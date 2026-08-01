@@ -228,6 +228,15 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		"cosmeticsPrices": cosmeticsPricesPayload(),
 		"titles":          titlesPayload(),
 		"reclaimTicks":    ReclaimTicks,
+		// Viewport contract: defaults the server uses until a "viewport"
+		// message arrives, plus the bounds it will clamp that message to.
+		"roi": map[string]any{
+			"w": ROIWidth, "h": ROIHeight,
+			"minW": ROIMinWidth, "minH": ROIMinHeight,
+			"maxW": ROIMaxWidth, "maxH": ROIMaxHeight,
+			"maxArea": ROIMaxArea,
+			"step":    ROIStep,
+		},
 		// G24: the phase boundaries are static, so the client can render the
 		// arc bar before it ever joins a room.
 		"matchTicks": MatchDurationTicks,
@@ -286,6 +295,10 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				rate, burst = 3, 6
 			case "titleEquip":
 				rate, burst = 2, 4
+			case "viewport":
+				// Resize fires in bursts (orientation change, browser chrome
+				// showing/hiding); the client debounces, this catches the rest.
+				rate, burst = 2, 8
 			default:
 				// Unknown types are limited too, so junk cannot be spammed.
 				// One shared bucket, otherwise random type names would each
@@ -548,12 +561,14 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			pid := client.profileKey()
 			bit := uint8(1) << id
 
-			// G8: write path, see cosmeticsBuy.
+			// S5: NOT a create path. Equipping cannot unlock anything, so it
+			// must not mint a profile for every visitor who opens the
+			// wardrobe. See profileForKeyEquipLocked.
 			if rm != nil {
 				rm.mu.Lock()
 			}
 			profilesMu.Lock()
-			pr := profileForKeyCreateLocked(pid)
+			pr, stored := profileForKeyEquipLocked(pid)
 			if pr == nil {
 				profilesMu.Unlock()
 				if rm != nil {
@@ -590,7 +605,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			// Re-equipping what is already on is a no-op: neither persist nor
 			// log it, or a client at the rate limit turns the log into a
 			// firehose and the autosave into a treadmill.
-			if changed {
+			if changed && stored {
 				markProfilesDirty()
 				log.Printf("cosmetics_txn pid=%q cat=%q id=%d price=%d balance_before=%d balance_after=%d",
 					shortPID(pid), "equip:"+cat, id, 0, balance, balance)
@@ -617,12 +632,12 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			pid := client.profileKey()
 
 			// Same lock order as the cosmetics branches: rm.mu -> profilesMu.
-			// G8: write path, so the entry is created under the lock.
+			// S5: equip only, so no entry is created (see cosmeticsEquip).
 			if rm != nil {
 				rm.mu.Lock()
 			}
 			profilesMu.Lock()
-			pr := profileForKeyCreateLocked(pid)
+			pr, stored := profileForKeyEquipLocked(pid)
 			if pr == nil {
 				profilesMu.Unlock()
 				if rm != nil {
@@ -652,13 +667,37 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "title_not_unlocked"})
 				continue
 			}
-			if changed {
+			if changed && stored {
 				markProfilesDirty()
 				log.Printf("title_equip pid=%q id=%d", shortPID(pid), p.ID)
 			}
 			client.sendJSON(r.Context(), "cosmetics", payload)
 			if rm != nil {
 				rm.broadcastCosExtra(r.Context())
+			}
+		case "viewport":
+			// {"type":"viewport","data":{"w":46,"h":94}} — the window the
+			// client can actually draw, in CELLS. Purely advisory: the server
+			// clamps it, and a client that never sends it keeps the historical
+			// 80x56. Valid before joining a room, so the first ROI after join
+			// is already the right size.
+			var p struct {
+				W int `json:"w"`
+				H int `json:"h"`
+			}
+			if json.Unmarshal(msg.Data, &p) != nil {
+				continue
+			}
+			w, h := clampViewport(p.W, p.H)
+			client.mu.Lock()
+			changed := client.viewW != w || client.viewH != h
+			client.viewW = w
+			client.viewH = h
+			client.mu.Unlock()
+			// Echo the granted size so the client can size its own fog/camera
+			// to what it will actually receive instead of what it asked for.
+			if changed {
+				client.sendJSON(r.Context(), "viewport", map[string]any{"w": w, "h": h})
 			}
 		case "input":
 			var p struct {

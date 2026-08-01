@@ -2911,3 +2911,283 @@ func TestStyleReasonCodesAreStable(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// S1. Адаптивный ROI под вьюпорт клиента.
+// ---------------------------------------------------------------------------
+
+// TestClampViewportBounds: сервер никогда не отдаёт окно вне своих границ, а
+// клиент, который ничего не просил, получает ровно исторические 80x56.
+func TestClampViewportBounds(t *testing.T) {
+	if w, h := clampViewport(0, 0); w != ROIWidth || h != ROIHeight {
+		t.Fatalf("молчащий клиент получил %dx%d, ожидалось %dx%d", w, h, ROIWidth, ROIHeight)
+	}
+	if w, h := clampViewport(-5, -5); w != ROIWidth || h != ROIHeight {
+		t.Fatalf("отрицательный запрос дал %dx%d", w, h)
+	}
+	cases := [][2]int{
+		{1, 1}, {40, 28}, {46, 94}, {80, 56}, {120, 120}, {5000, 5000}, {200, 1},
+	}
+	for _, c := range cases {
+		w, h := clampViewport(c[0], c[1])
+		if w < ROIMinWidth || w > ROIMaxWidth || w > W {
+			t.Fatalf("запрос %v дал ширину %d вне [%d..%d]", c, w, ROIMinWidth, ROIMaxWidth)
+		}
+		if h < ROIMinHeight || h > ROIMaxHeight || h > H {
+			t.Fatalf("запрос %v дал высоту %d вне [%d..%d]", c, h, ROIMinHeight, ROIMaxHeight)
+		}
+		if w*h > ROIMaxArea {
+			t.Fatalf("запрос %v дал площадь %d > ROIMaxArea=%d", c, w*h, ROIMaxArea)
+		}
+	}
+	// Портретный телефон помещается целиком: клампить его нечем.
+	if w, h := clampViewport(46, 94); w != 46 || h != 94 {
+		t.Fatalf("портретный 46x94 обрезан до %dx%d", w, h)
+	}
+	// Наглый запрос ужимается, но сохраняет пропорцию (квадрат остаётся квадратом).
+	if w, h := clampViewport(400, 400); w != h {
+		t.Fatalf("квадратный запрос ужат в %dx%d, пропорция потеряна", w, h)
+	}
+}
+
+// TestROILookaheadKeepsRearMargin: главный смысл S1 — после разворота позади
+// головы обязан оставаться запас. Сдвиг вперёд плюс худший промах привязки к
+// ROIStep не должны съедать половину окна.
+func TestROILookaheadKeepsRearMargin(t *testing.T) {
+	for _, wh := range [][2]int{{80, 56}, {46, 94}, {40, 28}, {120, 50}} {
+		w, h := clampViewport(wh[0], wh[1])
+		for _, d := range []Dir{DirUp, DirDown, DirLeft, DirRight} {
+			dx, dy := dirToDelta(d)
+			la := roiLookahead(w, h, dx, dy)
+			if la > ROILookahead {
+				t.Fatalf("%dx%d dir=%d: сдвиг %d > ROILookahead=%d", w, h, d, la, ROILookahead)
+			}
+			half := h / 2
+			if dx != 0 {
+				half = w / 2
+			}
+			// Привязка к ближайшему шагу промахивается не больше чем на
+			// ROIStep/2 в любую сторону.
+			rear := half - la - ROIStep/2
+			if rear < half/3 {
+				t.Fatalf("%dx%d dir=%d: позади головы остаётся %d из %d — полоса тумана",
+					w, h, d, rear, half)
+			}
+		}
+	}
+	// Стоящий на месте игрок не двигает окно.
+	if la := roiLookahead(80, 56, 0, 0); la != 0 {
+		t.Fatalf("без направления сдвиг %d, ожидался 0", la)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// S2. Прогресс по незакрытым ачивкам доходит до клиента.
+// ---------------------------------------------------------------------------
+
+func TestAchvProgressPayload(t *testing.T) {
+	withEmptyProfileStore(t)
+	pr := &Profile{}
+	profilesMu.Lock()
+	all := achvProgressLocked(pr)
+	profilesMu.Unlock()
+	if len(all) != len(achvRules) {
+		t.Fatalf("у пустого профиля %d строк прогресса, ожидалось %d", len(all), len(achvRules))
+	}
+	for i := 1; i < len(all); i++ {
+		if all[i-1].ID > all[i].ID {
+			t.Fatalf("строки не отсортированы по id: %+v", all)
+		}
+	}
+	for _, e := range all {
+		if e.Cur != 0 || e.Max == 0 {
+			t.Fatalf("пустой профиль: id=%d cur=%d max=%d", e.ID, e.Cur, e.Max)
+		}
+	}
+
+	// Счётчик считается, порог не достигнут — ачивка остаётся в списке с cur.
+	pr.TotalKills = 37
+	profilesMu.Lock()
+	got := achvProgressLocked(pr)
+	profilesMu.Unlock()
+	seen := map[uint8]achvProgressEntry{}
+	for _, e := range got {
+		seen[e.ID] = e
+	}
+	if e := seen[AchvKills100]; e.Cur != 37 || e.Max != 100 {
+		t.Fatalf("AchvKills100: cur=%d max=%d, ожидалось 37/100", e.Cur, e.Max)
+	}
+	// Счётчик выше порога, но флаг ещё не выставлен — cur не должен обгонять max.
+	if e := seen[AchvKills10]; e.Cur != 10 || e.Max != 10 {
+		t.Fatalf("AchvKills10: cur=%d max=%d, ожидалось 10/10", e.Cur, e.Max)
+	}
+
+	// Закрытые ачивки из списка исчезают.
+	pr.AchvMask |= 1 << uint32(AchvKills10)
+	profilesMu.Lock()
+	got = achvProgressLocked(pr)
+	profilesMu.Unlock()
+	for _, e := range got {
+		if e.ID == AchvKills10 {
+			t.Fatalf("закрытая ачивка осталась в прогрессе: %+v", e)
+		}
+	}
+
+	// И то же самое в самом payload сообщения cosmetics.
+	profilesMu.Lock()
+	payload := cosmeticsStatePayloadFromProfile(pr)
+	profilesMu.Unlock()
+	list, ok := payload["achvProgress"].([]achvProgressEntry)
+	if !ok || len(list) == 0 {
+		t.Fatalf("в payload нет achvProgress: %#v", payload["achvProgress"])
+	}
+	if _, ok := payload["achvMask"]; !ok {
+		t.Fatal("в payload нет achvMask")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// S3. Архетип и тир бота видны клиенту.
+// ---------------------------------------------------------------------------
+
+func TestCosExtraCarriesBotArchetypeAndTier(t *testing.T) {
+	r := newTestRoom()
+	bot := &Player{num: 7, bot: true, aiArchetype: ArchCoward, aiTier: TierHard}
+	human := &Player{num: 8}
+	r.players[7] = bot
+	r.players[8] = human
+
+	r.mu.Lock()
+	payload := r.cosExtraPayloadLocked()
+	r.mu.Unlock()
+	list, _ := payload["players"].([]cosExtraEntry)
+	if len(list) != 2 {
+		t.Fatalf("в cosExtra %d строк, ожидалось 2", len(list))
+	}
+	for _, e := range list {
+		switch e.N {
+		case 7:
+			if !e.Bot || e.Arch != ArchCoward || e.Tier != TierHard {
+				t.Fatalf("бот отдан как %+v", e)
+			}
+		case 8:
+			if e.Bot || e.Arch != 0 || e.Tier != 0 {
+				t.Fatalf("человек отдан как %+v", e)
+			}
+		}
+	}
+	// Диапазоны, на которые опирается клиент при выборе значка.
+	if ArchCount > 4 || TierCount > 3 {
+		t.Fatalf("контракт arch(0..3)/tier(0..2) сломан: ArchCount=%d TierCount=%d", ArchCount, TierCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// S4. Фермер наматывает заметно более длинные петли, чем остальные.
+// ---------------------------------------------------------------------------
+
+func TestFarmerRunsTheLongestLoops(t *testing.T) {
+	r := newTestRoom()
+	r.rng = rand.New(rand.NewSource(42))
+	budgets := map[uint8]int{}
+	closes := map[uint8]int{}
+	for arch := uint8(0); arch < ArchCount; arch++ {
+		worst := 1 << 30
+		worstClose := 1 << 30
+		for i := 0; i < 200; i++ {
+			p := &Player{num: 1, bot: true}
+			r.applyBotPersonality(p, TierEasy, arch)
+			b := r.botTrailBudget(p, p.aiRiskiness, p.aiCaution)
+			if b < worst {
+				worst = b
+			}
+			if c := int(float32(b) * botCloseFrac(p)); c < worstClose {
+				worstClose = c
+			}
+		}
+		budgets[arch] = worst
+		closes[arch] = worstClose
+	}
+	for arch := uint8(0); arch < ArchCount; arch++ {
+		if arch == ArchFarmer {
+			continue
+		}
+		if budgets[ArchFarmer] <= budgets[arch] {
+			t.Fatalf("бюджет следа фермера %d не выше архетипа %d (%d)",
+				budgets[ArchFarmer], arch, budgets[arch])
+		}
+		if closes[ArchFarmer] <= closes[arch] {
+			t.Fatalf("фермер закрывает петлю на %d, архетип %d на %d — архетип невидим",
+				closes[ArchFarmer], arch, closes[arch])
+		}
+	}
+	// И при этом фермер не бессмертный: он не охотится и его след длиннее,
+	// то есть его проще перерезать.
+	p := &Player{num: 1, bot: true}
+	r.applyBotPersonality(p, TierHard, ArchFarmer)
+	if p.aiHuntGate > 0.2 {
+		t.Fatalf("фермер охотится (huntGate=%.2f) — он должен быть мишенью, а не хищником", p.aiHuntGate)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// S5. Экипировка не материализует профиль.
+// ---------------------------------------------------------------------------
+
+func TestEquipDoesNotMaterializeProfile(t *testing.T) {
+	withEmptyProfileStore(t)
+
+	const pid = "0123456789abcdef0123456789abcdef"
+	profilesMu.Lock()
+	pr, stored := profileForKeyEquipLocked(pid)
+	profilesMu.Unlock()
+	if pr == nil {
+		t.Fatal("profileForKeyEquipLocked вернул nil")
+	}
+	if stored {
+		t.Fatal("несуществующий профиль отдан как сохранённый")
+	}
+	if n := profileStoreLen(); n != 0 {
+		t.Fatalf("экипировка создала %d записей, ожидалось 0", n)
+	}
+
+	// Единственное, что такой профиль вообще может надеть, — бесплатный id 0,
+	// который и так надет: менять на диске нечего.
+	profilesMu.Lock()
+	ensureProfileCosmeticsLocked(pr)
+	for _, cat := range []string{"capturefx", "head", "seg", "nameplate", "frame", "terr", "death"} {
+		inv := profileCosInvLocked(pr, cat)
+		if inv == nil {
+			profilesMu.Unlock()
+			t.Fatalf("категория %q не найдена", cat)
+		}
+		if *inv&^uint8(1) != 0 {
+			profilesMu.Unlock()
+			t.Fatalf("у пустого профиля куплено что-то кроме бита 0 в %q: %#x", cat, *inv)
+		}
+		if profileEquippedLocked(pr, cat) != 0 {
+			profilesMu.Unlock()
+			t.Fatalf("у пустого профиля в %q надет не id 0", cat)
+		}
+	}
+	if pr.TitleID != 0 || titleMaskLocked(pr) != 1 {
+		profilesMu.Unlock()
+		t.Fatalf("у пустого профиля титул %d, маска %#x", pr.TitleID, titleMaskLocked(pr))
+	}
+	profilesMu.Unlock()
+
+	// А вот у сохранённого профиля тот же вызов отдаёт именно его.
+	real := profileForKeyCreate(pid)
+	profilesMu.Lock()
+	got, stored2 := profileForKeyEquipLocked(pid)
+	profilesMu.Unlock()
+	if got != real || !stored2 {
+		t.Fatal("сохранённый профиль не найден путём экипировки")
+	}
+	profilesMu.Lock()
+	empty, _ := profileForKeyEquipLocked("")
+	profilesMu.Unlock()
+	if empty != nil {
+		t.Fatal("пустой ключ должен давать nil")
+	}
+}

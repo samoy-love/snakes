@@ -35,7 +35,16 @@ LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.Bui
 
 GO_IMAGE := golang:1.22
 
-.PHONY: help run build test test-race test-race-docker vet fmt fmt-check docker-build docker-up docker-down docker-logs clean
+# Клиентские тесты: чистый Node без зависимостей (node:test + node:assert).
+# 22.x нужен и для `node --check` (сам определяет ES-модуль по синтаксису),
+# и для стабильного `node --test` со списком файлов.
+NODE       ?= node
+CLIENT_JS  := public/client.js public/client_audio.js public/client_errors.js \
+              public/client_fx.js public/client_net.js
+CLIENT_TESTS := tests/protocol_golden.test.mjs tests/client_contract.test.mjs
+
+.PHONY: help run build test test-race test-race-docker test-client test-all vet fmt fmt-check \
+        golden node-check docker-build docker-up docker-down docker-logs clean
 
 help:
 	@echo "Доступные цели:"
@@ -44,6 +53,10 @@ help:
 	@echo "  test         — go test ./..."
 	@echo "  test-race    — go test ./... -race (нужен CGO и gcc в PATH)"
 	@echo "  test-race-docker — то же в контейнере $(GO_IMAGE) (gcc не нужен)"
+	@echo "  node-check   — node --check по всем public/client*.js"
+	@echo "  test-client  — клиентские тесты протокола (node --test, без зависимостей)"
+	@echo "  test-all     — go test + node-check + test-client"
+	@echo "  golden       — перегенерировать tests/golden/protocol_golden.json"
 	@echo "  vet          — go vet ./..."
 	@echo "  fmt          — gofmt -w ."
 	@echo "  fmt-check    — падает, если есть неотформатированные файлы"
@@ -78,6 +91,31 @@ test-race-docker:
 	MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
 	docker run --rm -v "$(CURDIR):/src" -w /src $(GO_IMAGE) \
 		go test $(PKG) -race -count=1
+
+# Клиент разбирает бинарный протокол по точным смещениям байтов, и рассинхрон
+# кодера с декодером трижды ломал игру молча. Эти тесты гоняют эталонные буферы
+# (снятые с Go-сериализаторов) через независимый декодер и статически сверяют
+# фактический public/client.js с эталоном. Внешних зависимостей нет.
+test-client:
+	$(NODE) --test $(CLIENT_TESTS)
+
+node-check:
+	@status=0; \
+	for f in $(CLIENT_JS); do \
+		[ -e "$$f" ] || continue; \
+		echo "check $$f"; \
+		$(NODE) --check "$$f" || status=1; \
+	done; \
+	exit $$status
+
+# Полный локальный аналог CI (кроме -race: для него есть test-race-docker).
+test-all: test node-check test-client
+
+# Перегенерация эталона после ОСОЗНАННОГО изменения протокола. После неё
+# обязательно прогнать test-client: клиент придётся править синхронно.
+golden:
+	UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport .
+	@echo "эталон обновлён; проверьте клиент: make test-client"
 
 vet:
 	go vet $(PKG)

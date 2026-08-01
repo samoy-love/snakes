@@ -83,6 +83,42 @@ CGO_ENABLED=0 GOOS="$DEPLOY_GOOS" GOARCH="$DEPLOY_GOARCH" \
 [ -d "${SRC_DIR}/public" ] || die "public/ directory not found"
 cp -r "${SRC_DIR}/public" "${STAGE}/public"
 
+# --- 2a. versioned static --------------------------------------------------
+#
+# public/index.html references its own static as `/client.js?v=__BUILD__`.
+# The literal is replaced here, in the copy that ships, and never in the repo:
+# a working tree that still says __BUILD__ is what makes `go run .` serve
+# Cache-Control: no-store (see isVersionedAsset in server.go), so local
+# development never fights a year-long immutable cache.
+#
+# Every release gets a fresh RELEASE string, so every deploy produces new URLs
+# and the immutable answer can never pin a user to an old bundle.
+#
+# Note: `sed -i` is deliberately not used - BSD/macOS sed wants an argument to
+# -i and GNU sed does not, and this script runs from Git Bash, Linux CI and
+# occasionally macOS.
+stamp_build() {
+  local f="$1"
+  [ -f "$f" ] || return 0
+  sed "s/__BUILD__/${RELEASE}/g" "$f" > "${f}.stamped" && mv "${f}.stamped" "$f"
+}
+STAMPED=0
+for f in "${STAGE}"/public/*.html; do
+  [ -e "$f" ] || continue
+  if grep -q '__BUILD__' "$f" 2>/dev/null; then
+    stamp_build "$f"
+    STAMPED=$((STAMPED + 1))
+  fi
+done
+if [ "$STAMPED" -gt 0 ]; then
+  log "static versioning: stamped ?v=${RELEASE} in ${STAMPED} html file(s)"
+  if grep -rq '__BUILD__' "${STAGE}/public" 2>/dev/null; then
+    die "__BUILD__ still present in the staged public/ after stamping"
+  fi
+else
+  warn "static versioning: no __BUILD__ placeholder found in public/*.html - assets will be served with no-store"
+fi
+
 TARBALL="${STAGE}/release.tgz"
 tar -czf "$TARBALL" -C "$STAGE" snakes public
 log "artifact $(du -h "$TARBALL" | cut -f1) ready"

@@ -67,14 +67,17 @@ html, body {
    --bg: #0b0f14;
    --text: #e5e7eb;
    --muted: rgba(229, 231, 235, 0.84);
-   --muted2: rgba(229, 231, 235, 0.60);
+   --muted2: rgba(229, 231, 235, 0.78);
    --hud-brightness: 1;
    --hud-contrast: 1;
    --hud-panel-alpha: 0.82;
    --accent: rgba(255, 45, 85, 0.98);
    --accent2: rgba(96, 165, 250, 0.85);
    --grid: rgba(255,255,255,0.040);
-   --panel: rgba(0, 0, 0, 0.46);
+   /* V4: подложка HUD. Панель умножается на --hud-panel-alpha (0.82), т.е.
+      фактическая непрозрачность по умолчанию 0.62. При 0.46 над захваченной
+      территорией (#f5c542) вторичный текст давал 2.1:1 — ниже порога AA. */
+   --panel: rgba(0, 0, 0, 0.76);
    --panel2: rgba(0, 0, 0, 0.36);
    --border: rgba(255, 255, 255, 0.12);
    --border2: rgba(255, 255, 255, 0.10);
@@ -145,11 +148,14 @@ html, body {
    --bg: #0b0f14;
    --text: #e5e7eb;
    --muted: rgba(229, 231, 235, 0.84);
-   --muted2: rgba(229, 231, 235, 0.60);
+   --muted2: rgba(229, 231, 235, 0.78);
    --hud-brightness: 1;
    --hud-contrast: 1;
    --hud-panel-alpha: 0.82;
-   --panel: rgba(0, 0, 0, 0.46);
+   /* V4: подложка HUD. Панель умножается на --hud-panel-alpha (0.82), т.е.
+      фактическая непрозрачность по умолчанию 0.62. При 0.46 над захваченной
+      территорией (#f5c542) вторичный текст давал 2.1:1 — ниже порога AA. */
+   --panel: rgba(0, 0, 0, 0.76);
    --panel2: rgba(0, 0, 0, 0.36);
    --border: rgba(255, 255, 255, 0.12);
    --border2: rgba(255, 255, 255, 0.10);
@@ -6126,9 +6132,12 @@ html[data-theme="light"] {
      было ~1.9:1 (0.60 поверх rgba(0,0,0,0.376)). Поднимаем и текст, и подложку.
      --hud-panel-alpha остаётся пользовательской настройкой (ползунок в
      «Настройках» пишет её инлайном), поэтому усиливаем базовый --panel. */
+  /* Волна 8: замер показал, что 0.68 + 0.78 дают только 4.0:1 — порога AA
+     недобирали. 0.76 даёт фактическую непрозрачность 0.76 * 0.82 = 0.62
+     и 4.9:1 для --muted2 над жёлтым #f5c542. */
   --muted2: rgba(229, 231, 235, 0.78);
-  --panel: rgba(0, 0, 0, 0.68);
-  --panel2: rgba(0, 0, 0, 0.52);
+  --panel: rgba(0, 0, 0, 0.76);
+  --panel2: rgba(0, 0, 0, 0.56);
 }
 
 /* Тяжёлое начертание — только крупному кеглю. */
@@ -6501,4 +6510,292 @@ body.inGame #hud:not(.lbPinned) #help {
   .topHudPhase.isFinal {
     animation: none;
   }
+}
+
+/* ==========================================================================
+   ВОЛНА 8. Хвосты приёмочного ревью.
+   Блок идёт последним в файле: перекрывает ранние правила порядком, а не
+   !important.
+   ========================================================================== */
+
+/* --- V2. Значок архетипа бота ---------------------------------------------
+   Разметку ставит client.js рядом с ником в таблице лидеров, килфиде и в
+   плашке над головой:
+     <span class="botArch archFarmer tier1" title="Фермер · Тир 2">
+       <span class="botArchLabel">Фермер</span>
+     </span>
+   Глиф рисует CSS (::before) — он не переводится и не зависит от i18n.
+   Подпись .botArchLabel опциональна и скрывается на узких экранах.
+   Бейдж намеренно тусклее ника: 700 против 800–900 и цвет через
+   color-mix с --muted, чтобы не перетягивать взгляд с имени игрока. */
+.botArch {
+  --arch-color: var(--tier-base);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: baseline;
+  flex: 0 0 auto;
+  /* 14ch: замер — «Агрессор» (самая длинная короткая подпись RU) не влезал
+     ни в 9ch, ни в 12ch. Длиннее 14ch подписи не предусмотрены: см. отчёт,
+     ключи bot.arch_* должны быть однословными. */
+  max-width: 14ch;
+  margin-right: 5px;
+  padding: 0 5px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--arch-color) 34%, transparent);
+  background: color-mix(in srgb, var(--arch-color) 12%, rgba(0, 0, 0, 0.34));
+  color: color-mix(in srgb, var(--arch-color) 74%, var(--muted));
+  font-size: var(--fs-11);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  /* 1.3, а не 1.5: при 1.5 бейдж (19.6px) поднимал строку таблицы с 23.6 до
+     25px — колонки «съезжали» относительно строк без бейджа. */
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.botArch::before {
+  content: '🤖';
+  font-size: var(--fs-11);
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.botArchLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+/* Четыре архетипа. Цвета взяты вне лестницы редкости, чтобы бейдж бота не
+   читался как «редкий предмет». */
+.botArch.archFarmer {
+  --arch-color: #4ade80;
+}
+
+.botArch.archFarmer::before {
+  content: '🌾';
+}
+
+.botArch.archAggressor {
+  --arch-color: #fb7185;
+}
+
+.botArch.archAggressor::before {
+  content: '⚔';
+}
+
+.botArch.archCoward {
+  --arch-color: #7dd3fc;
+}
+
+.botArch.archCoward::before {
+  content: '🛡';
+}
+
+.botArch.archTerritorial {
+  --arch-color: #c084fc;
+}
+
+.botArch.archTerritorial::before {
+  content: '🧭';
+}
+
+/* Три тира — только насыщенность. Отдельного глифа у тира нет: два значка
+   подряд у каждого ника превращают список в рябь. */
+.botArch.tier0 {
+  opacity: 0.72;
+  border-style: dashed;
+}
+
+.botArch.tier1 {
+  opacity: 1;
+}
+
+.botArch.tier2 {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--arch-color) 62%, transparent);
+  background: color-mix(in srgb, var(--arch-color) 20%, rgba(0, 0, 0, 0.34));
+  color: color-mix(in srgb, var(--arch-color) 88%, #fff);
+}
+
+/* Тир 3 получает единственный маркер — точку, а не второй бейдж */
+.botArch.tier2::after {
+  content: '●';
+  font-size: 7px;
+  line-height: 1;
+  flex: 0 0 auto;
+  opacity: 0.9;
+}
+
+/* В плашке над головой ник и так мелкий — бейдж ужимаем ещё сильнее */
+.nameTag .botArch,
+.botArch.isGlyphOnly {
+  max-width: none;
+  padding: 0 3px;
+  margin-right: 3px;
+}
+
+.botArch.isGlyphOnly .botArchLabel {
+  display: none;
+}
+
+/* Правая колонка (≈245px) и килфид: только глиф на любой ширине окна.
+   Замер: подпись упиралась в max-width: 9ch и «Агрессор» превращался в
+   «Агре…». Обрезанное слово хуже отсутствующего — там, где места нет,
+   значение несёт глиф, а расшифровку даёт title (его ставит client.js).
+   Подпись остаётся в широких контекстах: итоги матча и развёрнутый
+   лидерборд. */
+#rightSidebar .botArch,
+#killfeed .botArch,
+#teamHud .botArch,
+#metaHud .botArch {
+  max-width: none;
+  padding: 0 3px;
+}
+
+#rightSidebar .botArch .botArchLabel,
+#killfeed .botArch .botArchLabel,
+#teamHud .botArch .botArchLabel,
+#metaHud .botArch .botArchLabel {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .botArch .botArchLabel {
+    display: none;
+  }
+
+  .botArch {
+    max-width: none;
+    padding: 0 3px;
+  }
+}
+
+/* --- V3. Числовой прогресс у заблокированного титула -----------------------
+   client.js кладёт рядом с полосой подпись
+     <span class="cosmeticsItemProgressLabel">37 / 100</span>
+   — либо отдельным элементом после .cosmeticsItemProgress, либо внутри
+   обёртки .cosmeticsProgressRow. Оба варианта поддержаны. */
+/* Grid, а не flex: в карточке титула на двухколоночной сетке магазина
+   .titleItemLeft получается ~110px, и flex-строка «полоса 40px + подпись
+   47px» вылезала за карточку. `1fr auto` отдаёт подписи её max-content, а
+   полосе — остаток, и переполнения нет ни при какой ширине. */
+.cosmeticsProgressRow {
+  display: grid;
+  grid-template-columns: minmax(24px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  min-width: 0;
+}
+
+.cosmeticsProgressRow .cosmeticsItemProgress {
+  margin-top: 0;
+  min-width: 0;
+}
+
+.cosmeticsItemProgressLabel {
+  flex: 0 0 auto;
+  font-size: var(--fs-11);
+  font-weight: 800;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted2);
+  white-space: nowrap;
+}
+
+/* Отдельной строкой (без обёртки) подпись прижимается к правому краю полосы */
+.cosmeticsItemProgress + .cosmeticsItemProgressLabel {
+  display: block;
+  margin-top: 3px;
+  text-align: right;
+}
+
+/* В карточке титула прогресс золотой — подпись держит ту же линию */
+.titleItem .cosmeticsItemProgressLabel {
+  color: color-mix(in srgb, var(--title-accent, var(--gold)) 62%, var(--muted));
+}
+
+.titleItem.isUnlocked .cosmeticsItemProgressLabel {
+  color: var(--gold);
+}
+
+/* Условие получения теперь содержит числа («Захватите 37/100 клеток»):
+   моноширинные цифры и перенос вместо обрезки. */
+.titleReq {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.titleReq::before {
+  flex: 0 0 auto;
+}
+
+/* Полоса при наличии числовой подписи чуть заметнее: 5px рядом с 11px
+   цифрами выглядели как случайная линия. */
+.titleItem .cosmeticsItemProgress {
+  height: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Волна 8 новых анимаций не вводит; фиксируем статичность новых элементов. */
+  .botArch,
+  .cosmeticsItemProgressLabel {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* --- V4. Правая колонка при развёрнутом чате -------------------------------
+   Замер на 1366×768 с развёрнутым чатом: #rightInfo = 320px, а панели
+   «Матч»/«Команда» ужимались до 74.2px при суммарной занятости 274.4px —
+   45.6px оставались никем не занятыми. Причина: килфид участвует в раздаче
+   flex-shrink своей полной высотой (253px), а потом обрезается max-height, и
+   освободившееся место никому не возвращается.
+   Лечим ростом: обе панели получают flex-grow и забирают остаток. */
+#rightInfo > #rightMatchDetails,
+#rightInfo > #rightTeamDetails {
+  flex-grow: 1;
+}
+
+/* Замер (1366×768, чат развёрнут): панель 74.2px, из них 44px — шапка
+   details (глобальное `summary { min-height: var(--control-h) }`), т.е.
+   содержимому оставалось 28px = одна строка. Только для мыши и только в
+   тесноте развёрнутого чата опускаем шапку до 32px: это освобождает по 12px
+   на каждую из трёх шапок. Тач-сценарий не затронут — там (pointer: coarse)
+   правая колонка вообще скрыта при ширине <= 720px. */
+@media (min-width: 721px) and (pointer: fine) {
+  body:has(#chat:not(.collapsed)) #rightInfo .rightDetailsSummary {
+    min-height: 32px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+}
+
+/* --- V4. На тач-устройстве видны обе подсказки сразу ------------------------
+   Найдено исполнением (эмуляция: объявления из @media (pointer: coarse)
+   инжектированы инлайновым <style>, вьюпорт 390×844): правило
+   `@media (pointer: coarse) { #help { display: none !important } }`
+   проигрывало по специфичности более раннему
+   `body.inGame #hud:not(.lbPinned) #help { display: block !important }`
+   (0,1,0 против 0,3,1) — на телефоне игрок видел и «WASD/Enter/Esc/M», и
+   «Свайп по экрану». Поднимаем специфичность до сопоставимой. */
+@media (pointer: coarse) {
+  body.inGame #hud:not(.lbPinned) #help,
+  #hud #help {
+    display: none !important;
+  }
+}
+
+/* V3 (продолжение). Замер: на двухколоночной сетке магазина карточка титула
+   ≈254px, из них .titleItemLeft получала 85.2px — полоса прогресса ужималась
+   до 30px. Даём тексту минимум: кнопка «Закрыт» переносится на свою строку
+   (.titleItem и так flex-wrap: wrap), а прогресс получает читаемую ширину. */
+.titleItemLeft {
+  min-width: 118px;
 }

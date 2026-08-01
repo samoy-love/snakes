@@ -579,6 +579,39 @@ func (r *Room) checkAchievementsLocked(p *Player, pr *Profile) int {
 	return n
 }
 
+// achvProgressEntry is one row of the "achvProgress" array carried by the
+// "cosmetics" payload: the running counter and the threshold of an achievement
+// that is NOT yet unlocked. Unlocked ones are omitted — the client already has
+// them in achvMask/titleMask.
+type achvProgressEntry struct {
+	ID  uint8  `json:"id"`
+	Cur uint32 `json:"cur"`
+	Max uint32 `json:"max"`
+}
+
+// achvProgressLocked snapshots the progress of every locked achievement, in
+// achvRules order. Caller holds profilesMu.
+func achvProgressLocked(pr *Profile) []achvProgressEntry {
+	out := make([]achvProgressEntry, 0, len(achvRules))
+	if pr == nil {
+		return out
+	}
+	for _, ru := range achvRules {
+		if pr.AchvMask&(uint32(1)<<uint32(ru.code)) != 0 {
+			continue
+		}
+		cur := ru.get(pr)
+		if cur > ru.need {
+			// Counter is past the threshold but the unlock has not been
+			// evaluated yet; never report more than the goal.
+			cur = ru.need
+		}
+		out = append(out, achvProgressEntry{ID: ru.code, Cur: cur, Max: ru.need})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 // grantAchievementRewards pays out unlocks found by checkAchievementsLocked.
 // Must be called without profilesMu held.
 func (r *Room) grantAchievementRewards(p *Player, count int) {
@@ -1020,13 +1053,48 @@ const (
 	// between two scans; 3 keeps the cost bounded and the reaction visible.
 	BotHuntScanEvery = 3
 	BotHuntMaxProbes = 40
+
+	// S4: the trail budget ceiling. Everyone shares BotTrailBudgetCap; the
+	// Farmer alone is allowed past it, which is what makes its loops visibly
+	// longer than everyone else's. The ceiling is deliberately modest: past
+	// ~30 the extra length is paid for entirely in trail_cut deaths and the
+	// held territory goes DOWN, which is the trap the first attempt fell into.
+	BotTrailBudgetCap       = 26
+	BotTrailBudgetCapFarmer = 30
+	// BotCloseFrac* is the fraction of the budget at which a bot starts
+	// heading home. The Farmer runs almost the whole budget before turning
+	// back; the rest keep the tuned micro-loop behaviour.
+	BotCloseFracDefault = 0.72
+	BotCloseFracFarmer  = 0.88
 )
 
 const (
-	ROIWidth     = 80
-	ROIHeight    = 56
-	ROIStep      = 8
-	ROILookahead = 12
+	ROIWidth  = 80
+	ROIHeight = 56
+	ROIStep   = 8
+	// ROILookahead is now the CAP on the forward shift, not a fixed offset.
+	// A flat 12 left only rh/2-12-ROIStep = 8 rows of guaranteed history behind
+	// the head at the default 80x56 window, which is exactly the fog band a
+	// player sees for a few ticks after a hard reversal. The effective shift is
+	// derived from the window's half-extent along the movement axis
+	// (ROILookaheadNum/ROILookaheadDen), so a taller window still gets a useful
+	// preview while a short one keeps its rear margin.
+	ROILookahead    = 8
+	ROILookaheadNum = 1
+	ROILookaheadDen = 4
+
+	// Bounds for a client-requested viewport ("viewport" message). Anything
+	// outside is clamped; a client that never asks keeps ROIWidth x ROIHeight.
+	ROIMinWidth  = 40
+	ROIMinHeight = 28
+	ROIMaxWidth  = 120
+	ROIMaxHeight = 120
+	// ROIMaxArea bounds the per-client cost. The ROI is rebuilt for every
+	// client on every tick and a full snapshot costs ~8 bytes per cell, so the
+	// area is the knob that decides both CPU and bandwidth. 6000 leaves room
+	// for a portrait phone (46x94 = 4324) and for the legacy 80x56 = 4480
+	// without letting one client order a tenth of the map.
+	ROIMaxArea = 6000
 
 	BonusBudgetMax          = 70
 	BonusBudgetRegenPerTick = 1
@@ -1308,6 +1376,14 @@ type Player struct {
 	aiCooldownMax uint8
 	aiTrailBudget int
 	aiHuntGate    float32
+	// aiCloseFrac is the fraction of the trail budget at which the bot starts
+	// looking for a way home. It used to be a hard-coded 0.72 for everyone,
+	// which is why every archetype ran the same ~22-cell micro-loops and the
+	// Farmer's larger budget never turned into larger territory (S4).
+	aiCloseFrac float32
+	// aiBudgetCap is this bot's own ceiling on the trail budget. Only the
+	// Farmer is allowed past the shared 26.
+	aiBudgetCap int
 
 	// G2: victim this bot is accounted against in Room.huntersOn. Distinct
 	// from aiHuntTarget, which stays the trail owner used for path validation.
@@ -1605,6 +1681,28 @@ func profileForKeyCreate(key string) *Profile {
 	return profileForKeyCreateLocked(key)
 }
 
+// profileForKeyEquipLocked is the lookup used by the EQUIP paths
+// (cosmeticsEquip, titleEquip). Equipping is not progress: nothing can be
+// equipped that was not first bought or unlocked, and both of those already
+// materialise the profile. Routing equip through profileForKeyCreateLocked
+// (G8) meant every visitor who merely opened the wardrobe minted a store entry
+// — a free write amplifier against MAX_PROFILES that needed nothing but a
+// websocket and a rate-limit-respecting loop. S5: hand back the stored profile
+// when there is one, otherwise a transient with the free defaults. For such a
+// profile the only owned item in every category is bit 0, which is already the
+// equipped default, so every equip it can legally perform is a no-op and there
+// is nothing to persist. The second return says whether the profile is stored,
+// so callers know not to wake the autosave. Caller holds profilesMu.
+func profileForKeyEquipLocked(key string) (*Profile, bool) {
+	if key == "" {
+		return nil, false
+	}
+	if p := profiles[key]; p != nil {
+		return p, true
+	}
+	return &Profile{LastSeen: time.Now().Unix()}, false
+}
+
 // profileForKeyCreateLocked is profileForKeyCreate for callers that already
 // hold profilesMu, which is the only way to take the pointer and write through
 // it in one critical section (G8).
@@ -1669,6 +1767,15 @@ type Client struct {
 	lastStateTick uint32
 	lastROIX      int
 	lastROIY      int
+	lastROIW      int
+	lastROIH      int
+
+	// viewW/viewH is the window the client asked for with the "viewport"
+	// message, in cells, already passed through clampViewport. Zero means
+	// "never asked", which clampViewport turns into the historical
+	// ROIWidth x ROIHeight, so an old client is served exactly as before.
+	viewW int
+	viewH int
 
 	closed atomic.Bool
 }
@@ -2519,6 +2626,11 @@ func (c *Client) leaveRoomInternal(ctx context.Context, notify bool) {
 	if offlineUpdate != "" {
 		rm.broadcastJSON(ctx, "nameUpdate", map[string]any{"n": num, "nm": offlineUpdate})
 	}
+	if !shouldCleanup {
+		// The refill above may have added bots; cosExtra is what carries their
+		// archetype and tier, so the remaining clients need a fresh copy.
+		rm.broadcastCosExtra(ctx)
+	}
 
 	if notify {
 		c.sendJSON(ctx, "left", map[string]any{"room": rm.id})
@@ -2706,10 +2818,17 @@ func cosmeticsStatePayload(p *Player) map[string]any {
 		return map[string]any{}
 	}
 	titleMask := uint32(1)
+	achvMask := uint32(0)
+	var achvProg []achvProgressEntry
 	if pr := profileForKey(p.profileKey); pr != nil {
 		profilesMu.Lock()
 		titleMask = titleMaskLocked(pr)
+		achvMask = pr.AchvMask
+		achvProg = achvProgressLocked(pr)
 		profilesMu.Unlock()
+	}
+	if achvProg == nil {
+		achvProg = []achvProgressEntry{}
 	}
 	return map[string]any{
 		"style":        p.style,
@@ -2729,16 +2848,27 @@ func cosmeticsStatePayload(p *Player) map[string]any {
 		"eqDeath":      p.cosDeath,
 		"titleId":      p.titleID,
 		"titleMask":    titleMask,
+		"achvMask":     achvMask,
+		"achvProgress": achvProg,
 	}
 }
 
 // cosExtraEntry is one row of the "cosExtra" message: the cosmetic categories
 // that deliberately stay out of the frozen 21-byte binary player record.
+// It also carries the bot identity (G4/S3): the frozen 21-byte binary record
+// has a bot flag but no room for the archetype or the tier, and without them a
+// player has no way to tell a pushover from a hunter.
 type cosExtraEntry struct {
 	N     uint16 `json:"n"`
 	Terr  uint8  `json:"terr"`
 	Death uint8  `json:"death"`
 	Title uint8  `json:"title"`
+	// Bot gates arch/tier: they are meaningless for a human and are sent as 0.
+	Bot bool `json:"bot"`
+	// Arch is ArchFarmer/ArchAggressor/ArchCoward/ArchTerritorial (0..3).
+	Arch uint8 `json:"arch"`
+	// Tier is TierEasy/TierNormal/TierHard (0..2).
+	Tier uint8 `json:"tier"`
 }
 
 // cosExtraPayloadLocked snapshots every player in the room. Caller holds r.mu;
@@ -2749,7 +2879,12 @@ func (r *Room) cosExtraPayloadLocked() map[string]any {
 		if p == nil {
 			continue
 		}
-		list = append(list, cosExtraEntry{N: num, Terr: p.cosTerr, Death: p.cosDeath, Title: p.titleID})
+		e := cosExtraEntry{N: num, Terr: p.cosTerr, Death: p.cosDeath, Title: p.titleID, Bot: p.bot}
+		if p.bot {
+			e.Arch = p.aiArchetype
+			e.Tier = p.aiTier
+		}
+		list = append(list, e)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].N < list[j].N })
 	return map[string]any{"players": list}
@@ -2789,6 +2924,8 @@ func cosmeticsStatePayloadFromProfile(pr *Profile) map[string]any {
 		"eqDeath":      pr.CosEqDeath,
 		"titleId":      pr.TitleID,
 		"titleMask":    titleMaskLocked(pr),
+		"achvMask":     pr.AchvMask,
+		"achvProgress": achvProgressLocked(pr),
 	}
 }
 
@@ -4666,11 +4803,39 @@ func (r *Room) applyBotPersonality(p *Player, tier uint8, arch uint8) {
 	// picks where inside that band this particular bot sits, so a hard farmer
 	// runs the longest loops of anyone.
 	budgetLo, budgetHi := tierBudgetLo, tierBudgetHi
+	farmer := false
+	p.aiCloseFrac = BotCloseFracDefault
+	p.aiBudgetCap = BotTrailBudgetCap
 	switch arch {
 	case ArchFarmer:
-		p.aiAggression = 0.15 + 0.15*r.rng.Float32()
-		p.aiCaution = 0.45 + 0.30*r.rng.Float32()
-		budgetLo, budgetHi = 18, 26
+		// S4: the Farmer was supposed to be a fat, obvious target and was
+		// instead the skinniest bot in the room, because its 18-26 band never
+		// reached the map: the shared closeStart fraction shut the loop first.
+		//
+		// Territory is (land held) x (time alive) and a death wipes the land,
+		// so simply lengthening the loops makes it WORSE. Measured over 16
+		// sims x 4000 ticks with an honest autopilot in the room, a naive
+		// budget of 30-44 with low caution gave 853 held cells against a
+		// baseline of 1077, with deaths going 183 -> 190+ per batch.
+		//
+		// What works is longer loops PLUS the survival profile to finish
+		// them: never chase, read bait better than anyone, keep a wide margin
+		// on the way home. That lands the average loop at 33 cells against
+		// 17-22 for the other archetypes while the held territory stays on
+		// top of the roster.
+		//
+		// The extra deaths that do remain are the point of the archetype:
+		// ~90% of them are trail_cut, i.e. a player cutting a long exposed
+		// trail. This is the bot that is meant to be pleasant to kill.
+		p.aiAggression = 0.10 + 0.10*r.rng.Float32()
+		p.aiCaution = 0.55 + 0.25*r.rng.Float32()
+		budgetLo, budgetHi = 22, 30
+		p.aiCloseFrac = BotCloseFracFarmer
+		p.aiBudgetCap = BotTrailBudgetCapFarmer
+		// A Farmer that leaves its loop to hunt is a Farmer that dies with a
+		// 25-cell trail out. The tier sets this above; the archetype vetoes it.
+		p.aiHuntGate = 0.10
+		farmer = true
 	case ArchAggressor:
 		p.aiAggression = 0.80 + 0.15*r.rng.Float32()
 		p.aiCaution = 0.25
@@ -4712,6 +4877,11 @@ func (r *Room) applyBotPersonality(p *Player, tier uint8, arch uint8) {
 	// baitSense now scales the budget instead of being subtracted from it, so
 	// the top of the scale stays reachable (G3).
 	p.aiBaitSense = 0.30 + 0.60*r.rng.Float32()
+	if farmer {
+		// Trap awareness is the cheapest survival knob there is, and it is the
+		// one that lets the long loop pay off instead of ending in a cut.
+		p.aiBaitSense = 0.70 + 0.30*r.rng.Float32()
+	}
 	p.aiRiskiness = 0.20 + 0.65*r.rng.Float32()
 	if p.aiCaution > 0.70 {
 		p.aiBaitSense += 0.12
@@ -4731,6 +4901,88 @@ func (r *Room) applyBotPersonality(p *Player, tier uint8, arch uint8) {
 	} else if p.aiRiskiness > 1 {
 		p.aiRiskiness = 1
 	}
+}
+
+// clampViewport turns a client-requested window size (in cells) into one the
+// server is willing to serve: per-axis bounds first, then the map, then the
+// area budget. A zero or negative request means "no opinion" and falls back to
+// the historical default, so a client that never sends "viewport" is served
+// exactly as before.
+func clampViewport(w, h int) (int, int) {
+	if w <= 0 {
+		w = ROIWidth
+	}
+	if h <= 0 {
+		h = ROIHeight
+	}
+	if w < ROIMinWidth {
+		w = ROIMinWidth
+	}
+	if w > ROIMaxWidth {
+		w = ROIMaxWidth
+	}
+	if h < ROIMinHeight {
+		h = ROIMinHeight
+	}
+	if h > ROIMaxHeight {
+		h = ROIMaxHeight
+	}
+	if w > W {
+		w = W
+	}
+	if h > H {
+		h = H
+	}
+	// Area budget. Shrink proportionally first so the aspect ratio the client
+	// asked for survives, then shave the longer side until it fits. The
+	// per-axis minimums multiply out to 40*28 = 1120, well under ROIMaxArea, so
+	// the loop always terminates with both axes at or above their minimum.
+	if w*h > ROIMaxArea {
+		f := math.Sqrt(float64(ROIMaxArea) / float64(w*h))
+		nw := int(float64(w) * f)
+		nh := int(float64(h) * f)
+		if nw < ROIMinWidth {
+			nw = ROIMinWidth
+		}
+		if nh < ROIMinHeight {
+			nh = ROIMinHeight
+		}
+		w, h = nw, nh
+		for w*h > ROIMaxArea {
+			if w-ROIMinWidth >= h-ROIMinHeight && w > ROIMinWidth {
+				w--
+			} else if h > ROIMinHeight {
+				h--
+			} else {
+				break
+			}
+		}
+	}
+	return w, h
+}
+
+// roiLookahead is how far ahead of the head the window is pushed along the
+// movement axis. It is a fraction of the window's half-extent on that axis and
+// never exceeds ROILookahead, so the rear margin cannot collapse the way a flat
+// offset made it collapse on short windows.
+func roiLookahead(rw, rh, dx, dy int) int {
+	half := 0
+	switch {
+	case dx != 0:
+		half = rw / 2
+	case dy != 0:
+		half = rh / 2
+	default:
+		return 0
+	}
+	la := half * ROILookaheadNum / ROILookaheadDen
+	if la > ROILookahead {
+		la = ROILookahead
+	}
+	if la < 0 {
+		la = 0
+	}
+	return la
 }
 
 // botROI returns this bot's perception window, falling back to the global one
@@ -7130,13 +7382,34 @@ func (r *Room) botTrailBudget(p *Player, localRisk, localCaution float32) int {
 	if r.mutatorType == MutatorDoubleCapture {
 		budget -= 2
 	}
-	if budget < 6 {
-		budget = 6
+	floor := 6
+	if p.aiArchetype == ArchFarmer {
+		// Keep the Farmer above everyone else's ceiling even at the worst end
+		// of the baitSense multiplier; otherwise the archetype is invisible
+		// again the moment the dice go against it.
+		floor = BotTrailBudgetCap + 1
 	}
-	if budget > 26 {
-		budget = 26
+	if budget < floor {
+		budget = floor
+	}
+	budgetCap := p.aiBudgetCap
+	if budgetCap <= 0 {
+		budgetCap = BotTrailBudgetCap
+	}
+	if budget > budgetCap {
+		budget = budgetCap
 	}
 	return budget
+}
+
+// botCloseFrac is the share of the trail budget a bot burns before it starts
+// looking for a gate home. Zero means a bot built before archetype-specific
+// loop lengths existed.
+func botCloseFrac(p *Player) float32 {
+	if p == nil || p.aiCloseFrac <= 0 {
+		return BotCloseFracDefault
+	}
+	return p.aiCloseFrac
 }
 
 func (r *Room) botStep(p *Player) {
@@ -7884,7 +8157,7 @@ doFullBot:
 		}
 		// closeStart scales with the budget instead of bottoming out at a
 		// flat 6, which used to make a third of the roster behave identically.
-		closeStart := int(float32(budget)*0.72) + 1
+		closeStart := int(float32(budget)*botCloseFrac(p)) + 1
 		if p.contractType == ContractCapture {
 			closeStart += 2
 		}
@@ -9091,7 +9364,13 @@ func (r *Room) step() {
 		lastTick := c.lastStateTick
 		lastROIX := c.lastROIX
 		lastROIY := c.lastROIY
+		lastROIW := c.lastROIW
+		lastROIH := c.lastROIH
+		viewW := c.viewW
+		viewH := c.viewH
 		c.mu.Unlock()
+
+		rw, rh := clampViewport(viewW, viewH)
 
 		x := W / 2
 		y := H / 2
@@ -9101,8 +9380,9 @@ func (r *Room) step() {
 				x = a.x
 				y = a.y
 				dx, dy := dirToDelta(a.dir)
-				x += dx * ROILookahead
-				y += dy * ROILookahead
+				la := roiLookahead(rw, rh, dx, dy)
+				x += dx * la
+				y += dy * la
 				if x < 0 {
 					x = 0
 				} else if x >= W {
@@ -9119,14 +9399,6 @@ func (r *Room) step() {
 			}
 		}
 
-		rw := ROIWidth
-		rh := ROIHeight
-		if rw > W {
-			rw = W
-		}
-		if rh > H {
-			rh = H
-		}
 		rx := x - rw/2
 		ry := y - rh/2
 		if rx < 0 {
@@ -9145,8 +9417,12 @@ func (r *Room) step() {
 			atRightEdge := rx == W-rw
 			atBottomEdge := ry == H-rh
 
-			rx = (rx / ROIStep) * ROIStep
-			ry = (ry / ROIStep) * ROIStep
+			// Snap to the NEAREST step, not the one below: flooring biased the
+			// window backwards by up to ROIStep-1 cells and stacked that on top
+			// of the forward lookahead, which is what made the rear margin
+			// vanish after a reversal.
+			rx = ((rx + ROIStep/2) / ROIStep) * ROIStep
+			ry = ((ry + ROIStep/2) / ROIStep) * ROIStep
 			if rx < 0 {
 				rx = 0
 			}
@@ -9167,7 +9443,10 @@ func (r *Room) step() {
 			}
 		}
 
-		fullROI := forceROI || lastTick == 0 || rx != lastROIX || ry != lastROIY
+		// A resize keeps the origin but exposes new cells, so the window size
+		// is part of the "same window as last tick" test.
+		fullROI := forceROI || lastTick == 0 || rx != lastROIX || ry != lastROIY ||
+			rw != lastROIW || rh != lastROIH
 		reqs = append(reqs, roiReq{c: c, rx: rx, ry: ry, rw: rw, rh: rh, full: fullROI, sinceTick: lastTick})
 	}
 	r.tmpReqs = reqs
@@ -9217,6 +9496,8 @@ func (r *Room) step() {
 					c.lastStateTick = tickNow
 					c.lastROIX = req.rx
 					c.lastROIY = req.ry
+					c.lastROIW = req.rw
+					c.lastROIH = req.rh
 					c.mu.Unlock()
 				}
 			} else {

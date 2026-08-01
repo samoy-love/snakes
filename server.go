@@ -119,21 +119,53 @@ func parseInt(s string) (int, error) {
 	return n, err
 }
 
+// buildPlaceholder — литерал, который стоит в public/index.html вместо
+// идентификатора релиза. Его подменяет scripts/deploy.sh в копии, уезжающей на
+// сервер (см. «versioned static» там же); в репозитории литерал остаётся как
+// есть, поэтому `go run .` и docker-сборка из исходников кэша не включают.
+const buildPlaceholder = "__BUILD__"
+
+const immutableCacheControl = "public, max-age=31536000, immutable"
+
+// isVersionedAsset — запрос к статике с настоящим идентификатором релиза в
+// query (?v=20260802-abc1234). Пустой v и неподменённый литерал __BUILD__ не
+// считаются: в обоих случаях URL не меняется от релиза к релизу, и immutable
+// намертво залипил бы у пользователя старый файл.
+func isVersionedAsset(r *http.Request) bool {
+	v := r.URL.Query().Get("v")
+	return v != "" && v != buildPlaceholder
+}
+
 func cacheStaticMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		// HTML — всегда no-store: это единственное место, где записан текущий
+		// ?v=..., и закэшированный index.html навсегда прибил бы клиента к
+		// старому релизу.
 		if path == "/" || path == "/index.html" || strings.HasSuffix(path, ".html") {
 			w.Header().Set("Cache-Control", "no-store")
 			next.ServeHTTP(w, r)
 			return
 		}
 		if strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") {
-			w.Header().Set("Cache-Control", "no-store")
+			// V1: client.js ~490 КБ и style.css ~180 КБ качались заново на
+			// каждый F5. С ?v=<релиз> URL меняется при каждом деплое, поэтому
+			// immutable безопасен: новый релиз — новый URL — новый запрос.
+			//
+			// ВАЖНО. Соседние ES-модули (client_errors/audio/fx/net.js)
+			// импортируются из client.js по относительным путям, query из
+			// <script src> на них НЕ наследуется, и они приходят сюда без v —
+			// то есть остаются на no-store. Это осознанно: суммарно они ~20 КБ.
+			if isVersionedAsset(r) {
+				w.Header().Set("Cache-Control", immutableCacheControl)
+			} else {
+				w.Header().Set("Cache-Control", "no-store")
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
 		if strings.HasPrefix(path, "/emoji-64/") && strings.HasSuffix(path, ".png") {
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			w.Header().Set("Cache-Control", immutableCacheControl)
 		}
 		next.ServeHTTP(w, r)
 	})

@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title data-i18n="game.title">Змейки</title>
-    <link rel="stylesheet" href="/style.css" />
+    <!-- V1: версионирование статики. Литерал __BUILD__ заменяет скрипт деплоя
+         на идентификатор релиза; сервер отдаёт immutable только при непустом
+         v, отличном от литерала, поэтому при `go run .` кэша не будет. -->
+    <link rel="stylesheet" href="/style.css?v=__BUILD__" />
   </head>
   <body>
     <div id="menuOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="menuOverlayTitle">
@@ -530,7 +533,12 @@
 
     <!-- Вендоренная копия twemoji: без внешнего CDN в рантайме и без исключения
          для cdn.jsdelivr.net в CSP. Файл лежит в public/vendor/. -->
-    <script src="/vendor/twemoji.min.js"></script>
-    <script type="module" src="/client.js"></script>
+    <script src="/vendor/twemoji.min.js?v=__BUILD__"></script>
+    <!-- ВНИМАНИЕ (V1): client.js — ES-модуль, он импортирует client_errors.js,
+         client_audio.js, client_fx.js, client_net.js по относительным путям.
+         Query-параметр отсюда НЕ наследуется импортами: соседние модули уйдут
+         запросами без ?v=. Версионировать их можно только на стороне сервера
+         (например, ETag/immutable по хэшу содержимого) — см. отчёт. -->
+    <script type="module" src="/client.js?v=__BUILD__"></script>
   </body>
 </html>

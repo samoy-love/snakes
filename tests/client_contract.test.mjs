@@ -1,0 +1,267 @@
+/*
+ * Контракт «сервер ↔ public/client.js»: статическая сверка фактического
+ * декодера клиента с эталоном протокола (tests/golden/protocol_golden.json).
+ *
+ * Почему статически, а не запуском клиента. public/client.js — монолит на
+ * ~490 КБ, намертво завязанный на DOM, canvas, WebSocket, localStorage и
+ * twemoji; поднимать под него шим дороже и хрупче, чем разобрать сам разбор.
+ * Ровно этим (сверкой `need(...)` и суммы `o += N` по каждому kind) ловили
+ * все три исторических рассинхрона:
+ *   - kind=12 (ContractComplete): клиент читал 11 байт вместо 3;
+ *   - kind=13 (Style): обработчика не было вовсе;
+ *   - новый kind без обработчика ронял весь хвост пакета.
+ * Во всех трёх случаях парсер «съезжал» и молча терял киллфид, тосты,
+ * обновления заданий и баланс валюты.
+ *
+ * Тест разбирает исходник клиента как текст и проверяет три вещи на каждый
+ * тип события:
+ *   1) обработчик существует;
+ *   2) охранная проверка need(...) требует ровно длину payload с сервера;
+ *   3) последовательность ширин чтений (getUint8/16/32) совпадает с серверной
+ *      раскладкой полей — это строже суммы и ловит подмену u16+u16 на u32.
+ */
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(HERE, '..');
+const golden = JSON.parse(readFileSync(join(HERE, 'golden', 'protocol_golden.json'), 'utf8'));
+// SNAKES_CLIENT_JS — только для самопроверки самого теста (прогон по нарочно
+// испорченной копии клиента). В CI переменная не задаётся.
+const clientPath = process.env.SNAKES_CLIENT_JS || join(ROOT, 'public', 'client.js');
+const src = readFileSync(clientPath, 'utf8');
+
+// --- вспомогательные разборщики --------------------------------------------
+
+// Безопасное вычисление арифметики вида "2 + 1 + 2 * 11": только цифры,
+// плюс и звёздочка. eval здесь не нужен и не используется.
+function evalArith(expr, where) {
+  assert.match(expr, /^[\d\s+*]+$/, `${where}: неожиданное выражение в need(): ${expr}`);
+  return expr
+    .split('+')
+    .map((term) => term.split('*').reduce((a, b) => a * Number(b.trim()), 1))
+    .reduce((a, b) => a + b, 0);
+}
+
+// Регион разбора пакета событий: от `if (msgType === 5) {` до фолбэка на
+// неизвестный тип события.
+function eventsRegion() {
+  const start = src.indexOf('if (msgType === 5) {');
+  assert.notEqual(start, -1, 'в client.js не найден разбор пакета событий (msgType === 5)');
+  const fallback = src.indexOf('unknownEventKindSeen.has(kind)', start);
+  assert.notEqual(fallback, -1, 'в client.js не найден фолбэк на неизвестный тип события');
+  return { start, fallback, text: src.slice(start, fallback) };
+}
+
+// Блоки обработчиков идут подряд, поэтому границы берём по началу следующего
+// `if (kind === N) {` — это надёжнее подсчёта скобок в коде с шаблонными
+// строками и юникодными комментариями.
+function handlerBlocks() {
+  const { text } = eventsRegion();
+  const re = /if \(kind === (\d+)\) \{/g;
+  const marks = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    marks.push({ kind: Number(m[1]), at: m.index, bodyAt: m.index + m[0].length });
+  }
+  const out = new Map();
+  marks.forEach((mk, i) => {
+    const end = i + 1 < marks.length ? marks[i + 1].at : text.length;
+    assert.ok(!out.has(mk.kind), `в client.js два обработчика для kind=${mk.kind}`);
+    out.set(mk.kind, text.slice(mk.bodyAt, end));
+  });
+  return out;
+}
+
+// Ширины чтений в порядке их появления в блоке.
+function readWidths(body) {
+  return [...body.matchAll(/dv\.getUint(8|16|32)\(/g)].map((m) => Number(m[1]) / 8);
+}
+
+// Сумма продвижений курсора.
+function cursorAdvance(body) {
+  return [...body.matchAll(/\bo \+= (\d+);/g)].reduce((a, m) => a + Number(m[1]), 0);
+}
+
+function needValue(body, where) {
+  const m = body.match(/if \(!need\(([^)]*)\)\) return;/);
+  assert.ok(m, `${where}: нет охранной проверки need(...) — обработчик может читать за границей буфера`);
+  return evalArith(m[1], where);
+}
+
+const blocks = handlerBlocks();
+
+// ---------------------------------------------------------------------------
+// 1. Все типы событий с сервера имеют обработчик на клиенте
+// ---------------------------------------------------------------------------
+
+test('каждый тип события сервера имеет обработчик в client.js', () => {
+  const missing = golden.events
+    .filter((e) => !blocks.has(e.kind))
+    .map((e) => `${e.kind} (${e.const})`);
+  assert.deepEqual(
+    missing,
+    [],
+    'нет обработчика — клиент свалится в фолбэк «неизвестный kind», пропустит 1 байт вместо ' +
+      'полного payload и потеряет весь хвост пакета событий'
+  );
+});
+
+test('в client.js нет обработчиков несуществующих типов событий', () => {
+  const known = new Set(golden.events.map((e) => e.kind));
+  const orphan = [...blocks.keys()].filter((k) => !known.has(k));
+  assert.deepEqual(orphan, [], 'обработчик есть, а события такого сервер не шлёт');
+});
+
+// ---------------------------------------------------------------------------
+// 2. Длины и раскладка каждого обработчика
+// ---------------------------------------------------------------------------
+
+for (const spec of golden.events) {
+  test(`client.js: kind=${spec.kind} (${spec.const}) читает ${spec.len} байт по серверной раскладке`, () => {
+    const body = blocks.get(spec.kind);
+    assert.ok(body, `нет обработчика kind=${spec.kind}`);
+    const where = `kind=${spec.kind} (${spec.const})`;
+
+    assert.equal(
+      needValue(body, where),
+      spec.len,
+      `${where}: need(...) не совпадает с длиной payload на сервере`
+    );
+
+    const widths = readWidths(body);
+    const wantWidths = spec.fields.map((f) => f.size);
+    assert.deepEqual(
+      widths,
+      wantWidths,
+      `${where}: последовательность ширин чтений разошлась с серверной раскладкой ` +
+        `[${spec.fields.map((f) => `${f.name}:${f.size}`).join(', ')}]`
+    );
+
+    assert.equal(
+      cursorAdvance(body),
+      spec.len,
+      `${where}: суммарный сдвиг курсора o += ... не равен длине payload — ` +
+        'разбор следующего события уедет'
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 3. Заголовок пакета событий и список powerup
+// ---------------------------------------------------------------------------
+
+test('client.js: заголовок пакета событий и запись powerup', () => {
+  const { text } = eventsRegion();
+  const head = text.slice(0, text.indexOf('if (kind ==='));
+
+  // Байт типа сообщения к этому моменту уже прочитан, поэтому охрана заголовка
+  // на единицу меньше eventsHeaderBase.
+  const headNeed = head.match(/if \(!need\(([^)]*)\)\) return;/);
+  assert.ok(headNeed, 'нет охранной проверки заголовка пакета событий');
+  assert.equal(
+    evalArith(headNeed[1], 'заголовок событий'),
+    golden.consts.eventsHeaderBase - 1,
+    'охрана заголовка не совпадает с eventsHeaderBase сервера'
+  );
+
+  // Всё, что клиент читает до первого обработчика события:
+  //   заголовок  — tick u32, mutatorType u8, mutatorUntil u32,
+  //                bountyTarget u16, bountyUntil u32, powerupCount u8;
+  //   запись powerup — ID u16, Type u8, X u16, Y u16, Expires u32 (11 байт);
+  //   счётчик событий u16 и байт kind первого события.
+  const puRecord = [2, 1, 2, 2, 4];
+  assert.equal(
+    puRecord.reduce((a, b) => a + b, 0),
+    golden.consts.powerUpRecordLen,
+    'раскладка записи powerup не даёт powerUpRecordLen'
+  );
+  assert.deepEqual(
+    readWidths(head),
+    [4, 1, 4, 2, 4, 1, ...puRecord, 2, 1],
+    'раскладка заголовка пакета событий разошлась с сервером'
+  );
+
+  const puNeed = text.match(/if \(!need\(puCount \* (\d+) \+ 2\)\) return;/);
+  assert.ok(puNeed, 'нет охранной проверки списка powerup');
+  assert.equal(
+    Number(puNeed[1]),
+    golden.consts.powerUpRecordLen,
+    'размер записи powerup на клиенте не равен серверному'
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 4. ROI-снапшот и чанки миникарты
+// ---------------------------------------------------------------------------
+
+test('client.js: размер записи игрока в ROI совпадает с сервером', () => {
+  const decls = [...src.matchAll(/const perPlayerV4 = (\d+);/g)].map((m) => Number(m[1]));
+  assert.ok(decls.length > 0, 'в client.js не найдено объявление perPlayerV4');
+  for (const v of decls) {
+    assert.equal(
+      v,
+      golden.consts.roiPlayerRecordLen,
+      'perPlayerV4 разошёлся с roiPlayerRecordLen — записи игроков поедут, ' +
+        'а за ними rx/ry/rw/rh и дельты сетки'
+    );
+  }
+});
+
+test('client.js: разбор чанков миникарты', () => {
+  const start = src.indexOf('if (msgType === 4) {');
+  assert.notEqual(start, -1, 'в client.js не найден разбор чанков миникарты');
+  const block = src.slice(start, src.indexOf('if (msgType === 5) {', start));
+
+  // Заголовок: tick(4) + cw(1) + ch(1) + count(2) + flags(1); байт типа уже снят.
+  const head = block.match(/if \(o \+ ([\d\s+*]+) > bl\) return;/);
+  assert.ok(head, 'нет охранной проверки заголовка миникарты');
+  assert.equal(
+    evalArith(head[1], 'заголовок миникарты') + 4,
+    golden.consts.minimapHeaderLen + 3,
+    'охрана заголовка миникарты разошлась с сервером'
+  );
+
+  assert.match(
+    block,
+    /const bytesChunk = 2 \+ chunkCells \* 2 \+ \(hasTrail \? chunkCells \* 2 : 0\);/,
+    'формула размера чанка на клиенте разошлась с сервером ' +
+      '(cx(1)+cy(1) + cells*u16 сетки + опционально cells*u16 следа)'
+  );
+  assert.match(block, /const chunkCells = cw \* ch;/, 'клиент должен брать размер чанка из заголовка, а не из константы');
+});
+
+// ---------------------------------------------------------------------------
+// 5. Номера типов сообщений
+// ---------------------------------------------------------------------------
+
+test('client.js: номера типов сообщений совпадают с сервером', () => {
+  for (const [name, want] of Object.entries(golden.msgTypes)) {
+    if (name === 'state') continue; // legacy-путь, отдельная ветка msgType === 1
+    assert.match(
+      src,
+      new RegExp(`if \\(msgType === ${want}\\) \\{`),
+      `в client.js нет ветки разбора для msgType=${want} (${name})`
+    );
+  }
+  assert.match(src, /if \(msgType === 1\) \{/, 'нет ветки legacy full state (msgType=1)');
+});
+
+// ---------------------------------------------------------------------------
+// 6. Фолбэк на неизвестный тип события
+// ---------------------------------------------------------------------------
+
+test('client.js: неизвестный тип события пропускает ровно 1 байт и продолжает разбор', () => {
+  const { fallback } = eventsRegion();
+  const tail = src.slice(fallback, fallback + 600);
+  assert.match(
+    tail,
+    /if \(!need\(1\)\) break;\s*\n\s*o \+= 1;/,
+    'фолбэк должен пропускать ровно один байт-заглушку (см. default в buildEventsPooledLocked) ' +
+      'и продолжать разбор, иначе старый клиент теряет весь хвост пакета'
+  );
+});

@@ -43,7 +43,11 @@
 | `main.go` | Вся игровая логика: сетка, захват территории, матчи, боты, бонусы, мутаторы, контракты, ежедневки, ачивки, косметика, бинарные сериализаторы протокола |
 | `ws.go` | WebSocket-хендлер: allowlist origin'ов, per-IP token-bucket rate-limit, разбор клиентских команд, определение IP клиента с учётом доверенных прокси |
 | `profiles.go` | Персистентность профилей: HMAC-токены анонимной личности, атомарная запись `profiles.json`, TTL 90 дней, автосейв, потолок дохода «Стиля», парсинг `TRUSTED_PROXIES` |
-| `protocol_test.go` | «Золотой стандарт» бинарного протокола: фиксирует точную байтовую раскладку всех 19 типов событий и снапшотов |
+| `protocol_test.go` | «Золотой стандарт» бинарного протокола: фиксирует точную байтовую раскладку всех 21 типов событий и снапшотов |
+| `golden_export_test.go` | Экспорт эталонных буферов протокола в `tests/golden/protocol_golden.json` (и проверка, что файл не отстал от сериализаторов) |
+| `cache_static_test.go` | Тесты `cacheStaticMiddleware`: какая статика получает `immutable`, а какая `no-store` |
+| `env_docs_test.go` | Сверка «код ↔ документация»: каждая `os.Getenv` описана в `.env.example`, README и `docker-compose.yml` |
+| `tests/` | Клиентские тесты протокола на Node (`node:test`, без зависимостей) + эталонные буферы в `tests/golden/` |
 | `sanitize_test.go` | Тесты санитайзеров пользовательского ввода (ники, названия комнат, чат) |
 | `ws_smoke_test.go` | End-to-end smoke-тест поверх `httptest.Server`: hello → rooms → join → init → бинарный ROI-снапшот; отдельный тест переподключения по токену |
 | `public/index.html` | Разметка клиента |
@@ -59,6 +63,7 @@
 | `docker-compose.prod.yml` | Оверлей для прода (TLS); подключается вторым `-f` |
 | `deploy/nginx.conf` | Конфиг nginx для локального compose (только HTTP) |
 | `deploy/nginx.prod.conf` | Конфиг nginx для прода (TLS) |
+| `deploy/nginx.snakes.conf` | Конфиг nginx боевого хоста (bare-metal, systemd + TLS, только `snakes.samoy.love`) |
 | `deploy/nginx.common.conf` | Общие маршруты игры: `/ws`, health, статика, закрытый `/metrics` |
 | `deploy/security-headers.conf` | Сниппет заголовков безопасности для nginx |
 | `Makefile` | Повседневные команды: build / test / vet / fmt / docker-* |
@@ -250,6 +255,10 @@ make vet
 make build         # на Windows кладёт snakes.exe
 make test
 make test-race-docker   # -race в контейнере golang:1.22, gcc на хосте не нужен
+make node-check         # node --check по всем public/client*.js
+make test-client        # клиентские тесты бинарного протокола (Node 22+)
+make test-all           # go test + node-check + test-client
+make golden             # перегенерировать эталон протокола после его изменения
 make docker-build
 make docker-up / make docker-down / make docker-logs
 make clean
@@ -257,21 +266,63 @@ make clean
 
 `make test-race` требует CGO и `gcc` в `PATH`. На типичной Windows-машине его
 нет — используйте `make test-race-docker`, он даёт ровно то же окружение, что и
-CI. Последний прогон `-race` (Linux, `golang:1.22`) прошёл чисто: `ok snakes 1.210s`.
+CI. Последний прогон `-race` (Linux, `golang:1.22`) прошёл чисто: `ok snakes 1.806s`.
 
 Внимание, Windows: нужен именно GNU make из chocolatey
 (`C:\ProgramData\chocolatey\bin\make.exe`). Make из чужой msys2-среды (например
 `C:\devkitPro\msys2\usr\bin\make.exe`) приходит в рецепты с вычищенным
 окружением и ломает `go build`; подробности — в шапке `Makefile`.
 
-Синтаксис клиентских скриптов проверяется в CI: `node --check public/client.js`
-и `node --check public/client_*.js` (нужен Node 22+, он сам определяет ES-модуль).
+### Клиентские тесты протокола
+
+`node --check` проверяет только синтаксис. При этом клиент разбирает бинарный
+протокол по точным смещениям байтов, и рассинхрон кодера с декодером **трижды
+за проект ломал игру молча**: пропадали киллфид, тосты, обновления заданий,
+баланс валюты показывал мусор. Серверная сторона закрыта побайтовыми тестами в
+`protocol_test.go`, клиентская — тестами в `tests/`:
+
+```sh
+make test-client          # или: node --test tests/*.test.mjs (нужен Node 22+)
+```
+
+Зависимостей нет — только `node:test` и `node:assert`.
+
+| Файл | Что проверяет |
+| --- | --- |
+| `tests/golden/protocol_golden.json` | Эталонные буферы (base64) на все 21 типов событий, заголовок пакета со списком powerup, неизвестный тип, ROI-снапшот (fast и scan) и чанки миникарты (дельта и full). Генерируется из боевых Go-сериализаторов, лежит в репозитории **как данные** — для запуска тестов Go не нужен |
+| `tests/protocol_golden.test.mjs` | Независимый декодер (смещения выписаны заново) прогоняет эталонные буферы и сверяет каждое поле. Значения полей-образцов различны (`A=0x1122`, `B=0x3344`, `X=0x5566`, `Y=0x7788`, `C=0x99AABBCC`, `D=0xDD`), поэтому перепутанный порядок или подменённая ширина обязательно дадут другое значение |
+| `tests/client_contract.test.mjs` | Статическая сверка фактического `public/client.js` с эталоном: у каждого типа события есть обработчик, `need(...)` равен длине payload, последовательность ширин чтений (`getUint8/16/32`) совпадает с серверной раскладкой, сумма `o += N` сходится. Плюс `perPlayerV4` для ROI, формула размера чанка миникарты и фолбэк на неизвестный `kind` |
+
+Двусторонняя защита: `TestProtocolGoldenExport` (Go) падает, если эталон отстал
+от сериализаторов, а node-тесты падают, если от эталона отстал клиент. Между
+ними рассинхрон не проходит незамеченным. После **осознанного** изменения
+протокола:
+
+```sh
+make golden        # UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport .
+make test-client   # и синхронно править public/client.js, пока не позеленеет
+```
+
+Тесты проверены на живых регрессиях — каждая из трёх исторических поломок
+ловится:
+
+| Внесённая поломка | Что падает |
+| --- | --- |
+| `kind=12` читает 11 байт вместо 3 | `client.js: kind=12 (EventContractComplete) читает 3 байт…` |
+| у `kind=13` (Style) нет обработчика | «каждый тип события сервера имеет обработчик», «нет обработчиков несуществующих типов», проверка `kind=13` |
+| два `u16` заменены на один `u32` (сумма та же) | проверка `kind=14` — не сходится последовательность ширин |
+
+Синтаксис клиентских скриптов проверяется отдельно: `node --check public/client.js`
+и `node --check public/client_*.js` (`make node-check`, нужен Node 22+ — он сам
+определяет ES-модуль по синтаксису).
 
 CI: `.github/workflows/ci.yml` — три job'а: **go** (gofmt / vet / build /
-`test -race`), **js** (`node --check` по `public/client*.js`) и **docker**
-(сборка образа, `docker run`, проверка `/healthz`, `/readyz`, `/`, `/client.js`,
-`/style.css`, `/metrics`, ожидание статуса `healthy` у HEALTHCHECK и проба записи
-в каталог профилей от непривилегированного пользователя).
+`test -race`), **js** (`node --check` по `public/client*.js` + клиентские тесты
+протокола `node --test`) и **docker** (сборка образа, `docker run`, проверка
+`/healthz`, `/readyz`, `/`, `/client.js`, `/style.css`, `/metrics`, заголовки
+кэширования статики, рукопожатие `/ws` и отказ чужому origin'у, ожидание статуса
+`healthy` у HEALTHCHECK и проба записи в каталог профилей от непривилегированного
+пользователя).
 `.github/workflows/docker.yml` — сборка и публикация образа в GHCR по push в
 `master`/`main` и по тегам `v*`.
 
@@ -307,14 +358,21 @@ CI: `.github/workflows/ci.yml` — три job'а: **go** (gofmt / vet / build /
 
 Разбор на клиенте — `handleStateBinary(buf)` в `public/client.js`; транспорт и
 реконнект — `createNetModule` в `public/client_net.js`. Эталонная байтовая
-раскладка зафиксирована в `protocol_test.go` — при изменении сериализатора тест
-упадёт, и клиент нужно править синхронно.
+раскладка зафиксирована в `protocol_test.go` (сервер) и в
+`tests/golden/protocol_golden.json` + `tests/*.test.mjs` (клиент) — при
+изменении сериализатора падают обе стороны, и клиент нужно править синхронно.
+Подробности — в разделе «Клиентские тесты протокола».
 
-### 19 типов игровых событий
+### 21 тип игровых событий
 
 Общая структура события: байт `kind`, затем поля из `Event` (`A`, `B`, `X`, `Y`
 — `uint16`, `C` — `uint32`, `D` — `uint8`) в порядке, специфичном для каждого
-типа; точные длины payload перечислены в `protocol_test.go`.
+типа; точные длины payload перечислены в `protocol_test.go` и в
+`tests/golden/protocol_golden.json` (там же — порядок и ширина каждого поля).
+
+Неизвестный клиенту `kind` сервер пишет одним байтом-заглушкой, а клиент его
+пропускает и продолжает разбор: иначе старый закешированный клиент терял бы весь
+остаток пакета после первого же нового типа события.
 
 | Код | Константа | Смысл |
 | --- | --- | --- |
@@ -337,6 +395,50 @@ CI: `.github/workflows/ci.yml` — три job'а: **go** (gofmt / vet / build /
 | 17 | `EventDailyComplete` | Ежедневка выполнена |
 | 18 | `EventAchievement` | Разблокировано достижение |
 | 19 | `EventCapture` | Захват территории |
+| 20 | `EventReclaim` | Игрок вернул свою остывающую территорию |
+| 21 | `EventCoolBatch` | Территория погибшего пошла остывать (с тиком окончательного исчезновения) |
+
+## Кэширование статики
+
+`client.js` (~490 КБ) и `style.css` (~180 КБ) раньше отдавались с
+`Cache-Control: no-store` и качались заново при каждом F5. Сборщика в проекте
+нет и вводить его не планируется, поэтому версионирование сделано через query.
+
+Как это работает:
+
+1. `public/index.html` ссылается на собственную статику как
+   `/client.js?v=__BUILD__` — литеральный плейсхолдер.
+2. `scripts/deploy.sh` подменяет `__BUILD__` на идентификатор релиза
+   (`20260802-010203-abc1234`) **в копии, которая уезжает на сервер**. В
+   репозитории литерал остаётся как есть.
+3. Ответ получает `Cache-Control: public, max-age=31536000, immutable`, только
+   если в query есть непустой `v`, отличный от литерала `__BUILD__`. Иначе —
+   `no-store`. HTML — всегда `no-store`: именно в нём записан текущий `?v=`.
+
+Правило продублировано в двух местах и обязано совпадать:
+
+| Где | Что |
+| --- | --- |
+| `server.go`, `isVersionedAsset` / `cacheStaticMiddleware` | Когда статику отдаёт сам Go-процесс |
+| `deploy/nginx*.conf`, map'ы `$snakes_asset_cc` / `$snakes_asset_pragma` / `$snakes_asset_expires` | Когда статику отдаёт nginx (в проде — всегда: он читает `public/` с диска и делает `proxy_hide_header Cache-Control`) |
+
+Проверка (значение `v` произвольное, лишь бы не пустое и не `__BUILD__`):
+
+```sh
+curl -sI 'http://127.0.0.1:3000/client.js'          | grep -i cache-control
+# Cache-Control: no-store
+curl -sI 'http://127.0.0.1:3000/client.js?v=rel-1'  | grep -i cache-control
+# Cache-Control: public, max-age=31536000, immutable
+```
+
+**Ограничение.** `client.js` — ES-модуль и импортирует соседние
+(`client_errors.js`, `client_audio.js`, `client_fx.js`, `client_net.js`) по
+относительным путям. Query из `<script src>` импортами **не наследуется**, их
+URL в `index.html` не прописан, поэтому версионировать их через query нельзя —
+они осознанно остаются на `no-store`. Суммарно это ~20 КБ против 490 КБ
+`client.js`. Если понадобится закрыть и их, вариантов два: import map в
+`index.html` (тоже штампуется деплоем) или замена `no-store` на
+`no-cache` + `ETag`, чтобы вместо перекачки был `304`.
 
 ## HTTP-эндпоинты
 

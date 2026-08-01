@@ -402,7 +402,22 @@ const I18N = {
     'cosmetics.tier_epic': 'Эпический',
     'cosmetics.tier_legendary': 'Легендарный',
     'cosmetics.tier_mythic': 'Мифический',
-    'cosmetics.locked': 'Заблокировано'
+    'cosmetics.locked': 'Заблокировано',
+
+    // C4: архетипы и тиры ботов (main.go: ArchFarmer/ArchAggressor/ArchCoward/
+    // ArchTerritorial, TierEasy/TierNormal/TierHard).
+    'bot.arch_farmer': 'Фермер',
+    'bot.arch_aggressor': 'Агрессор',
+    'bot.arch_coward': 'Трус',
+    'bot.arch_territorial': 'Территориальный',
+    'bot.tier_easy': 'Тир 1',
+    'bot.tier_normal': 'Тир 2',
+    'bot.tier_hard': 'Тир 3',
+    'bot.badge_title': '{arch} · {tier}',
+    'bot.badge_aria': 'Бот: {arch}, {tier}',
+
+    // C3: подпись у полосы прогресса заблокированного титула.
+    'cosmetics.progress_of': '{cur} / {max}'
   },
   en: {
     'lang.toggle': 'Switch language',
@@ -795,7 +810,19 @@ const I18N = {
     'cosmetics.tier_epic': 'Epic',
     'cosmetics.tier_legendary': 'Legendary',
     'cosmetics.tier_mythic': 'Mythic',
-    'cosmetics.locked': 'Locked'
+    'cosmetics.locked': 'Locked',
+
+    'bot.arch_farmer': 'Farmer',
+    'bot.arch_aggressor': 'Aggressor',
+    'bot.arch_coward': 'Coward',
+    'bot.arch_territorial': 'Territorial',
+    'bot.tier_easy': 'Tier 1',
+    'bot.tier_normal': 'Tier 2',
+    'bot.tier_hard': 'Tier 3',
+    'bot.badge_title': '{arch} · {tier}',
+    'bot.badge_aria': 'Bot: {arch}, {tier}',
+
+    'cosmetics.progress_of': '{cur} / {max}'
   }
 };
 
@@ -1039,6 +1066,15 @@ function t(key) {
   const k = String(key || '');
   const pack = I18N[lang] || I18N.ru;
   return pack[k] ?? I18N.ru[k] ?? k;
+}
+
+/* Подстановка в строку словаря: t('bot.badge_title', {arch, tier}).
+   Отдельная функция, а не параметр t(), чтобы не менять сигнатуру, на которую
+   опираются ~350 существующих вызовов. */
+function tfmt(key, vars) {
+  const s = t(key);
+  if (!vars) return s;
+  return s.replace(/\{(\w+)\}/g, (m, name) => (vars[name] === undefined ? m : String(vars[name])));
 }
 
 function numberLocale() {
@@ -2502,6 +2538,59 @@ function drawDeathFx(ctx, cx, cy, cell, hsl, deathId, progress) {
   ctx.restore();
 }
 
+/* --- C4. Значок архетипа и тира бота ---------------------------------------
+   Архетипы реально различаются по поведению (агрессор убивает в разы чаще
+   труса, территориальный держит вдвое больше клеток), но у игрока не было ни
+   одного маркера — вся разница читалась как «боты ведут себя по-разному».
+   Сервер шлёт arch/tier в `cosExtra` (только для ботов, см. cosExtraEntry).
+
+   Разметка согласована с .botArch в style.css: глиф рисует CSS через ::before,
+   тир — насыщенностью (tier0/tier1/tier2), подпись .botArchLabel скрывается на
+   узких экранах и в килфиде. Для канваса (плашка над головой) есть отдельный
+   путь — botArchGlyph(). */
+const BOT_ARCH_MAX = 3;
+const BOT_TIER_MAX = 2;
+// num игрока -> {arch, tier}. Только боты; человек в карту не попадает.
+const botArchByPlayer = new Map();
+
+const BOT_ARCH_CLASS = ['archFarmer', 'archAggressor', 'archCoward', 'archTerritorial'];
+// Дублирует content у .botArch::before — нужен канвасу, где CSS не работает.
+const BOT_ARCH_GLYPH = ['🌾', '⚔', '🛡', '🧭'];
+const BOT_ARCH_KEY = ['bot.arch_farmer', 'bot.arch_aggressor', 'bot.arch_coward', 'bot.arch_territorial'];
+const BOT_TIER_KEY = ['bot.tier_easy', 'bot.tier_normal', 'bot.tier_hard'];
+
+function botArchInfo(playerNum) {
+  const rec = botArchByPlayer.get(Number(playerNum));
+  if (!rec) return null;
+  const arch = Math.max(0, Math.min(BOT_ARCH_MAX, Number(rec.arch) || 0));
+  const tier = Math.max(0, Math.min(BOT_TIER_MAX, Number(rec.tier) || 0));
+  return { arch, tier };
+}
+
+// Один символ для канваса; пустая строка, если это не бот.
+function botArchGlyph(playerNum) {
+  const info = botArchInfo(playerNum);
+  return info ? BOT_ARCH_GLYPH[info.arch] : '';
+}
+
+/* Готовый DOM-бейдж или null. glyphOnly — для килфида и плашек, где колонка
+   ника важнее подписи. */
+function botArchBadge(playerNum, { glyphOnly = false } = {}) {
+  const info = botArchInfo(playerNum);
+  if (!info) return null;
+  const archName = t(BOT_ARCH_KEY[info.arch]);
+  const tierName = t(BOT_TIER_KEY[info.tier]);
+  const el = document.createElement('span');
+  el.className = `botArch ${BOT_ARCH_CLASS[info.arch]} tier${info.tier}${glyphOnly ? ' isGlyphOnly' : ''}`;
+  el.title = tfmt('bot.badge_title', { arch: archName, tier: tierName });
+  el.setAttribute('aria-label', tfmt('bot.badge_aria', { arch: archName, tier: tierName }));
+  const label = document.createElement('span');
+  label.className = 'botArchLabel';
+  label.textContent = archName;
+  el.appendChild(label);
+  return el;
+}
+
 /* --- TITLE: заголовок перед ником ------------------------------------------
    Титулы не продаются: сервер присылает `titleMask` (что открыто) и `titleId`
    (что надето), экипировка уходит сообщением `titleEquip`. */
@@ -2511,6 +2600,14 @@ function drawDeathFx(ctx, cx, cy, cell, hsl, deathId, progress) {
 // подстраховка, если серверный набор титулов вырастет раньше клиента.
 const COS_TITLE_MAX = 12;
 const cosTitleServerNames = new Map();
+/* C3: id ачивки, которая открывает титул (hello.titles[].achv). Без этой
+   таблицы прогресс не к чему привязать — идентификаторы титулов и ачивок
+   не совпадают. Старый сервер поля не шлёт — карта останется пустой, и
+   прогресс просто не будет рисоваться, как и раньше. */
+const cosTitleAchvById = new Map();
+/* C3: накопленная статистика по ещё не открытым ачивкам:
+   achvId -> {cur, max} из `cosmetics.achvProgress`. */
+const achvProgressById = new Map();
 
 function cosTitleName(id) {
   const i = Math.max(0, Number(id) || 0);
@@ -2554,22 +2651,30 @@ function playerTitleHtml(titleId) {
 
 // То же для DOM-пути таблицы лидеров, которая обновляется каждый кадр:
 // пересобираем ячейку только при смене титула или ника.
-function setNameCellWithTitle(td, titleId, name) {
+function setNameCellWithTitle(td, titleId, name, playerNum) {
   if (!td) return;
   const tid = Math.max(0, Number(titleId) || 0);
   const nm = String(name || '');
-  if (td._tid === tid && td._nm === nm) return;
+  // C4: значок бота — часть подписи, поэтому входит в ключ кэша, иначе смена
+  // архетипа (переезд бота между слотами) не перерисует ячейку.
+  const bi = botArchInfo(playerNum);
+  const bsig = bi ? `${bi.arch}:${bi.tier}:${lang}` : '';
+  if (td._tid === tid && td._nm === nm && td._bsig === bsig) return;
   td._tid = tid;
   td._nm = nm;
+  td._bsig = bsig;
+  const badge = bi ? botArchBadge(playerNum) : null;
   const tn = cosTitleName(tid);
   if (!tn) {
-    td.textContent = nm;
+    if (badge) td.replaceChildren(badge, document.createTextNode(nm));
+    else td.textContent = nm;
     return;
   }
   const sp = document.createElement('span');
   sp.className = 'playerTitle';
   sp.textContent = tn;
-  td.replaceChildren(sp, document.createTextNode(nm));
+  if (badge) td.replaceChildren(badge, sp, document.createTextNode(nm));
+  else td.replaceChildren(sp, document.createTextNode(nm));
 }
 
 /* --- FRAME: рамка профиля --------------------------------------------------
@@ -4336,6 +4441,99 @@ let camLeadY = 0;
    окно гуляет на ~20 клеток. Полный запас (20) зажал бы телефон до 16 клеток
    по ширине; 14 — компромисс между «поле видно» и «туман не лезет». */
 const ROI_MARGIN_CELLS = 14;
+
+/* C2 «Адаптивный ROI». Раньше окно ROI на сервере было жёстко 80×56, и на
+   портретном телефоне экран физически не влезал в него: масштаб приходилось
+   зажимать снизу (см. draw()), а после резкого разворота внизу всё равно
+   оставалась полоса тумана. Теперь сервер принимает сообщение
+   `viewport {w,h}` — размер окна В КЛЕТКАХ, который клиент реально способен
+   нарисовать, — и подтверждает выданный размер тем же типом сообщения.
+
+   Контракт (ws.go, case "viewport" + hello.roi):
+     → {"type":"viewport","data":{"w":46,"h":94}}
+     ← {"type":"viewport","data":{"w":46,"h":94}}   // фактически выданное
+   Границы приходят в hello.roi {w,h,minW,minH,maxW,maxH,maxArea,step}.
+
+   Всё написано защищённо: если сервер старый — hello.roi нет, ack не придёт,
+   сообщение молча проигнорируется, и клиент работает ровно как раньше на
+   дефолтных 80×56. */
+const roiCaps = {
+  w: 80,
+  h: 56,
+  minW: 40,
+  minH: 28,
+  maxW: 120,
+  maxH: 120,
+  maxArea: 6000,
+  step: 8,
+};
+// Поддержку подтверждаем только по факту ack — до него доверяем lastRoi.
+let roiGrant = null;
+let viewportSentW = 0;
+let viewportSentH = 0;
+let viewportTimer = 0;
+
+function applyRoiCaps(src) {
+  if (!src || typeof src !== 'object') return;
+  for (const k of ['w', 'h', 'minW', 'minH', 'maxW', 'maxH', 'maxArea', 'step']) {
+    const v = Number(src[k]);
+    if (Number.isFinite(v) && v > 0) roiCaps[k] = Math.floor(v);
+  }
+}
+
+/* Сколько клеток нужно, чтобы закрыть текущий вьюпорт. Базовый масштаб тот же,
+   что в draw() (до клэмпа по ROI), плюс ROI_MARGIN_CELLS на гуляние окна:
+   сервер снапит его по ROIStep и смещает вперёд по ходу движения. */
+function computeViewportCells() {
+  const cw = Math.max(1, Number(window.innerWidth) || 1);
+  const chh = Math.max(1, Number(window.innerHeight) || 1);
+  const cell = Math.max(6, Math.floor(Math.min(cw / VIEW_CELLS_X, chh / VIEW_CELLS_Y)));
+  let w = Math.ceil(cw / cell) + ROI_MARGIN_CELLS;
+  let h = Math.ceil(chh / cell) + ROI_MARGIN_CELLS;
+  w = Math.max(roiCaps.minW, Math.min(roiCaps.maxW, w));
+  h = Math.max(roiCaps.minH, Math.min(roiCaps.maxH, h));
+  // Тот же порядок, что в clampViewport() на сервере: пропорционально, потом
+  // подрезаем длинную сторону. Иначе наш «ожидаемый» размер разойдётся с
+  // выданным и камера будет считать не по тому окну.
+  if (w * h > roiCaps.maxArea) {
+    const f = Math.sqrt(roiCaps.maxArea / (w * h));
+    w = Math.max(roiCaps.minW, Math.floor(w * f));
+    h = Math.max(roiCaps.minH, Math.floor(h * f));
+    let guard = 4096;
+    while (w * h > roiCaps.maxArea && guard-- > 0) {
+      if (w - roiCaps.minW >= h - roiCaps.minH && w > roiCaps.minW) w--;
+      else if (h > roiCaps.minH) h--;
+      else break;
+    }
+  }
+  return { w, h };
+}
+
+function sendViewportNow() {
+  let want;
+  try {
+    want = computeViewportCells();
+  } catch {
+    return;
+  }
+  if (want.w === viewportSentW && want.h === viewportSentH) return;
+  // Не отправлено — не запоминаем: иначе после реконнекта сервер останется на
+  // дефолте, а клиент будет думать, что попросил.
+  if (!wsSend('viewport', { w: want.w, h: want.h })) return;
+  viewportSentW = want.w;
+  viewportSentH = want.h;
+}
+
+/* Дебаунс: поворот экрана и сворачивание адресной строки на iOS дают серию
+   событий подряд, а каждое из них — это перестройка ROI на сервере. */
+function scheduleViewportSend(delayMs = 250) {
+  if (viewportTimer) clearTimeout(viewportTimer);
+  viewportTimer = setTimeout(() => {
+    viewportTimer = 0;
+    sendViewportNow();
+  }, Math.max(0, delayMs));
+}
+
 // C10: переиспользуемая карта Path2D под пунктир остывающей территории.
 const coolEdgePaths = new Map();
 // C10: градиенты фона кадра зависят только от размеров вьюпорта.
@@ -5478,11 +5676,15 @@ function renderTopHud() {
     if (bountyTarget && obKills) {
       const bn = displayNameOf(bountyTarget);
       const rem = formatTickRemain(bountyUntil);
-      bountyEl.textContent = rem ? `🎯 ${bn} (${rem})` : `🎯 ${bn}`;
+      /* C7: строка писалась в DOM на КАЖДОМ кадре, хотя меняется раз в секунду
+         (обратный отсчёт). Пишем только при изменении — так же, как соседние
+         элементы верхнего HUD. */
+      const bt = rem ? `🎯 ${bn} (${rem})` : `🎯 ${bn}`;
+      if (bountyEl.textContent !== bt) bountyEl.textContent = bt;
       bountyEl.classList.remove('hidden');
       bountyEl.classList.toggle('isMe', bountyTarget === you);
     } else {
-      bountyEl.textContent = '';
+      if (bountyEl.textContent !== '') bountyEl.textContent = '';
       bountyEl.classList.add('hidden');
     }
   }
@@ -5504,7 +5706,11 @@ function renderTopHud() {
   };
 
   const { obj, chip } = ensureContractParts();
-  if (obj) obj.textContent = `${t('hud.objective')}: ${t('hud.objective_capture')}`;
+  // C7: строка-константа при неизменном языке, а писалась каждый кадр.
+  if (obj) {
+    const objTxt = `${t('hud.objective')}: ${t('hud.objective_capture')}`;
+    if (obj.textContent !== objTxt) obj.textContent = objTxt;
+  }
 
   if (chip) {
     if (youContractType && obContract) {
@@ -5512,17 +5718,22 @@ function renderTopHud() {
       const goal = Number(youContractGoal) || 0;
       const prog = Number(youContractProgress) || 0;
       const rem = formatTickRemain(youContractUntil);
-      chip.textContent = `📜 ${cn} ${prog}/${goal}${rem ? ` (${rem})` : ''}`;
+      // C7: то же самое — раньше безусловная запись на каждом кадре.
+      const chipTxt = `📜 ${cn} ${prog}/${goal}${rem ? ` (${rem})` : ''}`;
+      if (chip.textContent !== chipTxt) chip.textContent = chipTxt;
       chip.classList.remove('hidden');
     } else {
-      chip.textContent = '';
+      if (chip.textContent !== '') chip.textContent = '';
       chip.classList.add('hidden');
     }
   }
 
   if (topHudBarFillEl) {
     const p = mapCells ? Math.max(0, Math.min(1, cells / mapCells)) : 0;
-    topHudBarFillEl.style.width = `${(p * 100).toFixed(1)}%`;
+    // C7: присваивание в style пересчитывает стиль элемента даже когда значение
+    // не изменилось, а меняется оно только при смене числа клеток.
+    const wTxt = `${(p * 100).toFixed(1)}%`;
+    if (topHudBarFillEl.style.width !== wTxt) topHudBarFillEl.style.width = wTxt;
   }
 }
 
@@ -5587,6 +5798,14 @@ net = createNetModule({
       // A1: the server re-issues the profile token on every connect.
       if (typeof d?.token === 'string') setProfileToken(d.token);
       if (typeof d?.roomLimit === 'number') roomLimit = d.roomLimit;
+      /* C2: границы адаптивного ROI. Старый сервер их не шлёт — тогда
+         остаются встроенные значения и просьба всё равно будет валидной. */
+      applyRoiCaps(d?.roi);
+      // Просим окно до входа в комнату: первый же ROI после join придёт нужного
+      // размера, и стартовой полосы тумана не будет вовсе.
+      viewportSentW = 0;
+      viewportSentH = 0;
+      sendViewportNow();
       // C9: соединение доказано на прикладном уровне — можно сбрасывать backoff.
       try {
         net.markHealthy?.();
@@ -5602,10 +5821,16 @@ net = createNetModule({
       // шире клиентского — тогда имя берётся оттуда, а не рисуется пустым.
       if (Array.isArray(d?.titles)) {
         cosTitleServerNames.clear();
+        cosTitleAchvById.clear();
         for (const it of d.titles) {
           const id = Number(it?.id);
           const nm = typeof it?.name === 'string' ? it.name.trim() : '';
           if (Number.isFinite(id) && id > 0 && nm) cosTitleServerNames.set(id, nm);
+          // C3: связка «титул → ачивка», без неё прогресс не найти.
+          const av = Number(it?.achv);
+          if (Number.isFinite(id) && id > 0 && Number.isFinite(av) && av >= 0) {
+            cosTitleAchvById.set(id, av);
+          }
         }
       }
       updateRoomInfo();
@@ -5638,6 +5863,15 @@ net = createNetModule({
       onLeft(d);
     } else if (t === 'rttPong') {
       onRttPong(d);
+    } else if (t === 'viewport') {
+      /* C2: сервер подтверждает фактически выданное окно. Оно может быть
+         меньше запрошенного (потолок по площади), и считать масштаб/камеру
+         надо именно по нему, а не по тому, что мы просили. */
+      const gw = Number(d?.w);
+      const gh = Number(d?.h);
+      if (Number.isFinite(gw) && gw > 0 && Number.isFinite(gh) && gh > 0) {
+        roiGrant = { w: Math.floor(gw), h: Math.floor(gh) };
+      }
     }
   },
   onBinaryMsg: (buf) => {
@@ -6286,6 +6520,14 @@ function resetClientForNewMatch() {
   botIds = new Set();
   coolDeadlineByOwner.clear();
   lastRoi = null;
+  /* C7: карты «по номеру игрока» здесь НЕ чистятся намеренно. Сервер при
+     matchStart не пересылает ни nameUpdateBatch, ни cosExtra (main.go: обе
+     рассылки привязаны к входу в комнату), поэтому очистка оставила бы всех
+     без имён и косметики до следующего события. Номера внутри комнаты между
+     матчами не переигрываются — переигрываются они при входе, там очистка и
+     стоит (см. onInit). Ограничены по размеру: ключ — номер игрока, а их в
+     комнате не больше roomLimit + ботов. */
+  captureAnchorByOwner.clear();
 
   eventFeed.length = 0;
   lastEventsTick = 0;
@@ -6334,6 +6576,9 @@ function resetClientForNewMatch() {
   } catch {}
   // C8: DOM киллфида очищен вручную — подпись обязана протухнуть.
   renderKillfeed._sig = null;
+  // C7: у мета-панели теперь такая же подпись — сбрасываем по той же причине.
+  renderMetaHud._sig = null;
+  renderTopHud._placeSig = null;
 
   lastState = null;
   prevPlayers = new Map();
@@ -7247,7 +7492,7 @@ function updateLeaderboard() {
     if (lb) {
       if (lb.tdRank) lb.tdRank.textContent = String(it.rank);
       // Титул перед ником — как в плашке над головой и в итогах матча.
-      setNameCellWithTitle(lb.tdName, cosTitleByPlayer.get(p.n) || 0, p.nm || String(p.n));
+      setNameCellWithTitle(lb.tdName, cosTitleByPlayer.get(p.n) || 0, p.nm || String(p.n), p.n);
       lb.tdCells.textContent = `${p.p || 0} • ${p.s || 0}`;
       const pct = mapCells ? ((p.s || 0) / mapCells) * 100 : 0;
       lb.tdPct.textContent = pct.toFixed(1);
@@ -7966,19 +8211,56 @@ function resize() {
 }
 
 let resizeRaf = 0;
+
+// C5: общий хвост пересчёта — и для отложенного, и для немедленного пути.
+function afterResize() {
+  // C3: панель «Ваш облик» тянется по ширине колонки меню.
+  try {
+    renderMenuSkinPreview();
+  } catch {}
+  // C2: новый размер вьюпорта — новая просьба к серверу, с дебаунсом.
+  scheduleViewportSend();
+}
+
 function scheduleResize() {
   if (resizeRaf) return;
   resizeRaf = requestAnimationFrame(() => {
     resizeRaf = 0;
     resize();
-    // C3: панель «Ваш облик» тянется по ширине колонки меню.
-    try {
-      renderMenuSkinPreview();
-    } catch {}
+    afterResize();
   });
 }
 
+/* C5: `resize` откладывался до следующего кадра, а на iOS Safari при повороте
+   экрана и при сворачивании/разворачивании адресной строки следующий кадр
+   может не прийти вовсе (страница успевает уйти в фон) — канвас оставался в
+   старом размере, и поле рисовалось с обрезанным или растянутым краем.
+   Поворот и visualViewport пересчитываем немедленно, а отложенный путь
+   отменяем, чтобы он не перезаписал результат теми же числами. */
+function resizeNow() {
+  if (resizeRaf) {
+    cancelAnimationFrame(resizeRaf);
+    resizeRaf = 0;
+  }
+  resize();
+  afterResize();
+}
+
 window.addEventListener('resize', scheduleResize);
+window.addEventListener('orientationchange', () => {
+  resizeNow();
+  /* На части устройств innerWidth/innerHeight на момент orientationchange ещё
+     старые — добираем повторным пересчётом после того, как браузер применит
+     новую метрику. Оба вызова идемпотентны. */
+  setTimeout(resizeNow, 60);
+  setTimeout(resizeNow, 300);
+});
+try {
+  // Клавиатура и сворачивание адресной строки меняют visualViewport, но не
+  // всегда дают window.resize.
+  window.visualViewport?.addEventListener?.('resize', resizeNow);
+  window.screen?.orientation?.addEventListener?.('change', resizeNow);
+} catch {}
 resize();
 
 let lastDirSent = null;
@@ -8285,6 +8567,13 @@ function onInit(msg) {
   minimapOwnerRgbCache.clear();
   botIds = new Set();
   lastRoi = null;
+  // C7: то же самое при входе в комнату — см. комментарий в onMatchStart.
+  nameById.clear();
+  nameEnById.clear();
+  cosTerrByPlayer.clear();
+  cosDeathByPlayer.clear();
+  cosTitleByPlayer.clear();
+  botArchByPlayer.clear();
 
   gridFillAt = new Float32Array(N);
   coolSeenAt = new Float32Array(N);
@@ -8355,6 +8644,24 @@ function onCosmetics(msg) {
   if (msg?.eqDeath !== undefined) youCosEqDeath = cosClampId(msg.eqDeath);
   if (msg?.titleMask !== undefined) youTitleMask = Number(msg.titleMask) || 0;
   if (msg?.titleId !== undefined) youTitleId = Math.max(0, Math.min(COS_TITLE_MAX, Number(msg.titleId) || 0));
+  /* C3: прогресс по незакрытым ачивкам. Массив содержит ТОЛЬКО закрытые ещё
+     ачивки — открытые сервер опускает, они и так видны по titleMask. Поле
+     может отсутствовать (старый сервер) — тогда карту не трогаем вовсе,
+     чтобы не стереть уже показанный прогресс. */
+  if (Array.isArray(msg?.achvProgress)) {
+    achvProgressById.clear();
+    for (const it of msg.achvProgress) {
+      const id = Number(it?.id);
+      const cur = Number(it?.cur);
+      const max = Number(it?.max);
+      if (!Number.isFinite(id) || id < 0) continue;
+      if (!Number.isFinite(max) || max <= 0) continue;
+      achvProgressById.set(id, {
+        cur: Math.max(0, Math.min(max, Number.isFinite(cur) ? cur : 0)),
+        max,
+      });
+    }
+  }
   // Базовый вариант всегда доступен — иначе магазин выглядит полностью пустым.
   youCosInvTerr |= 1;
   youCosInvDeath |= 1;
@@ -8793,12 +9100,25 @@ function cosTitleUnlocked(id) {
   return (Number(youTitleMask) & (1 << i)) !== 0;
 }
 
-// Доля выполнения условия титула: 1 — открыт, null — данных нет.
-// TODO: сервер пока не передаёт накопленную статистику по ачивкам.
+/* C3: прогресс к титулу. Возвращает {frac, cur, max} либо null, если данных
+   нет. Открытый титул — {frac:1}, без счётчика: сервер не присылает прогресс
+   по уже закрытым ачивкам, и придумывать «10/10» было бы враньём. */
 function cosTitleProgress(id) {
   const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
   if (i === 0) return null;
-  return cosTitleUnlocked(i) ? 1 : null;
+  if (cosTitleUnlocked(i)) return { frac: 1, cur: 0, max: 0 };
+  const achv = cosTitleAchvById.get(i);
+  if (achv == null) return null;
+  const p = achvProgressById.get(achv);
+  if (!p || !(p.max > 0)) return null;
+  return { frac: Math.max(0, Math.min(1, p.cur / p.max)), cur: p.cur, max: p.max };
+}
+
+/* C3: «37/100», «0/100 000» — разряды через УЗКИЙ НЕРАЗРЫВНЫЙ пробел (U+202F).
+   Обычный пробел дал бы перенос строки посреди числа. */
+function cosFormatCount(n) {
+  const v = Math.max(0, Math.floor(Number(n) || 0));
+  return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
 function cosTitlesUnlockedCount() {
@@ -8892,17 +9212,31 @@ function renderCosmeticsTitles() {
       left.appendChild(req);
     }
 
-    // Прогресс к ачивке. Сервер пока не присылает накопленные значения, поэтому
-    // честно показываем только «открыт / не открыт».
-    // TODO: заполнять реальным прогрессом, когда сервер начнёт его отдавать.
+    /* C3: реальный прогресс к ачивке. Сервер присылает накопленные счётчики
+       в `cosmetics.achvProgress` (только по НЕ открытым ачивкам). У открытого
+       титула счётчика нет — там полная полоса без подписи. Если сервер старый
+       или связка «титул → ачивка» не пришла, cosTitleProgress() вернёт null и
+       блок просто не рисуется, как и раньше. */
     const prog = cosTitleProgress(id);
     if (prog != null) {
+      const row = document.createElement('div');
+      row.className = 'cosmeticsProgressRow';
       const bar = document.createElement('div');
       bar.className = 'cosmeticsItemProgress';
       const fill = document.createElement('span');
-      fill.style.width = `${Math.round(Math.max(0, Math.min(1, prog)) * 100)}%`;
+      fill.style.width = `${Math.round(Math.max(0, Math.min(1, prog.frac)) * 100)}%`;
       bar.appendChild(fill);
-      left.appendChild(bar);
+      row.appendChild(bar);
+      if (prog.max > 0) {
+        const lab = document.createElement('span');
+        lab.className = 'cosmeticsItemProgressLabel';
+        lab.textContent = tfmt('cosmetics.progress_of', {
+          cur: cosFormatCount(prog.cur),
+          max: cosFormatCount(prog.max),
+        });
+        row.appendChild(lab);
+      }
+      left.appendChild(row);
     }
 
     const right = document.createElement('div');
@@ -10610,11 +10944,20 @@ function addToast(icon, text, variant, subtext, action) {
   return;
 }
 
-function pushEventFeed(text, kind) {
+/* C6: порог, ниже которого ЧУЖОЙ захват в ленту не идёт. Домашний квадрат на
+   старте — 9x9 = 81 клетка, типовая петля бота даёт 20-40; 48 отсекает
+   рутину и оставляет заметные события. Свои захваты, киллы, баунти,
+   контракты и ачивки фильтром не затрагиваются. */
+const FEED_FOREIGN_CAPTURE_MIN = 48;
+
+/* actorNum (необязательный) — номер игрока, чьё это событие. Нужен только
+   для значка архетипа бота (C4); на текст и схлопывание не влияет. */
+function pushEventFeed(text, kind, actorNum) {
   const t = performance.now();
   const s = String(text || '').trim();
   if (!s) return;
   const k = String(kind || '');
+  const a = Number.isFinite(Number(actorNum)) ? Number(actorNum) : null;
   /* C8: подряд идущие одинаковые строки читались как зависший лог. Схлопываем
      их в одну с множителем ×N (окно 10 с — дальше строка всё равно истечёт). */
   const head = eventFeed[0];
@@ -10623,7 +10966,7 @@ function pushEventFeed(text, kind) {
     head.t = t;
     return;
   }
-  eventFeed.unshift({ t, text: s, k, n: 1 });
+  eventFeed.unshift({ t, text: s, k, n: 1, a });
   if (eventFeed.length > 64) eventFeed.length = 64;
 }
 
@@ -10642,7 +10985,9 @@ function renderKillfeed() {
      пакеты, где видимый текст не менялся вообще: killfeedDirty выставляется на
      любое событие, а строк на экране всего 4-6. Сверяем подпись и не трогаем
      DOM, когда рисовать нечего нового. */
-  const sig = visible.map((e) => `${e.k}${e.text}${e.n || 1}`).join('');
+  // C4: значок бота входит в подпись — иначе приход cosExtra не перерисует ленту.
+  const sig =
+    visible.map((e) => `${e.k}${e.text}${e.n || 1}${botArchInfo(e.a) ? `b${e.a}` : ''}`).join('') + lang;
   if (renderKillfeed._sig === sig) return;
   renderKillfeed._sig = sig;
 
@@ -10652,7 +10997,11 @@ function renderKillfeed() {
     div.className = k ? `killLine killLine${k}` : 'killLine';
     // C8: множитель схлопнутых повторов.
     const rep = Number(e?.n) || 1;
-    div.textContent = rep > 1 ? `${e.text} ×${rep}` : e.text;
+    const txt = rep > 1 ? `${e.text} ×${rep}` : e.text;
+    // C4: в килфиде колонка узкая — оставляем только глиф, без подписи архетипа.
+    const badge = botArchBadge(e.a, { glyphOnly: true });
+    if (badge) div.replaceChildren(badge, document.createTextNode(txt));
+    else div.textContent = txt;
     return div;
   });
   killfeedEl.replaceChildren(...lines);
@@ -10796,11 +11145,29 @@ function renderMetaHud() {
   addDetailSection(t('meta.fight'), fightRows);
   addDetailSection(t('meta.tasks'), dailyRows);
 
+  /* C7: панель пересобиралась ПОЛНОСТЬЮ на каждом кадре — замер оснасткой
+     (tools/probe.mjs): 16 createElement и 10 записей textContent на кадр,
+     то есть ~1000 узлов в секунду при том, что содержимое меняется раз в
+     секунду (обратные отсчёты) или реже. Тот же приём, что в renderKillfeed:
+     сверяем подпись содержимого и не трогаем DOM, когда рисовать нечего. */
+  const metaSig = JSON.stringify([
+    mainRows,
+    detailSections,
+    // Свёрнутость <details> живёт в DOM, а не в данных: если панель пересобрать,
+    // она схлопнется, поэтому состояние в подпись не входит и пересборка
+    // происходит только при смене самих строк.
+  ]);
+  if (renderMetaHud._sig === metaSig) return;
+  renderMetaHud._sig = metaSig;
+
   if (!mainRows.length && !detailSections.length) {
     metaHudEl.textContent = '';
     metaHudEl.style.display = 'none';
     return;
   }
+
+  // Раскрытое состояние блока «Подробнее» переживает пересборку.
+  const wasOpen = !!metaHudEl.querySelector('details.metaDetails')?.open;
 
   metaHudEl.style.display = '';
   const frag = document.createDocumentFragment();
@@ -10811,6 +11178,7 @@ function renderMetaHud() {
   if (detailSections.length) {
     const det = document.createElement('details');
     det.className = 'metaDetails';
+    det.open = wasOpen;
 
     const sum = document.createElement('summary');
     sum.className = 'metaDetailsSummary';
@@ -11269,8 +11637,8 @@ function handleStateBinary(buf) {
           life: COS_DEATH_MS
         });
 
-        if (killer) pushEventFeed(`${kn} -> ${vn}${rs ? ` (${rs})` : ''}`, 'Kill');
-        else pushEventFeed(`${vn} ${lang === 'en' ? 'died' : 'погиб'}${rs ? ` (${rs})` : ''}`, 'Death');
+        if (killer) pushEventFeed(`${kn} -> ${vn}${rs ? ` (${rs})` : ''}`, 'Kill', killer);
+        else pushEventFeed(`${vn} ${lang === 'en' ? 'died' : 'погиб'}${rs ? ` (${rs})` : ''}`, 'Death', victim);
 
         if (killer && killer === you) {
           youKills++;
@@ -11307,7 +11675,19 @@ function handleStateBinary(buf) {
         const fxId = dv.getUint8(o);
         o += 1;
         const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} ${lang === 'en' ? 'captured' : 'захватил'} +${delta} ${lang === 'en' ? 'zone' : 'зоны'}`, 'Capture');
+        /* C6: 13 ботов делают по ~66 захватов за матч — это ~2 строки в
+           секунду, лента читалась как зависший лог и в ней тонули киллы.
+           Свой захват идёт в ленту всегда (это ответ на твоё действие),
+           чужой — только если он крупный: порог примерно равен половине
+           типового домашнего квадрата, ниже него событие не несёт
+           информации о раскладе на карте. */
+        if (pid === you || delta >= FEED_FOREIGN_CAPTURE_MIN) {
+          pushEventFeed(
+            `${pn} ${lang === 'en' ? 'captured' : 'захватил'} +${delta} ${lang === 'en' ? 'zone' : 'зоны'}`,
+            'Capture',
+            pid
+          );
+        }
         addFxBurst(ex, ey, `cap${Math.max(0, Math.min(7, Number(fxId) || 0))}`, { pid });
         if (pid === you) {
           // J5: самое частое приятное действие теперь показывает число.
@@ -11358,7 +11738,11 @@ function handleStateBinary(buf) {
         const ey = dv.getUint16(o, true);
         o += 2;
         const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} ${lang === 'en' ? 'reclaimed' : 'вернул'} +${cells}`, 'Reclaim');
+        // C6: тот же порог, что и у захвата — чужой возврат мелочи в ленте
+        // такой же шум, как и чужой мелкий захват. Свой — всегда.
+        if (pid === you || cells >= FEED_FOREIGN_CAPTURE_MIN) {
+          pushEventFeed(`${pn} ${lang === 'en' ? 'reclaimed' : 'вернул'} +${cells}`, 'Reclaim', pid);
+        }
         addFxBurst(ex, ey, `cap${cosClampId(cosCaptureFxByPlayer(pid))}`, { pid });
         if (pid === you && cells > 0) {
           addScorePopup(ex, ey, cells);
@@ -11463,7 +11847,7 @@ function handleStateBinary(buf) {
         const achv = dv.getUint8(o);
         o += 1;
         const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} — ${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'Achv');
+        pushEventFeed(`${pn} — ${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'Achv', pid);
         if (pid === you) {
           bumpMatchTabBadge();
           sfx.achievement();
@@ -11489,7 +11873,7 @@ function handleStateBinary(buf) {
         const until = dv.getUint32(o, true);
         o += 4;
         const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} — ${infoPack().labels.contract}: ${contractLabel(type) || type} ${goal}`, 'Contract');
+        pushEventFeed(`${pn} — ${infoPack().labels.contract}: ${contractLabel(type) || type} ${goal}`, 'Contract', pid);
         if (pid === you) {
           youContractType = type;
           youContractGoal = goal;
@@ -11526,7 +11910,7 @@ function handleStateBinary(buf) {
         const type = dv.getUint8(o);
         o += 1;
         const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} — ${infoPack().labels.contractComplete}: ${contractLabel(type) || type}`, 'Contract');
+        pushEventFeed(`${pn} — ${infoPack().labels.contractComplete}: ${contractLabel(type) || type}`, 'Contract', pid);
         if (pid === you) {
           youContractProgress = youContractGoal;
           bumpMatchTabBadge();
@@ -11591,7 +11975,7 @@ function handleStateBinary(buf) {
         o += 2;
         const kn = displayNameOf(killer);
         const vn = displayNameOf(victim);
-        pushEventFeed(`${lang === 'en' ? 'REVENGE' : 'МЕСТЬ'}: ${kn} -> ${vn}`, 'Revenge');
+        pushEventFeed(`${lang === 'en' ? 'REVENGE' : 'МЕСТЬ'}: ${kn} -> ${vn}`, 'Revenge', killer);
         if (killer === you) {
           bumpMatchTabBadge();
           sfx.revenge();
@@ -11611,7 +11995,7 @@ function handleStateBinary(buf) {
         const streak = dv.getUint8(o);
         o += 1;
         const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} — ${t('event.streak')} x${streak}`, 'Streak');
+        pushEventFeed(`${pn} — ${t('event.streak')} x${streak}`, 'Streak', pid);
         if (pid === you) {
           youStreak = streak;
           // J3: раньше бип стоял вне этой проверки — в комнате с 14 ботами
@@ -11662,7 +12046,7 @@ function handleStateBinary(buf) {
         o += 2;
         const kn = displayNameOf(killer);
         const vn = displayNameOf(victim);
-        pushEventFeed(`${t('event.bounty_claimed')}: ${kn} -> ${vn}`, 'Bounty');
+        pushEventFeed(`${t('event.bounty_claimed')}: ${kn} -> ${vn}`, 'Bounty', killer);
 
         bumpMatchTabBadge();
         const mineClaim = killer === you;
@@ -11710,7 +12094,7 @@ function handleStateBinary(buf) {
         o += 2;
         powerUps.delete(id);
         const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} ${t('event.picked')}: ${powerupLabel(type)}`, 'Pickup');
+        pushEventFeed(`${pn} ${t('event.picked')}: ${powerupLabel(type)}`, 'Pickup', pid);
 
         if (pid === you) {
           if (type === 1) youShield = true;
@@ -11743,7 +12127,7 @@ function handleStateBinary(buf) {
         const ey = dv.getUint16(o, true);
         o += 2;
         const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} ${t('event.used')}: ${powerupLabel(type)}`, 'Use');
+        pushEventFeed(`${pn} ${t('event.used')}: ${powerupLabel(type)}`, 'Use', pid);
 
         if (pid === you) {
           if (type === 1) youShield = false;
@@ -11853,6 +12237,8 @@ function onCosExtra(m) {
   cosTerrByPlayer.clear();
   cosDeathByPlayer.clear();
   cosTitleByPlayer.clear();
+  // C4: bot identity. Полная пересборка — сообщение всегда содержит всю комнату.
+  botArchByPlayer.clear();
   for (const it of arr) {
     const n = Number(it?.n);
     if (!Number.isFinite(n)) continue;
@@ -11862,6 +12248,16 @@ function onCosExtra(m) {
     if (terr) cosTerrByPlayer.set(n, terr);
     if (death) cosDeathByPlayer.set(n, death);
     if (title) cosTitleByPlayer.set(n, title);
+    /* C4: арх/тир осмысленны только у бота — у человека сервер шлёт нули, и
+       без флага bot первый архетип («Фермер») налипал бы на всех живых. */
+    if (it?.bot === true) {
+      const arch = Number(it?.arch);
+      const tier = Number(it?.tier);
+      botArchByPlayer.set(n, {
+        arch: Number.isFinite(arch) ? Math.max(0, Math.min(BOT_ARCH_MAX, arch)) : 0,
+        tier: Number.isFinite(tier) ? Math.max(0, Math.min(BOT_TIER_MAX, tier)) : 0,
+      });
+    }
     if (n === you) {
       youCosEqTerr = terr;
       youCosEqDeath = death;
@@ -12440,8 +12836,14 @@ function draw() {
      меняют. */
   let cell = Math.max(6, Math.floor(Math.min(cw / VIEW_CELLS_X, viewH / VIEW_CELLS_Y)));
   {
-    const roiW = Math.max(8, (Number(lastRoi?.rw) || VIEW_CELLS_X * 2) - ROI_MARGIN_CELLS);
-    const roiH = Math.max(8, (Number(lastRoi?.rh) || VIEW_CELLS_Y * 2) - ROI_MARGIN_CELLS);
+    /* C2: до первого ROI-пакета опираемся на размер, подтверждённый сервером
+       (`viewport` ack), и только потом — на исторические 80×56. Иначе первые
+       кадры после входа рисуются в неверном масштабе и «схлопываются» на
+       первом же пакете. */
+    const fallbackW = Number(roiGrant?.w) || VIEW_CELLS_X * 2;
+    const fallbackH = Number(roiGrant?.h) || VIEW_CELLS_Y * 2;
+    const roiW = Math.max(8, (Number(lastRoi?.rw) || fallbackW) - ROI_MARGIN_CELLS);
+    const roiH = Math.max(8, (Number(lastRoi?.rh) || fallbackH) - ROI_MARGIN_CELLS);
     cell = Math.max(cell, Math.ceil(cw / roiW), Math.ceil(viewH / roiH));
   }
 
@@ -13173,8 +13575,13 @@ function draw() {
       ctx.restore();
     }
 
-    // Титул идёт перед ником — он виден всем, кто видит плашку.
-    const label = `${cosTitlePrefix(cosTitleByPlayer.get(ip.n) || 0)}${ip.nm ? String(ip.nm) : String(ip.n)}`;
+    /* Титул идёт перед ником — он виден всем, кто видит плашку.
+       C4: у бота перед титулом идёт глиф архетипа. В канвасе CSS-бейджа быть
+       не может, поэтому берём тот же символ, что рисует .botArch::before —
+       один знак, плашка от него почти не растёт, а «кто передо мной» читается
+       ещё до того, как бот что-то сделает. */
+    const archGlyph = botArchGlyph(ip.n);
+    const label = `${archGlyph ? `${archGlyph} ` : ''}${cosTitlePrefix(cosTitleByPlayer.get(ip.n) || 0)}${ip.nm ? String(ip.nm) : String(ip.n)}`;
     // Плашка ника — единый drawNamePlate, тот же и в магазине.
     drawNamePlate(ctx, label, px, py - cell * 0.58, c, ip.cosNameplate, 0.95, 12, nowFrame);
   }
