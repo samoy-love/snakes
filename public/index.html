@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title data-i18n="game.title">Змейки</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <button
+      id="langToggleGlobal"
+      class="iconBtn langToggle langToggleGlobal"
+      type="button"
+      aria-label="Сменить язык"
+      title="Сменить язык"
+      data-lang-toggle
+      data-i18n-aria-label="lang.toggle"
+      data-i18n-title="lang.toggle"
+    >
+      🇷🇺
+    </button>
+
+    <div id="menuOverlay" class="overlay">
+      <div class="card">
+        <div class="menuHeader">
+          <div class="overlayKicker" data-i18n="menu.kicker">Онлайн • быстрый матч</div>
+          <div class="overlayTitle" data-i18n="game.title">Змейки</div>
+          <div class="overlaySub" data-i18n="menu.subtitle">Захватывайте территорию, избегайте следов и побеждайте</div>
+        </div>
+
+        <div class="menuGrid">
+          <div class="menuPanel menuPanelPrimary">
+            <div class="menuPanelTitle" data-i18n="menu.quick_start">Быстрый старт</div>
+            <div class="menuPanelBody">
+              <div class="fieldInline">
+                <label class="fieldLabel" for="menuNameInput" data-i18n="menu.nick">Ник</label>
+                <input id="menuNameInput" maxlength="18" placeholder="Введите ник" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="menuNameError" data-i18n-placeholder="menu.nick_placeholder" />
+                <button id="menuNameRandomBtn" class="iconBtn" type="button" aria-label="Случайный ник" data-i18n-aria-label="menu.nick_random_aria">🎲</button>
+              </div>
+              <div id="menuNameError" class="fieldError" aria-live="polite"></div>
+              <div class="menuActions">
+                <button id="playBtn" class="btnPrimary" data-i18n="menu.play">Играть</button>
+                <button id="cosmeticsMenuBtn" class="btnSecondary" type="button" data-i18n="menu.cosmetics">Косметика</button>
+              </div>
+              <div id="menuOnboarding" class="menuOnboarding hidden">
+                <div class="menuOnboardingTitle" data-i18n="menu.controls_title"></div>
+                <div class="menuOnboardingDesc" data-i18n="menu.controls_desc"></div>
+              </div>
+              <div class="overlayHint" data-i18n="menu.hint">Совет: чат — Enter • управление — WASD/стрелки</div>
+            </div>
+          </div>
+
+          <div class="menuPanel">
+            <div class="menuPanelHeader">
+              <div class="menuPanelTitle" data-i18n="rooms.title">Комнаты</div>
+              <div class="roomsHeaderActions">
+                <button id="joinRoomBtn" class="btnSecondary" disabled data-i18n="rooms.join">Войти</button>
+                <button id="toggleCreateRoomBtn" class="btnGhost" aria-controls="roomsCreate" aria-expanded="false" data-i18n="rooms.create">Создать</button>
+                <button id="refreshRoomsBtn" class="btnGhost" aria-label="Обновить список комнат" data-i18n="rooms.refresh" data-i18n-aria-label="rooms.refresh_aria">Обновить</button>
+              </div>
+            </div>
+            <div class="roomsToolbar">
+              <div id="roomsStats" class="roomsStats" aria-live="polite"></div>
+              <div class="roomsControls">
+                <div class="roomsSearchWrap">
+                  <input id="roomsSearchInput" type="text" maxlength="40" placeholder="Поиск по названию/нику" aria-label="Поиск комнат" data-i18n-placeholder="rooms.search_placeholder" data-i18n-aria-label="rooms.search_aria" />
+                  <button id="roomsSearchClearBtn" class="iconBtn hidden" type="button" aria-label="Очистить поиск" data-i18n-aria-label="rooms.search_clear_aria">✕</button>
+                </div>
+                <select id="roomsSortSelect" aria-label="Сортировка комнат" data-i18n-aria-label="rooms.sort_aria">
+                  <option value="free" data-i18n="rooms.sort_free">Свободные сверху</option>
+                  <option value="fill" data-i18n="rooms.sort_fill">По заполненности</option>
+                  <option value="humans" data-i18n="rooms.sort_humans">По онлайну</option>
+                  <option value="id" data-i18n="rooms.sort_id">По номеру</option>
+                </select>
+              </div>
+            </div>
+            <div id="roomsCreate" class="roomsCreate hidden">
+              <div class="fieldInline">
+                <label class="fieldLabel" for="roomsCreateNameInput" data-i18n="rooms.name">Название</label>
+                <input id="roomsCreateNameInput" maxlength="32" placeholder="Название комнаты" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="roomsCreateError" data-i18n-placeholder="rooms.name_placeholder" />
+              </div>
+              <div id="roomsCreateError" class="fieldError" aria-live="polite"></div>
+              <div class="roomsCreateActions">
+                <button id="createRoomBtn" class="btnPrimary" disabled data-i18n="rooms.create_and_join">Создать и войти</button>
+              </div>
+            </div>
+            <div id="roomsList" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="cosmeticsOverlay" class="overlay hidden">
+      <div class="card">
+        <div class="menuHeader">
+          <div class="overlayKicker" data-i18n="cosmetics.kicker">Магазин • гардероб</div>
+          <div class="overlayTitle" data-i18n="menu.cosmetics">Косметика</div>
+          <div class="overlaySub" data-i18n="cosmetics.subtitle">Покупайте за Стиль и экипируйте — видят все</div>
+        </div>
+
+        <div class="cosmeticsGrid">
+          <div class="menuPanel">
+            <div class="menuPanelHeader">
+              <div class="menuPanelTitle cosmeticsStyleTitle">
+                <span data-i18n="cosmetics.style">Стиль</span>: <span id="cosmeticsStyle">0</span>
+                <button
+                  id="cosmeticsStyleInfoBtn"
+                  class="iconBtn"
+                  type="button"
+                  title=""
+                  aria-label=""
+                  data-i18n-title="cosmetics.style_info"
+                  data-i18n-aria-label="cosmetics.style_info"
+                >
+                  ⓘ
+                </button>
+              </div>
+              <div class="roomsHeaderActions">
+                <button id="cosmeticsCloseBtn" class="btnGhost" type="button" data-i18n="common.close">Закрыть</button>
+              </div>
+            </div>
+
+            <div class="cosmeticsStoreBar">
+              <div class="cosmeticsFilters" role="tablist" aria-label="" data-i18n-aria-label="cosmetics.filters_aria">
+                <button id="cosmeticsFilterAll" class="btnGhost" type="button" data-i18n="cosmetics.filter_all"></button>
+                <button id="cosmeticsFilterOwned" class="btnGhost" type="button" data-i18n="cosmetics.filter_owned"></button>
+                <button id="cosmeticsFilterAvailable" class="btnGhost" type="button" data-i18n="cosmetics.filter_available"></button>
+              </div>
+            </div>
+
+            <div id="cosmeticsEarnStyle" class="cosmeticsEarnStyle"></div>
+
+            <div id="cosmeticsTabs" class="cosmeticsTabs" role="tablist" aria-label="Категории косметики" data-i18n-aria-label="cosmetics.categories_aria"></div>
+            <div id="cosmeticsItems" class="cosmeticsItems" aria-live="polite"></div>
+          </div>
+
+          <div class="menuPanel">
+            <div class="menuPanelTitle" data-i18n="cosmetics.preview">Предпросмотр</div>
+            <div class="cosmeticsPreviewWrap">
+              <canvas id="cosmeticsPreview" width="420" height="260"></canvas>
+            </div>
+            <div id="cosmeticsHint" class="overlayHint"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="deathOverlay"
+      class="deathOverlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="deathTitle"
+      aria-describedby="deathHint"
+    >
+      <div class="toastCard" role="document">
+        <div class="toastIcon" aria-hidden="true">✖</div>
+        <div class="toastBody">
+          <div id="deathTitle" class="toastTitle" data-i18n="death.title">Вы проиграли</div>
+          <div id="deathReason" class="deathReason"></div>
+          <div id="deathHint" class="toastSub" data-i18n="death.hint">Enter — снова • Esc — меню</div>
+          <div id="deathStats" class="deathStats" aria-live="polite"></div>
+          <div class="toastRow">
+            <button id="restartBtn" class="btnPrimary" aria-label="Играть снова" data-i18n="death.play_again" data-i18n-aria-label="death.play_again">Играть снова</button>
+            <button id="deathMenuBtn" class="btnGhost" aria-label="В меню" data-i18n="common.to_menu" data-i18n-aria-label="common.to_menu">В меню</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="matchOverlay"
+      class="matchOverlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="matchTitle"
+      aria-describedby="matchHint"
+    >
+      <div class="matchCard" role="document">
+        <div class="matchHeader">
+          <div id="matchTitle" class="matchTitle" data-i18n="match.title">Матч завершён</div>
+          <div id="matchHint" class="matchSub"><span data-i18n="match.hint_prefix">Новый матч начнётся через</span> <span id="matchCountdown">—</span></div>
+        </div>
+        <div id="matchResults" class="matchResults" aria-live="polite"></div>
+        <div class="matchActions">
+          <button id="matchContinueBtn" class="btnPrimary" data-i18n="match.play_on">Играть дальше</button>
+          <button id="matchMenuBtn" class="btnGhost" data-i18n="common.to_menu">В меню</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="eventToasts"></div>
+
+    <div id="settingsOverlay" class="overlay hidden">
+      <div class="card">
+        <div class="menuHeader">
+          <div class="overlayKicker" data-i18n="settings.kicker">Настройки</div>
+          <div class="overlayTitle" data-i18n="settings.title">Игровые</div>
+          <div class="overlaySub" data-i18n="settings.subtitle">Визуальные эффекты, интерфейс и звук</div>
+        </div>
+
+        <div class="menuGrid">
+          <div class="menuPanel">
+            <div class="menuPanelTitle" data-i18n="settings.visual">Визуал</div>
+            <div class="menuPanelBody">
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.fx">Эффекты</span>
+                <input id="fxEnabled" type="checkbox" checked />
+              </label>
+              <div class="fieldHint" data-i18n="settings.fx_hint"></div>
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.intensity">Интенсивность</span>
+                <input id="fxIntensity" type="range" min="0" max="1" step="0.05" value="0.85" />
+              </label>
+              <div class="fieldHint" data-i18n="settings.intensity_hint"></div>
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.shake">Тряска</span>
+                <input id="shakeIntensity" type="range" min="0" max="1" step="0.05" value="0.55" />
+              </label>
+              <div class="fieldHint" data-i18n="settings.shake_hint"></div>
+
+              <div class="settingsGroupTitle" data-i18n="settings.hud"></div>
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.hud_brightness"></span>
+                <input id="hudBrightness" type="range" min="0.75" max="1.25" step="0.05" value="1" />
+              </label>
+              <div class="fieldHint" data-i18n="settings.hud_brightness_hint"></div>
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.hud_contrast"></span>
+                <input id="hudContrast" type="range" min="0.85" max="1.35" step="0.05" value="1" />
+              </label>
+              <div class="fieldHint" data-i18n="settings.hud_contrast_hint"></div>
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.hud_panels"></span>
+                <input id="hudPanelOpacity" type="range" min="0.55" max="1" step="0.05" value="0.82" />
+              </label>
+              <div class="fieldHint" data-i18n="settings.hud_panels_hint"></div>
+            </div>
+          </div>
+
+          <div class="menuPanel">
+            <div class="menuPanelTitle" data-i18n="settings.sound">Звук</div>
+            <div class="menuPanelBody">
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.sound_enable"></span>
+                <input id="soundEnabled" type="checkbox" checked />
+              </label>
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.volume">Громкость</span>
+                <input id="soundVolume" type="range" min="0" max="1" step="0.05" value="0.7" />
+              </label>
+              <div class="fieldHint" data-i18n="settings.volume_hint"></div>
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.mute_on_blur"></span>
+                <input id="muteOnBlur" type="checkbox" />
+              </label>
+              <div class="fieldHint" data-i18n="settings.mute_on_blur_hint"></div>
+              <div class="menuActions">
+                <button id="testBeepBtn" class="btnSecondary" type="button" data-i18n="settings.test_beep"></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="menuPanel">
+            <div class="menuPanelTitle" data-i18n="settings.debug">Отладка</div>
+            <div class="menuPanelBody">
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.perf_show"></span>
+                <input id="perfEnabled" type="checkbox" />
+              </label>
+              <div class="fieldHint" data-i18n="settings.perf_hint"></div>
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.perf_compact"></span>
+                <input id="perfCompact" type="checkbox" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="menuActions settingsFooterActions">
+          <button id="resetSettingsBtn" class="btnSecondary" type="button" data-i18n="settings.reset"></button>
+          <button id="closeSettingsBtn" class="btnGhost" data-i18n="common.close">Закрыть</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="hud">
+      <div class="hudTop">
+        <div class="hudBrand">
+          <div id="title" data-i18n="game.title">Змейки</div>
+          <div id="roomInfo"></div>
+        </div>
+        <div class="hudActions">
+          <button id="lbBtn" class="iconBtn" type="button" aria-label="Показать лидеров" data-i18n-aria-label="hud.leaders">🏆</button>
+          <button id="cosmeticsBtn" class="iconBtn" type="button" aria-label="Открыть косметику" data-i18n-aria-label="hud.cosmetics">🎨</button>
+          <button id="settingsBtn" class="iconBtn" type="button" aria-label="Открыть настройки" data-i18n-aria-label="hud.settings">⚙</button>
+          <button
+            id="langToggle"
+            class="iconBtn langToggle"
+            type="button"
+            aria-label="Сменить язык"
+            title="Сменить язык"
+            data-lang-toggle
+            data-i18n-aria-label="lang.toggle"
+            data-i18n-title="lang.toggle"
+          >
+            🇷🇺
+          </button>
+          <button id="leaveBtn" class="iconBtn" type="button" aria-label="Выйти в меню" data-i18n-aria-label="hud.leave">⟵</button>
+        </div>
+      </div>
+
+      <div class="hudMid">
+        <div id="nameRow">
+          <input id="nameInput" placeholder="Ваш ник" maxlength="18" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-i18n-placeholder="hud.nick_placeholder" />
+          <button id="nameBtn" aria-label="Сохранить ник" data-i18n="common.ok" data-i18n-aria-label="hud.save_nick">Ок</button>
+        </div>
+        <div id="stats"></div>
+      </div>
+
+      <div id="help" data-i18n="hud.help">Управление: стрелки / WASD • Чат: Enter</div>
+    </div>
+
+    <div id="topHud" aria-hidden="true">
+      <div class="topHudRow">
+        <div class="topHudZone">
+          <span class="topHudLabel" data-i18n="hud.zone">Зона</span>
+          <span id="topHudCells" class="topHudValue">—</span>
+          <span id="topHudPct" class="topHudSub">—</span>
+        </div>
+        <div class="topHudRight">
+          <span id="topHudTime" class="topHudTime"></span>
+          <span id="topHudKills" class="topHudKills"></span>
+          <span id="topHudContract" class="topHudContract"></span>
+        </div>
+      </div>
+      <div class="topHudBar"><div id="topHudBarFill" class="topHudBarFill"></div></div>
+    </div>
+
+    <div id="rightSidebar" data-tab="match">
+      <div id="minimapPanel" class="minimapPanel">
+        <canvas id="minimap"></canvas>
+        <div id="minimapLegend" class="minimapLegend" aria-hidden="true"></div>
+      </div>
+      <div id="rightInfo">
+        <details id="rightMatchDetails" class="rightDetails" open>
+          <summary class="rightDetailsSummary" data-i18n="right.match">Матч</summary>
+          <div id="metaHud"></div>
+        </details>
+
+        <details id="rightTeamDetails" class="rightDetails" open>
+          <summary class="rightDetailsSummary" data-i18n="right.team">Команда</summary>
+          <div id="teamHud"></div>
+        </details>
+        <div id="killfeed"></div>
+        <div id="perf"></div>
+      </div>
+    </div>
+    <div id="chat">
+      <div id="chatHeader">
+        <div id="chatHeaderLeft">
+          <span id="chatHeaderTitle" data-i18n="chat.title">Чат</span>
+          <span id="chatHeaderHint">Enter</span>
+        </div>
+        <div id="chatHeaderRight">
+          <span id="chatUnread" class="badge hidden"></span>
+        </div>
+      </div>
+      <div id="chatLog"></div>
+      <form id="chatForm" autocomplete="off">
+        <button id="emojiBtn" type="button" title="Эмодзи" aria-label="Открыть панель эмодзи" data-i18n-title="chat.emoji" data-i18n-aria-label="chat.emoji_open">😀</button>
+        <div id="chatInputWrap">
+          <div id="chatInputOverlay"></div>
+          <input id="chatInput" placeholder="Сообщение..." maxlength="180" data-i18n-placeholder="chat.message_placeholder" />
+        </div>
+        <button id="chatBtn" type="submit" aria-label="Отправить сообщение" data-i18n="chat.send" data-i18n-aria-label="chat.send">Отправить</button>
+      </form>
+      <div id="emojiPanel">
+        <div id="emojiPanelTop">
+          <button id="emojiCloseBtn" type="button" title="Закрыть" aria-label="Закрыть панель эмодзи" data-i18n-title="common.close" data-i18n-aria-label="chat.emoji_close">✕</button>
+        </div>
+        <div id="emojiRecent" class="emojiRow hidden"></div>
+        <div id="emojiGrid"></div>
+      </div>
+    </div>
+    <div
+      id="minimapOverlay"
+      class="overlay minimapOverlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label=""
+      data-i18n-aria-label="minimap.overlay_aria"
+    >
+      <div class="card minimapOverlayCard" role="document">
+        <div class="minimapOverlayHeader">
+          <div class="minimapOverlayTitle" data-i18n="minimap.title"></div>
+          <button
+            id="minimapOverlayCloseBtn"
+            class="iconBtn"
+            type="button"
+            aria-label=""
+            title=""
+            data-i18n-aria-label="common.close"
+            data-i18n-title="common.close"
+          >
+            ✕
+          </button>
+        </div>
+        <canvas id="minimapOverlayCanvas"></canvas>
+      </div>
+    </div>
+    <canvas id="game"></canvas>
+
+    <script src="https://cdn.jsdelivr.net/npm/twemoji@14.0.2/dist/twemoji.min.js" crossorigin="anonymous"></script>
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>
