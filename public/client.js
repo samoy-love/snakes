@@ -153,7 +153,10 @@ const I18N = {
     'hud.leave': 'Выйти в меню',
     'hud.nick_placeholder': 'Ваш ник',
     'hud.save_nick': 'Сохранить ник',
-    'hud.help': 'Управление: стрелки / WASD • Чат: Enter',
+    'hud.help': 'Управление: стрелки / WASD • Чат: Enter • Карта: M',
+    'hud.minimap': 'Открыть карту',
+    'menu.your_look': 'Ваш облик',
+    'menu.your_look_hint': 'Экипированное видят все игроки в матче',
     'hud.zone': 'Зона',
 
     'right.match': 'Матч',
@@ -187,6 +190,8 @@ const I18N = {
     'net.connecting': 'Соединение…',
     'net.reconnecting': 'Переподключение…',
     'net.offline': 'Нет соединения',
+    'net.rejoin_hint': 'Не выходи — вернём в матч сами.',
+    'net.rejoined': 'Снова в матче',
 
     'death.reason_prefix': 'Причина',
     'death.killed_by': 'Вас убил',
@@ -316,6 +321,9 @@ const I18N = {
     'hud.combo': 'Комбо',
     'hud.trail_len': 'След',
     'hud.time_left': 'До конца',
+    'hud.place_short': 'Место',
+    'hud.points_short': 'Очки',
+    'lb.player': 'Игрок',
 
     'banner.first_capture': 'Первый захват!',
     'banner.first_capture_sub': 'Замкнул петлю — территория твоя. Так и набирают зону.',
@@ -545,7 +553,10 @@ const I18N = {
     'hud.leave': 'Back to menu',
     'hud.nick_placeholder': 'Your name',
     'hud.save_nick': 'Save name',
-    'hud.help': 'Move: arrows / WASD • Chat: Enter',
+    'hud.help': 'Move: arrows / WASD • Chat: Enter • Map: M',
+    'hud.minimap': 'Open map',
+    'menu.your_look': 'Your look',
+    'menu.your_look_hint': 'Everyone in the match sees what you equip',
     'hud.zone': 'Zone',
 
     'right.match': 'Match',
@@ -579,6 +590,8 @@ const I18N = {
     'net.connecting': 'Connecting…',
     'net.reconnecting': 'Reconnecting…',
     'net.offline': 'Offline',
+    'net.rejoin_hint': 'Stay put — we will put you back in the match.',
+    'net.rejoined': 'Back in the match',
 
     'death.reason_prefix': 'Reason',
     'death.killed_by': 'Killed by',
@@ -687,6 +700,9 @@ const I18N = {
     'hud.combo': 'Combo',
     'hud.trail_len': 'Trail',
     'hud.time_left': 'Time left',
+    'hud.place_short': 'Place',
+    'hud.points_short': 'Points',
+    'lb.player': 'Player',
 
     'banner.first_capture': 'First capture!',
     'banner.first_capture_sub': 'You closed the loop — the land is yours. That is how you grow.',
@@ -1108,6 +1124,19 @@ function setLang(next) {
   try {
     renderDeathStats();
   } catch {}
+  // K4: обе строки собираются в JS и раньше оставались на прежнем языке.
+  try {
+    renderDeathReason();
+  } catch {}
+  try {
+    renderCosmeticsStatus();
+  } catch {}
+  try {
+    renderTeamHud();
+  } catch {}
+  try {
+    renderTopHud();
+  } catch {}
   try {
     ensureLeaderboardDom();
   } catch {}
@@ -1244,6 +1273,125 @@ function cosCachedGradient(ctx, key, make) {
   return g;
 }
 
+/* K6: строки `rgba(...)` собирались на КАЖДУЮ клетку следа каждый кадр — до
+   3.6к аллокаций за кадр на мобильном. Кэш повторяет приём getOwnerFillStyle:
+   квантованная альфа + цвет как ключ. Ключом здесь служит hsl, а не номер
+   игрока, потому что drawSegTile зовётся ещё и из превью магазина, где номера
+   игрока нет вовсе. */
+const COS_ALPHA_STEPS = 24;
+const cosFillCache = new Map();
+
+function cosQuantA(a) {
+  const v = Math.max(0, Math.min(1, Number(a) || 0));
+  return Math.round(v * COS_ALPHA_STEPS);
+}
+
+function cosSegFill(hsl, a) {
+  const ai = cosQuantA(a);
+  const key = `${hsl}|${ai}`;
+  let v = cosFillCache.get(key);
+  if (v) return v;
+  const rgb = hslToRgb(hsl);
+  v = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${(ai / COS_ALPHA_STEPS).toFixed(3)})`;
+  if (cosFillCache.size > 640) cosFillCache.clear();
+  cosFillCache.set(key, v);
+  return v;
+}
+
+const cosWhiteCache = new Map();
+
+function cosWhiteFill(a) {
+  const ai = cosQuantA(a);
+  let v = cosWhiteCache.get(ai);
+  if (v) return v;
+  v = `rgba(255,255,255,${(ai / COS_ALPHA_STEPS).toFixed(3)})`;
+  cosWhiteCache.set(ai, v);
+  return v;
+}
+
+// «Бездна» (id 7) заливается фиксированным тёмным цветом — ему свой кэш.
+const cosVoidCache = new Map();
+
+function cosVoidFill(a) {
+  const ai = cosQuantA(a);
+  let v = cosVoidCache.get(ai);
+  if (v) return v;
+  v = `rgba(4,6,10,${(ai / COS_ALPHA_STEPS).toFixed(3)})`;
+  cosVoidCache.set(ai, v);
+  return v;
+}
+
+/* K6: «Неон» (id 1) и «Полосы» (id 2) — единственные варианты следа, чей
+   рисунок не зависит ни от времени, ни от seed, и одновременно самые дорогие в
+   цикле: у Неона был save/restore + shadowBlur НА КЛЕТКУ (4.23 мс на 300
+   клеток на десктопе, 20-35 мс на телефоне — один кадровый бюджет целиком), у
+   Полос — save + clip() + ~4 stroke() на клетку (2.09 мс).
+   Тот же приём, что уже применён к территории: рисуем плитку один раз в
+   оффскрин на пару (цвет, размер клетки), а в цикле остаётся один drawImage.
+   Альфа не запекается — она накладывается через globalAlpha, иначе кэш
+   размножился бы на каждый шаг пульсации собственного следа.
+   У Неона свечение выходит за границы клетки, поэтому плитка шире на pad. */
+const cosSegTileCache = new Map();
+
+function cosSegTile(hsl, segId, cell) {
+  const id = cosClampId(segId);
+  if (id !== 1 && id !== 2) return null;
+  const c = Math.max(1, Math.round(cell));
+  const key = `${id}|${hsl}|${c}`;
+  const hit = cosSegTileCache.get(key);
+  if (hit) return hit;
+
+  const blur = Math.max(6, c * 0.55);
+  const pad = id === 1 ? Math.ceil(blur) + 2 : 0;
+  const size = c + pad * 2;
+  let cv = null;
+  let g = null;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = size;
+    cv.height = size;
+    g = cv.getContext('2d');
+  } catch {
+    return null;
+  }
+  if (!g) return null;
+
+  // Координаты внутри плитки повторяют геометрию исходного кода: отступ 1 px
+  // от края клетки, сторона cell-2.
+  const x = pad + 1;
+  const y = pad + 1;
+  const w = Math.max(1, c - 2);
+  const h = Math.max(1, c - 2);
+
+  if (id === 1) {
+    g.shadowColor = hsl;
+    g.shadowBlur = blur;
+    g.fillStyle = cosSegFill(hsl, 1);
+    g.fillRect(x, y, w, h);
+  } else {
+    g.fillStyle = cosSegFill(hsl, 0.92);
+    g.fillRect(x, y, w, h);
+    g.beginPath();
+    g.rect(x, y, w, h);
+    g.clip();
+    g.globalAlpha = 0.45;
+    g.strokeStyle = 'rgba(0,0,0,0.55)';
+    g.lineWidth = Math.max(2, c * 0.10);
+    const step = Math.max(4, (c * 0.55) | 0);
+    for (let k = -c; k <= c * 2; k += step) {
+      g.beginPath();
+      g.moveTo(pad + k, pad - 2);
+      g.lineTo(pad + k + c, pad + c + 2);
+      g.stroke();
+    }
+  }
+
+  const rec = { cv, pad };
+  if (cosSegTileCache.size > 64) cosSegTileCache.clear();
+  cosSegTileCache.set(key, rec);
+  return rec;
+}
+
 /* --- SEG: одна клетка следа ------------------------------------------------
    px,py — левый верхний угол клетки; cell — сторона клетки в пикселях.
    seed — стабильное число клетки (в игре из x,y), timeMs — время для анимации.
@@ -1265,21 +1413,28 @@ function drawSegTile(ctx, px, py, cell, hsl, segId, seed, alpha, timeMs) {
   const g = rgb[1];
   const b = rgb[2];
 
-  if (id === 1) {
-    // Неон: заливка + свечение наружу.
+  // K6: Неон и Полосы — из готовой оффскрин-плитки, один drawImage на клетку.
+  if (id === 1 || id === 2) {
+    const tile = cosSegTile(hsl, id, cell);
+    if (tile) {
+      const ga = ctx.globalAlpha;
+      ctx.globalAlpha = ga * a;
+      ctx.drawImage(tile.cv, Math.round(px) - tile.pad, Math.round(py) - tile.pad);
+      ctx.globalAlpha = ga;
+      return;
+    }
+    // Плитку не удалось создать (нет canvas) — падаем в честный медленный путь.
+    if (id === 1) {
+      ctx.save();
+      ctx.shadowColor = hsl;
+      ctx.shadowBlur = Math.max(6, cell * 0.55);
+      ctx.fillStyle = cosSegFill(hsl, a);
+      ctx.fillRect(x, y, w, h);
+      ctx.restore();
+      return;
+    }
     ctx.save();
-    ctx.shadowColor = hsl;
-    ctx.shadowBlur = Math.max(6, cell * 0.55);
-    ctx.fillStyle = `rgba(${r},${g},${b},${a})`;
-    ctx.fillRect(x, y, w, h);
-    ctx.restore();
-    return;
-  }
-
-  if (id === 2) {
-    // Полосы: диагональная штриховка поверх заливки.
-    ctx.save();
-    ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.92})`;
+    ctx.fillStyle = cosSegFill(hsl, a * 0.92);
     ctx.fillRect(x, y, w, h);
     ctx.beginPath();
     ctx.rect(x, y, w, h);
@@ -1322,13 +1477,13 @@ function drawSegTile(ctx, px, py, cell, hsl, segId, seed, alpha, timeMs) {
     // Искры: заливка + одна белая искра, прыгающая по клетке.
     // Старая формула `h % (cell - 8)` при cell=9 давала `% 1` — искра всегда
     // в одной точке и мерцания не было вовсе. Считаем позицию долей стороны.
-    ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.92})`;
+    ctx.fillStyle = cosSegFill(hsl, a * 0.92);
     ctx.fillRect(x, y, w, h);
     const hsh = (((s * 73856093) >>> 0) ^ (((now / 90) | 0) * 19349663)) >>> 0;
     const sz = Math.max(1.5, cell * 0.18);
     const sx = x + (w - sz) * ((hsh & 1023) / 1023);
     const sy = y + (h - sz) * (((hsh >>> 10) & 1023) / 1023);
-    ctx.fillStyle = `rgba(255,255,255,${(0.90 * a).toFixed(3)})`;
+    ctx.fillStyle = cosWhiteFill(0.90 * a);
     ctx.fillRect(sx, sy, sz, sz);
     return;
   }
@@ -1336,15 +1491,15 @@ function drawSegTile(ctx, px, py, cell, hsl, segId, seed, alpha, timeMs) {
   if (id === 5) {
     // Схема: тёмная подложка, яркие дорожки крестом и бегущий вдоль хвоста
     // импульс — узел вспыхивает белым, волна идёт от головы к хвосту.
-    ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.34})`;
+    ctx.fillStyle = cosSegFill(hsl, a * 0.34);
     ctx.fillRect(x, y, w, h);
     const tw = Math.max(1, Math.round(cell * 0.24));
-    ctx.fillStyle = `rgba(${r},${g},${b},${a})`;
+    ctx.fillStyle = cosSegFill(hsl, a);
     ctx.fillRect(x, y + (h - tw) / 2, w, tw);
     ctx.fillRect(x + (w - tw) / 2, y, tw, h * 0.5);
     const ph = (((s - ((now / 90) | 0)) % 6) + 6) % 6;
     if (ph === 0) {
-      ctx.fillStyle = `rgba(255,255,255,${(0.92 * a).toFixed(3)})`;
+      ctx.fillStyle = cosWhiteFill(0.92 * a);
       const nr = Math.max(1.4, cell * 0.20);
       ctx.fillRect(x + w / 2 - nr, y + h / 2 - nr, nr * 2, nr * 2);
     }
@@ -1355,10 +1510,10 @@ function drawSegTile(ctx, px, py, cell, hsl, segId, seed, alpha, timeMs) {
     // Мозаика: четыре плитки со швом — шахматка читается даже на 7px.
     const hw = Math.max(1, (w - 1) / 2);
     const hh = Math.max(1, (h - 1) / 2);
-    ctx.fillStyle = `rgba(${r},${g},${b},${a})`;
+    ctx.fillStyle = cosSegFill(hsl, a);
     ctx.fillRect(x, y, hw, hh);
     ctx.fillRect(x + hw + 1, y + hh + 1, hw, hh);
-    ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.42})`;
+    ctx.fillStyle = cosSegFill(hsl, a * 0.42);
     ctx.fillRect(x + hw + 1, y, hw, hh);
     ctx.fillRect(x, y + hh + 1, hw, hh);
     return;
@@ -1367,16 +1522,16 @@ function drawSegTile(ctx, px, py, cell, hsl, segId, seed, alpha, timeMs) {
   if (id === 7) {
     // Бездна: тёмная дыра в яркой рамке — единственный «полый» след.
     const lw = Math.max(1.5, cell * 0.20);
-    ctx.fillStyle = `rgba(4,6,10,${(0.72 * a).toFixed(3)})`;
+    ctx.fillStyle = cosVoidFill(0.72 * a);
     ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = `rgba(${r},${g},${b},${a})`;
+    ctx.strokeStyle = cosSegFill(hsl, a);
     ctx.lineWidth = lw;
     ctx.strokeRect(x + lw / 2, y + lw / 2, Math.max(0.5, w - lw), Math.max(0.5, h - lw));
     return;
   }
 
   // 0 — Классика.
-  ctx.fillStyle = `rgba(${r},${g},${b},${a})`;
+  ctx.fillStyle = cosSegFill(hsl, a);
   ctx.fillRect(x, y, w, h);
 }
 
@@ -2882,6 +3037,13 @@ let you = 0;
 let tickMs = 100;
 let mapCells = 0;
 let roomId = null;
+
+/* K7 «Реконнект». roomId комнаты, в которую нужно вернуться после разрыва:
+   ставится в onClose, гасится после успешного onInit или явного выхода.
+   userLeftRoom отличает «игрок нажал Выйти» от «сеть отвалилась». */
+let rejoinRoomId = null;
+let rejoinPending = false;
+let userLeftRoom = false;
 let roomLimit = null;
 
 let matchSeq = 0;
@@ -3256,6 +3418,9 @@ function fxPresetDef() {
 }
 
 function fxShakeScale() {
+  // K7: единственная из пяти fx-функций, которая не уважала системный запрет
+  // анимаций. Тряска экрана — ровно то, что prefers-reduced-motion выключает.
+  if (prefersReducedMotion()) return 0;
   return Math.max(0, fxPresetDef().shake);
 }
 
@@ -4224,6 +4389,13 @@ minimapOverlayCloseBtn?.addEventListener('click', (e) => {
   hideMinimapOverlay();
 });
 
+// Тач-доступ к карте: на мобильном #minimapPanel скрыт, а клавиши M нет,
+// поэтому без этой кнопки игрок в игре про захват территории играет вслепую.
+document.getElementById('minimapMobileBtn')?.addEventListener('click', (e) => {
+  e?.preventDefault?.();
+  toggleMinimapOverlay();
+});
+
 minimapOverlayEl?.addEventListener('click', (e) => {
   if (e.target === minimapOverlayEl) {
     hideMinimapOverlay();
@@ -4247,6 +4419,16 @@ let viewMinX = 0;
 let viewMinY = 0;
 let viewMaxX = 0;
 let viewMaxY = 0;
+
+/* K1 «Туман войны». Сервер шлёт дельту сетки только для прямоугольника ROI
+   (сейчас 80×56 клеток) и присылает его границы в каждом снапшоте. Экран же на
+   портретном телефоне выше: cell считается по ширине (375/40 ≈ 9 px), и по
+   вертикали в кадр влезает ~79 строк. Разница (верхние и нижние ~11 строк)
+   никогда не обновлялась — там оставались нули или данные многолетней
+   давности, то есть игрок видел «свободную» землю ровно по курсу движения.
+   Теперь всё, что вне последнего полученного ROI, не рисуется из gridOwner и
+   закрашивается туманом: честное «не знаю» вместо уверенного вранья. */
+let lastRoi = null;
 
 let fps = 0;
 let fpsLast = performance.now();
@@ -4616,7 +4798,7 @@ function onError(d) {
     return;
   }
 
-  const msg =
+  const msgFor = () =>
     code === 'room_full'
       ? t('rooms.full')
       : code === 'room_not_found'
@@ -4632,12 +4814,25 @@ function onError(d) {
                 : code === 'cosmetics_unavailable'
                   ? t('cosmetics.err_unavailable')
         : t('common.error');
+  const msg = msgFor();
+
+  // K7: если не удалось вернуться в свою комнату после обрыва — комнаты уже
+  // нет или она заполнилась. Тогда честно отправляем в меню.
+  if (rejoinPending && (code === 'room_not_found' || code === 'room_full')) {
+    rejoinPending = false;
+    rejoinRoomId = null;
+    roomId = null;
+    updateRoomInfo();
+    showMenuOverlay();
+    addToast('⚠', msg, null);
+    return;
+  }
 
   // C1/C4: shop errors must land inside the overlay — toasts are hidden while it is open.
   if (code.startsWith('cosmetics_')) {
     cosmeticsOpClear();
     if (cosmeticsOpen) {
-      setCosmeticsStatus(msg, 'error');
+      setCosmeticsStatus(msgFor, 'error');
       syncCosmeticsUi();
       return;
     }
@@ -4872,6 +5067,28 @@ function ensureTopHudBountyEl() {
   return el;
 }
 
+/* K3: «Место N/M · Очки P» — единственная цифра, по которой игра на самом деле
+   ранжирует, и её в HUD не было вовсе (показывалась «Зона %», по которой не
+   ранжируют). Слот #topHudPlace ждём от вёрсточного агента; пока его нет —
+   создаём сами, слева в правой группе верхнего HUD. */
+function ensureTopHudPlaceEl() {
+  let el = document.getElementById('topHudPlace');
+  if (el) return el;
+  const host = topHudTimeEl?.parentElement || topHudKillsEl?.parentElement || null;
+  if (!host) return null;
+  try {
+    el = document.createElement('span');
+    el.id = 'topHudPlace';
+    // Пока вёрсточный агент не завёл собственный стиль, переиспользуем
+    // существующую «пилюлю» .topHudChip — иначе строка выглядит как сырой текст.
+    el.className = 'topHudPlace topHudChip';
+    host.insertBefore(el, host.firstChild);
+  } catch {
+    return null;
+  }
+  return el;
+}
+
 function renderTopHud() {
   if (!topHudEl) return;
   if (!started || !lastState) {
@@ -4903,6 +5120,26 @@ function renderTopHud() {
     topHudCellsEl.dataset.value = String(cells);
   }
   if (topHudPctEl) topHudPctEl.textContent = `${pct.toFixed(1)}%`;
+
+  // K3: место и очки — прямо в верхнем HUD, на каждом кадре HUD-а.
+  {
+    const placeEl = ensureTopHudPlaceEl();
+    if (placeEl) {
+      const ordered = computeTopSorted(lastState.players);
+      const idx = ordered.findIndex((p) => p.n === you);
+      const points = Number(me?.p) || 0;
+      const txt =
+        idx >= 0
+          ? `${t('hud.place_short')} ${idx + 1}/${ordered.length} · ${t('hud.points_short')} ${fmtInt(points)}`
+          : '';
+      placeEl.textContent = txt;
+      placeEl.classList.toggle('hidden', !txt);
+      placeEl.classList.toggle('isLeader', idx === 0);
+      try {
+        placeEl.title = `${t('death.place')} / ${t('death.points')}`;
+      } catch {}
+    }
+  }
 
   if (topHudKillsEl) {
     topHudKillsEl.textContent = obKills ? `⚔ ${youKills}` : '';
@@ -4998,6 +5235,14 @@ net = createNetModule({
     if (storedName) send('setName', { name: storedName });
     refreshRoomsBtn?.click();
     updateRoomsUi();
+    // K7: обрыв связи (блокировка экрана, Wi-Fi → LTE) выбрасывал игрока из
+    // матча в меню. Соединение восстанавливается само — возвращаемся в ту же
+    // комнату, а не заставляем искать её руками.
+    if (rejoinRoomId != null) {
+      const rid = rejoinRoomId;
+      rejoinPending = true;
+      send('join', { roomId: rid, mode: 'id' });
+    }
   },
   onClose: () => {
     createRoomPending = false;
@@ -5013,6 +5258,15 @@ net = createNetModule({
       refreshRoomsBtn.classList.remove('isLoading');
       refreshRoomsBtn.textContent = t('rooms.refresh');
     }
+    // K7: если игрок был в комнате и не уходил сам — запоминаем комнату и
+    // держим игровой экран, вместо того чтобы швырять в меню.
+    if (roomId != null && !userLeftRoom) {
+      rejoinRoomId = roomId;
+      addToast('📶', t('net.reconnecting'), null, t('net.rejoin_hint'), { key: 'net_reconnect' });
+      updateRoomsUi();
+      return;
+    }
+    rejoinRoomId = null;
     showMenuOverlay();
     updateRoomsUi();
   },
@@ -5100,10 +5354,24 @@ function showDeathOverlay() {
 
   // F16b: человеческое объяснение только на первых трёх смертях — дальше
   // ветеран читает сухую причину быстрее, чем абзац текста.
-  const deathsSeen = obDeathsSeen();
+  // K4: сколько смертей было НА МОМЕНТ показа — запоминаем, чтобы блок можно
+  // было пересобрать при смене языка с тем же составом строк.
+  deathReasonDeathsSeen = obDeathsSeen();
   obBumpDeaths();
+  renderDeathReason();
 
+  overlayManager.focusDefault('death');
+}
+
+/* K4: раньше подсказка в оверлее смерти собиралась только внутри
+   showDeathOverlay(), и setLang() её не трогал — в английском интерфейсе
+   висело «Выйди из своей зоны, обведи участок…». Теперь это отдельная функция,
+   которую зовёт и показ оверлея, и смена языка. */
+let deathReasonDeathsSeen = 99;
+
+function renderDeathReason() {
   if (deathReasonEl) {
+    const deathsSeen = deathReasonDeathsSeen;
     const reasonText = deathReasonText(lastDeathInfo);
     const hintText = deathsSeen < 3 ? deathReasonHint(lastDeathInfo) : '';
     // F5 «Реклейм»: механика нигде не объяснена, показываем её на первой смерти.
@@ -5134,8 +5402,6 @@ function showDeathOverlay() {
     }
     deathReasonEl.style.display = reasonText || hintText || reclaimText ? '' : 'none';
   }
-
-  overlayManager.focusDefault('death');
 }
 
 function syncOverlayUiState() {
@@ -5237,10 +5503,21 @@ const OB_STAGE_KEY = 'snakes_onboarding_stages_v1';
 
 // Пороги подобраны так, чтобы первый захват (15-20 с) успел случиться раньше
 // любой мета-системы: сначала правило игры, потом надстройки над ним.
+/* K5: ступени онбординга висели на секундомере ПЕРВОГО матча (105/135/165 с),
+   а `obUnlocked()` открывал всё сразу после двух сыгранных матчей. Новичок,
+   умерший дважды за первые две минуты (типичный сценарий), не видел ни одной
+   ступени и на второй жизни получал сразу весь HUD.
+   Теперь ступень привязана к событию — к моменту, когда механика впервые
+   становится осмысленной. Таймер остался только страховкой для игрока, который
+   за все эти секунды так ничего и не сделал. */
 const OB_STAGES = [
-  { id: 'bonus', at: 105000, icon: '🎁', title: 'onb.bonus_title', desc: 'onb.bonus_desc' },
-  { id: 'contract', at: 135000, icon: '📜', title: 'onb.contract_title', desc: 'onb.contract_desc' },
-  { id: 'bounty', at: 165000, icon: '🎯', title: 'onb.bounty_title', desc: 'onb.bounty_desc' }
+  // Захватил первый участок — теперь имеет смысл рассказать, что по дороге
+  // домой валяются бонусы.
+  { id: 'bonus', at: 105000, on: 'capture', icon: '🎁', title: 'onb.bonus_title', desc: 'onb.bonus_desc' },
+  // Первое убийство — игрок понял, что за действия платят; контракт как раз про это.
+  { id: 'contract', at: 135000, on: 'kill', icon: '📜', title: 'onb.contract_title', desc: 'onb.contract_desc' },
+  // Первая смерть — теперь ясно, что охотятся и на него; здесь и про баунти.
+  { id: 'bounty', at: 165000, on: 'death', icon: '🎯', title: 'onb.bounty_title', desc: 'onb.bounty_desc' }
 ];
 
 let obMatchStartAt = 0;
@@ -5317,7 +5594,29 @@ function obUnlocked(id) {
   if (!obFirstMatch()) return true;
   const st = OB_STAGES.find((s) => s.id === id);
   if (!st) return true;
+  // K5: ступень, уже показанная по событию, остаётся открытой — в том числе
+  // после смерти и респавна в том же матче.
+  if (obLoadStages().has(st.id)) return true;
   return obMatchElapsed() >= st.at;
+}
+
+// K5: показать ступень (один раз за всю жизнь профиля).
+function obShowStage(st) {
+  if (!st) return;
+  const set = obLoadStages();
+  if (set.has(st.id)) return;
+  obMarkStageShown(st.id);
+  addToast(st.icon, t(st.title), 'big', t(st.desc), { key: `onb_${st.id}`, prio: 'important' });
+}
+
+/* K5: событийный триггер. kind — 'capture' | 'kill' | 'death'.
+   Молчит у ветеранов (больше трёх входов в матч) — им объяснять нечего. */
+function obFireEvent(kind) {
+  if (obMatchesEntered() > 3) return;
+  for (const st of OB_STAGES) {
+    if (st.on !== kind) continue;
+    obShowStage(st);
+  }
 }
 
 // F15: стрелка домой живёт, пока игрок ни разу не замкнул петлю.
@@ -5335,11 +5634,9 @@ function obTick() {
   if (!started || !obMatchStartAt || obMatchesEntered() > 2) return;
   const el = obMatchElapsed();
   for (const st of OB_STAGES) {
+    // K5: таймер теперь только страховка — событие обычно срабатывает раньше.
     if (el < st.at) continue;
-    const set = obLoadStages();
-    if (set.has(st.id)) continue;
-    obMarkStageShown(st.id);
-    addToast(st.icon, t(st.title), 'big', t(st.desc), { key: `onb_${st.id}`, prio: 'important' });
+    obShowStage(st);
   }
 }
 
@@ -5643,7 +5940,15 @@ function resetClientForNewMatch() {
 
   matchStyleEarned = 0;
 
+  // K2: номера игроков в новом матче раздаются заново — кэши по номеру нужно
+  // обнулить, иначе враг ещё несколько минут рисуется цветом прошлого хозяина
+  // номера, а два игрока могут оказаться одного цвета.
+  colors.clear();
+  ownerFillStyleCache.clear();
   minimapOwnerRgbCache.clear();
+  botIds = new Set();
+  coolDeadlineByOwner.clear();
+  lastRoi = null;
 
   eventFeed.length = 0;
   lastEventsTick = 0;
@@ -5792,6 +6097,10 @@ function onMatchStart(d) {
 }
 
 function hideOverlays() {
+  // K7: флаг залипал — оверлей магазина скрыт, а cosmeticsOpen остаётся true,
+  // и каждое начисление Стиля запускало полную пересборку DOM скрытого
+  // магазина (замер 3.3 мс на начисление).
+  cosmeticsOpen = false;
   if (menuOverlay) menuOverlay.classList.add('hidden');
   if (settingsOverlay) settingsOverlay.classList.add('hidden');
   if (matchOverlay) matchOverlay.classList.add('hidden');
@@ -5855,6 +6164,10 @@ function hideMenuOverlay() {
 }
 
 leaveBtn?.addEventListener('click', () => {
+  // K7: явный выход — реконнект в эту комнату больше не нужен.
+  userLeftRoom = true;
+  rejoinRoomId = null;
+  rejoinPending = false;
   wsSend('leave', {});
   roomId = null;
   roomLimit = null;
@@ -6091,6 +6404,12 @@ function updateRoomsStats(rawRooms) {
   try {
     const onlineEl = document.getElementById('menuOnlineCount');
     if (onlineEl) onlineEl.textContent = formatNumber(totalHumans);
+    // K7: в поле `humans` сервер считает только людей, поэтому в пустой момент
+    // бейдж честно писал «0 сейчас играют» — при 13 живых ботах на карте это
+    // худшая из возможных первых цифр. Ботов в списке комнат нет, посчитать их
+    // клиент не может, поэтому нулевой бейдж просто прячем.
+    const badgeEl = document.getElementById('menuOnlineBadge');
+    if (badgeEl) badgeEl.classList.toggle('hidden', !(totalHumans > 0));
   } catch {}
 
   if (!roomsStatsEl) return;
@@ -6196,6 +6515,7 @@ playBtn?.addEventListener('click', () => {
     menuNameInput?.focus();
     return;
   }
+  userLeftRoom = false;
   trackEvent('quick_start');
   wsSend('join', { mode: 'auto' });
 });
@@ -6208,6 +6528,7 @@ joinRoomBtn?.addEventListener('click', () => {
     menuNameInput?.focus();
     return;
   }
+  userLeftRoom = false;
   trackEvent('join_room');
   wsSend('join', { roomId: selectedRoomId, mode: 'id' });
 });
@@ -6472,6 +6793,7 @@ function renderDeathStats() {
 }
 
 renderTeamHud._u = 0;
+renderTeamHud._at = 0;
 
 function updateLeaderboard() {
   if (!lastState) return;
@@ -7544,6 +7866,14 @@ function onInit(msg) {
   roomId = msg.room ?? null;
   roomLimit = msg.roomLimit ?? null;
 
+  // K7: вход в комнату состоялся — реконнект-цель обновлена, флаг «ушёл сам» снят.
+  rejoinRoomId = roomId;
+  userLeftRoom = false;
+  if (rejoinPending) {
+    rejoinPending = false;
+    addToast('✅', t('net.rejoined'), null, null, { key: 'net_reconnect' });
+  }
+
   matchSeq = Number(msg?.matchSeq) || 0;
   matchEndTick = Number(msg?.matchEnd) || 0;
   matchEnded = !!msg?.matchEnded;
@@ -7590,7 +7920,14 @@ function onInit(msg) {
 
   minimapGridOwner = new Uint16Array(N);
 
+  // K2: вход в комнату — новый набор номеров игроков. Всё, что кэшируется по
+  // номеру, обязано умереть здесь, иначе чужие цвета и «ботовость» приезжают
+  // из прошлой комнаты.
+  colors.clear();
+  ownerFillStyleCache.clear();
   minimapOwnerRgbCache.clear();
+  botIds = new Set();
+  lastRoi = null;
 
   gridFillAt = new Float32Array(N);
   coolSeenAt = new Float32Array(N);
@@ -7700,9 +8037,11 @@ function onCosmetics(msg) {
       boughtCat = '';
     }
     if (boughtCat) {
-      const txt = `${t('cosmetics.bought_prefix')}: ${cosmeticsLabel(boughtCat)} — ${cosmeticsVariantName(boughtCat, boughtId)}`;
-      setCosmeticsStatus(txt, 'success');
-      addToast('✨', txt, null);
+      const bc = boughtCat;
+      const bi = boughtId;
+      const boughtText = () => `${t('cosmetics.bought_prefix')}: ${cosmeticsLabel(bc)} — ${cosmeticsVariantName(bc, bi)}`;
+      setCosmeticsStatus(boughtText, 'success');
+      addToast('✨', boughtText(), null);
       playBeep(880, 150, 0.9);
     } else if (pending) {
       setCosmeticsStatus('', '');
@@ -7782,7 +8121,7 @@ function cosmeticsApplyDesiredServer() {
   apply('death', d.eqDeath, youCosInvDeath, youCosEqDeath, 'eqDeath');
 
   if (failed.length) {
-    setCosmeticsStatus(`${t('cosmetics.desired_not_applied')}: ${failed.join(', ')}`, 'error');
+    setCosmeticsStatus(() => `${t('cosmetics.desired_not_applied')}: ${failed.join(', ')}`, 'error');
   }
 
   // Keep only what could not be sent; drop everything that was applied or is impossible.
@@ -7792,7 +8131,30 @@ function cosmeticsApplyDesiredServer() {
 // C1: shop feedback goes into a dedicated in-overlay line (#cosmeticsStatus),
 // because body.overlayActive hides #eventToasts. Falls back to a toast if the
 // element is not present in the markup.
+/* K4: строка статуса магазина ставилась готовым текстом один раз, и переключение
+   языка её не трогало — в русском интерфейсе висело «Not confirmed by the
+   server yet…». Теперь источник строки хранится: если это функция, она
+   перевычисляется при каждой смене языка. */
+let cosmeticsStatusSrc = '';
+let cosmeticsStatusKind = '';
+
 function setCosmeticsStatus(text, kind) {
+  cosmeticsStatusSrc = typeof text === 'function' ? text : String(text || '');
+  cosmeticsStatusKind = String(kind || '');
+  renderCosmeticsStatus();
+}
+
+// Перерисовать статус из сохранённого источника (вызывается из setLang).
+function renderCosmeticsStatus() {
+  let text = cosmeticsStatusSrc;
+  if (typeof text === 'function') {
+    try {
+      text = text();
+    } catch {
+      text = '';
+    }
+  }
+  const kind = cosmeticsStatusKind;
   const msg = String(text || '').trim();
   const k = String(kind || '');
   let el = null;
@@ -7827,7 +8189,7 @@ function cosmeticsOpBegin(cat, id) {
     cosmeticsOpTimer = 0;
     if (!pendingCosmeticsOp) return;
     pendingCosmeticsOp = null;
-    setCosmeticsStatus(t('cosmetics.op_timeout'), 'error');
+    setCosmeticsStatus(() => t('cosmetics.op_timeout'), 'error');
     syncCosmeticsUi();
   }, 5000);
 }
@@ -7860,8 +8222,8 @@ function showCosmeticsOverlay() {
   const eq0 = cosmeticsEqForCat(cosmeticsCat);
   cosmeticsSelId = Number.isFinite(Number(eq0)) ? Number(eq0) : 0;
   setCosmeticsStatus('', '');
-  if (!wsIsConnected()) setCosmeticsStatus(t('cosmetics.no_connection'), 'info');
-  else if (cosmeticsSource !== 'server') setCosmeticsStatus(t('cosmetics.unconfirmed_hint'), 'info');
+  if (!wsIsConnected()) setCosmeticsStatus(() => t('cosmetics.no_connection'), 'info');
+  else if (cosmeticsSource !== 'server') setCosmeticsStatus(() => t('cosmetics.unconfirmed_hint'), 'info');
   syncOverlayUiState();
   syncCosmeticsUi();
   overlayManager.focusDefault('cosmetics');
@@ -8096,7 +8458,7 @@ function cosTitleEquip(id) {
   }
   cosmeticsCacheSave();
   if (!wsSend('titleEquip', { id: i })) {
-    setCosmeticsStatus(wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection'), 'info');
+    setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'info');
   }
   syncCosmeticsUi();
 }
@@ -8127,16 +8489,16 @@ function renderCosmeticsTitles() {
     // вместо превью-канваса, условие получения вместо цены, никакой валюты.
     const card = document.createElement('div');
     card.className = 'titleItem' + (cosmeticsSelId === id ? ' isSelected' : '');
+    // K7: тот же приём, что и для карточек предметов — выбор не пересобирает
+    // список и не роняет фокус.
+    card.dataset.cosid = String(id);
     card.classList.toggle('isUnlocked', unlocked);
     card.classList.toggle('isEquipped', worn);
     card.classList.toggle('isLocked', !unlocked);
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
     card.addEventListener('click', () => {
-      cosmeticsSelId = id;
-      cosmeticsHoverId = null;
-      cosmeticsHoverCat = null;
-      syncCosmeticsUi();
+      cosmeticsSelectItem(id);
     });
     card.addEventListener('mouseenter', () => cosmeticsSetHover('title', id));
     card.addEventListener('focus', () => cosmeticsSetHover('title', id));
@@ -8356,7 +8718,7 @@ function cosmeticsServerReady() {
 
 function cosmeticsBuyLocal(cat, id) {
   // C1/C2: no server -> explain why the purchase cannot go through, inside the overlay.
-  setCosmeticsStatus(wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection'), 'error');
+  setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'error');
 }
 
 function cosmeticsEquipLocal(cat, id) {
@@ -8537,6 +8899,13 @@ function syncCosmeticsUi() {
 
   if (cosmeticsItemsEl) {
     cosmeticsItemsEl.classList.remove('isTitles');
+    // «Где это видно» — свойство КАТЕГОРИИ, а не предмета: раньше одна и та же
+    // строка дублировалась на всех восьми карточках. Показываем один раз под
+    // вкладками; пустая строка скрывается стилями через :empty.
+    try {
+      const whereEl = document.getElementById('cosmeticsWhere');
+      if (whereEl) whereEl.textContent = t(`cosmetics.where_${cosmeticsCat}`) || '';
+    } catch {}
     const mask = cosmeticsMaskForCat(cosmeticsCat);
     const eq = cosmeticsEqForCat(cosmeticsCat);
     // C9: until the server confirms the inventory, everything we show is provisional.
@@ -8577,15 +8946,16 @@ function syncCosmeticsUi() {
 
       const card = document.createElement('div');
       card.className = 'cosmeticsItem' + (cosmeticsSelId === id ? ' isSelected' : '');
+      // K7: выбор предмета раньше пересобирал весь список, и фокус улетал в
+      // <body>. Теперь у карточки есть стабильный id, а выбор только
+      // переключает класс на уже существующих карточках.
+      card.dataset.cosid = String(id);
       card.classList.toggle('isOwned', owned);
       card.classList.toggle('isEquipped', owned && equipped);
       card.classList.toggle('isLocked', !owned && balance < price);
       card.tabIndex = 0;
       card.addEventListener('click', () => {
-        cosmeticsSelId = id;
-        cosmeticsHoverId = null;
-        cosmeticsHoverCat = null;
-        syncCosmeticsUi();
+        cosmeticsSelectItem(id);
       });
       // Превью следует за наведением и за фокусом с клавиатуры.
       const catNow = cosmeticsCat;
@@ -8596,8 +8966,7 @@ function syncCosmeticsUi() {
       card.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          cosmeticsSelId = id;
-          syncCosmeticsUi();
+          cosmeticsSelectItem(id);
         }
       });
 
@@ -8685,7 +9054,7 @@ function syncCosmeticsUi() {
           e.stopPropagation();
           if (pendingCosmeticsOp) return;
           if (!cosmeticsServerReady()) {
-            setCosmeticsStatus(wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection'), 'error');
+            setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'error');
             cosmeticsBuyLocal(cat, id);
             return;
           }
@@ -8693,11 +9062,11 @@ function syncCosmeticsUi() {
           buy.disabled = true;
           buy.classList.add('isLoading');
           cosmeticsOpBegin(cat, id);
-          setCosmeticsStatus(t('cosmetics.op_pending'), 'info');
+          setCosmeticsStatus(() => t('cosmetics.op_pending'), 'info');
           // C5: a silently dropped send must not leave a dead spinner.
           if (!wsSend('cosmeticsBuy', { cat, id })) {
             cosmeticsOpClear();
-            setCosmeticsStatus(t('cosmetics.no_connection'), 'error');
+            setCosmeticsStatus(() => t('cosmetics.no_connection'), 'error');
             syncCosmeticsUi();
           }
         });
@@ -8709,13 +9078,13 @@ function syncCosmeticsUi() {
         const doEquip = (wantId) => {
           if (!cosmeticsServerReady()) {
             cosmeticsEquipLocal(cat, wantId);
-            setCosmeticsStatus(wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection'), 'info');
+            setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'info');
             return;
           }
           // C5: react to a dropped send instead of pretending it worked.
           if (!wsSend('cosmeticsEquip', { cat, id: wantId })) {
             cosmeticsEquipLocal(cat, wantId);
-            setCosmeticsStatus(t('cosmetics.no_connection'), 'error');
+            setCosmeticsStatus(() => t('cosmetics.no_connection'), 'error');
           } else {
             cosmeticsSetDesiredEq(cat, wantId);
           }
@@ -8775,6 +9144,30 @@ function syncCosmeticsUi() {
 
 // Какой id показывать: наведённая карточка важнее выбранной, при уходе курсора
 // превью возвращается к выбранному варианту.
+/* K7: сменить выделение без пересборки списка. Возврат к полному
+   syncCosmeticsUi() — только если карточек с data-cosid в DOM нет (список ещё
+   не строился или отрисован пустой заглушкой). */
+function cosmeticsSelectItem(id) {
+  const next = Number(id) || 0;
+  cosmeticsHoverId = null;
+  cosmeticsHoverCat = null;
+  if (cosmeticsSelId === next) {
+    renderCosmeticsPreview();
+    return;
+  }
+  cosmeticsSelId = next;
+  let patched = false;
+  try {
+    const cards = cosmeticsItemsEl?.querySelectorAll?.('.cosmeticsItem[data-cosid], .titleItem[data-cosid]');
+    if (cards && cards.length) {
+      for (const c of cards) c.classList.toggle('isSelected', Number(c.dataset.cosid) === next);
+      patched = true;
+    }
+  } catch {}
+  if (patched) renderCosmeticsPreview();
+  else syncCosmeticsUi();
+}
+
 function cosmeticsPreviewId() {
   // У титулов свой потолок id (их 16, а не 8), поэтому клампим по категории.
   const clamp = cosmeticsCat === 'title'
@@ -9731,6 +10124,10 @@ function pushEventFeed(text, kind) {
   if (eventFeed.length > 64) eventFeed.length = 64;
 }
 
+// K7: флаг «киллфид нужно перерисовать» — выставляется в цикле разбора
+// событий, гасится один раз в конце пакета.
+let killfeedDirty = false;
+
 function renderKillfeed() {
   if (!killfeedEl) return;
   const now = performance.now();
@@ -9962,10 +10359,19 @@ function renderTeamHud() {
     <div class="metaSection">
       <div class="metaSectionTitle">${escapeHtml(t('right.team'))}</div>
       <div class="metaRow"><span class="metaLabel">${escapeHtml(t('death.place'))}:</span><span class="metaValue">${escapeHtml(place)}</span></div>
+      <div class="metaRow"><span class="metaLabel">${escapeHtml(t('death.points'))}:</span><span class="metaValue">${escapeHtml(String(Number(me?.p) || 0))}</span></div>
     </div>
     <div class="metaSection">
       <div class="metaSectionTitle">${escapeHtml(t('death.top'))}</div>
       <table class="teamTable">
+        <thead>
+          <tr>
+            <th class="num">#</th>
+            <th class="name">${escapeHtml(t('lb.player'))}</th>
+            <th class="num">${escapeHtml(t('death.points'))}</th>
+            <th class="num">${escapeHtml(t('match.zone'))}</th>
+          </tr>
+        </thead>
         <tbody>
           ${rows}
         </tbody>
@@ -10358,14 +10764,18 @@ function handleStateBinary(buf) {
           sfx.kill();
           fxFlashScreen([255, 96, 96], 0.75);
           comboBump();
+          // K5: первое убийство — открываем контракты.
+          obFireEvent('kill');
         }
         if (victim === you) {
           // J2: отклик на собственную смерть — не на чужую.
           addShakeClass('large', ...shakeDirFrom(ex, ey));
           fxFlashScreen([255, 80, 80], 1);
           comboBreak();
+          // K5: первая смерть — теперь понятно, зачем баунти и киллы.
+          obFireEvent('death');
         }
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10412,8 +10822,10 @@ function handleStateBinary(buf) {
           }
 
           celebrateFirstCapture(delta);
+          // K5: первый захват — момент, когда про бонусы уже есть смысл рассказать.
+          obFireEvent('capture');
         }
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10480,22 +10892,24 @@ function handleStateBinary(buf) {
         o += 2;
         const packed = dv.getUint32(o, true);
         o += 4;
-        const t = (packed >>> 16) & 0xffff;
+        // K7: раньше здесь объявлялась `const t`, перекрывавшая функцию перевода
+        // на весь блок. Переименовано в `type`.
+        const type = (packed >>> 16) & 0xffff;
         const prog = packed & 0xffff;
         if (pid === you) {
           if (slot === 1) {
-            youDaily1Type = t;
+            youDaily1Type = type;
             youDaily1Goal = goal;
             youDaily1Prog = prog;
           } else {
-            youDaily2Type = t;
+            youDaily2Type = type;
             youDaily2Goal = goal;
             youDaily2Prog = prog;
           }
           bumpMatchTabBadge();
           // J16: назначение ежедневки было беззвучным.
           sfx.dailyAssigned();
-          addToast('📅', `${infoPack().labels.daily}: ${dailyLabel(t)}`, 'big', infoDesc(infoPack().dailies, t, ''), { tab: 'match', key: `daily_assign_${t}`, prio: 'important' });
+          addToast('📅', `${infoPack().labels.daily}: ${dailyLabel(type)}`, 'big', infoDesc(infoPack().dailies, type, ''), { tab: 'match', key: `daily_assign_${type}`, prio: 'important' });
         }
         continue;
       }
@@ -10548,7 +10962,7 @@ function handleStateBinary(buf) {
             addToast('🏅', `${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'big', infoDesc(infoPack().achv, achv, ''), { tab: 'match', key: `achv_${achv}`, prio: 'jackpot' });
           }
         }
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10574,7 +10988,7 @@ function handleStateBinary(buf) {
           sfx.contractAssigned();
           addToast('📜', `${infoPack().labels.contract}: ${contractLabel(type) || type}`, 'big', infoDesc(infoPack().contracts, type, ''), { tab: 'match', key: `contract_assign_${type}`, prio: 'important' });
         }
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10608,7 +11022,7 @@ function handleStateBinary(buf) {
           sfx.contractDone();
           comboBump();
         }
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10651,7 +11065,7 @@ function handleStateBinary(buf) {
             }
           }
         }
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10672,7 +11086,7 @@ function handleStateBinary(buf) {
             addToast('😈', lang === 'en' ? 'Revenge!' : 'Месть!', 'big', lang === 'en' ? 'A kill in return for your death' : 'Убийство в ответ на вашу смерть', { tab: 'match', key: 'revenge', prio: 'jackpot' });
           }
         }
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10701,7 +11115,7 @@ function handleStateBinary(buf) {
             }
           }
         }
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10722,7 +11136,7 @@ function handleStateBinary(buf) {
         // если цель — ты, иначе 40%.
         sfx.bountyAssigned(target === you ? 1 : 0.4);
         if (target === you) fxFlashScreen([255, 140, 90], 0.7);
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10748,7 +11162,7 @@ function handleStateBinary(buf) {
         } else {
           sfx.bountyAssigned(0.4);
         }
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10800,7 +11214,7 @@ function handleStateBinary(buf) {
           addShakeClass('micro', ...shakeDirFrom(ex, ey));
           comboBump();
         }
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10829,7 +11243,7 @@ function handleStateBinary(buf) {
           }
           addShakeClass('medium', ...shakeDirFrom(ex, ey));
         }
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10847,7 +11261,7 @@ function handleStateBinary(buf) {
         if (mn) addToast('⚡', `${infoPack().labels.round}: ${mn}`, 'big', infoDesc(infoPack().mutators, type, ''), { key: `mutator_${type}`, prio: 'important' });
         // J2: глобальное событие — 40% громкости.
         sfx.mutatorOn(0.4);
-        renderKillfeed();
+        killfeedDirty = true;
         continue;
       }
 
@@ -10878,6 +11292,12 @@ function handleStateBinary(buf) {
       continue;
     }
 
+    // K7: renderKillfeed() звался 13 раз внутри цикла разбора событий (замер:
+    // 784 мутации DOM за 115 с). Один пакет — одна перерисовка в конце.
+    if (killfeedDirty) {
+      killfeedDirty = false;
+      renderKillfeed();
+    }
     renderMetaHud();
     renderTopHud();
     return;
@@ -10978,6 +11398,8 @@ function onRooms(rooms) {
   updateRoomsUi();
 }
 function onLeft() {
+  rejoinRoomId = null;
+  rejoinPending = false;
   roomId = null;
   roomLimit = null;
   updateRoomInfo();
@@ -11071,6 +11493,21 @@ function applyPackedDeltaGridWithAnim(buf, now) {
 function onState(s) {
   lastState = s;
 
+  // K1: прямоугольник ROI приходил и молча выбрасывался. Он — единственный
+  // источник правды о том, какая часть сетки вообще свежая.
+  const r = s?.roi;
+  if (r && Number(r.rw) > 0 && Number(r.rh) > 0) {
+    lastRoi = {
+      rx: Math.max(0, Number(r.rx) || 0),
+      ry: Math.max(0, Number(r.ry) || 0),
+      rw: Number(r.rw) || 0,
+      rh: Number(r.rh) || 0
+    };
+  } else if (s?.full) {
+    // Полный снапшот освежает всю карту — тумана в этом кадре нет.
+    lastRoi = null;
+  }
+
   const now = performance.now();
 
   // J15: якоря должны быть готовы до применения дельты сетки — именно в этом
@@ -11108,7 +11545,12 @@ function onState(s) {
   let nameChanged = false;
   for (const p of s.players) {
     currPlayers.set(p.n, p);
-    if (!colors.has(p.n)) {
+    // K2: номера игроков переиспользуются (аллокатор отдаёт первый свободный,
+    // боты пересоздаются при каждом входе/выходе человека). Кэш «номер → цвет»
+    // раньше писался один раз и никогда не обновлялся: номер 7 оставался
+    // красным даже после того, как его получил новый синий бот. Сравниваем
+    // цвет каждый кадр и сбрасываем зависимые кэши при расхождении.
+    if (colors.get(p.n) !== p.c) {
       colors.set(p.n, p.c);
       ownerFillStyleCache.delete(p.n);
       minimapOwnerRgbCache.delete(p.n);
@@ -11355,11 +11797,25 @@ function getInterpPlayer(id, t) {
 
 function draw() {
   requestAnimationFrame(draw);
-  if (matchOverlay && !matchOverlay.classList.contains('hidden')) {
+  const matchOverlayOpen = !!(matchOverlay && !matchOverlay.classList.contains('hidden'));
+  if (matchOverlayOpen) {
     updateMatchCountdown();
   }
 
   if (!lastState || !gridOwner || !trailOwner) return;
+
+  /* K7: под открытым оверлеем смерти/итогов поле продолжало рисоваться на
+     60 fps, причём сквозь backdrop-filter: blur(8px) — худший из возможных
+     сценариев для мобильного GPU: каждый кадр поля тянет за собой пересчёт
+     размытия всей области оверлея. Поле там статично и всё равно размыто,
+     поэтому обновляем его раз в 4 кадра. */
+  const deathOverlayOpen = !!(deathOverlay && !deathOverlay.classList.contains('hidden'));
+  if (matchOverlayOpen || deathOverlayOpen) {
+    draw._blurSkip = ((draw._blurSkip || 0) + 1) % 4;
+    if (draw._blurSkip !== 0) return;
+  } else {
+    draw._blurSkip = 0;
+  }
 
   const cw = window.innerWidth;
   const ch = window.innerHeight;
@@ -11432,6 +11888,14 @@ function draw() {
   viewMinY = minY;
   viewMaxX = maxX;
   viewMaxY = maxY;
+
+  /* K1: границы горячего цикла по сетке — пересечение экрана с последним
+     полученным ROI. За его пределами gridOwner/trailOwner заведомо устарели. */
+  const roi = lastRoi;
+  const gMinX = roi ? Math.max(minX, roi.rx) : minX;
+  const gMinY = roi ? Math.max(minY, roi.ry) : minY;
+  const gMaxX = roi ? Math.min(maxX, roi.rx + roi.rw - 1) : maxX;
+  const gMaxY = roi ? Math.min(maxY, roi.ry + roi.rh - 1) : maxY;
 
   {
     const bg = ctx.createLinearGradient(0, 0, cw, ch);
@@ -11529,8 +11993,8 @@ function draw() {
   const headCX = my ? my.ix : -1;
   const headCY = my ? my.iy : -1;
 
-  for (let y = minY; y <= maxY; y++) {
-    for (let x = minX; x <= maxX; x++) {
+  for (let y = gMinY; y <= gMaxY; y++) {
+    for (let x = gMinX; x <= gMaxX; x++) {
       const i = y * W + x;
       const rawOwner = gridOwner[i];
       // F5: старший бит = «клетка остывает, её ещё можно вернуть».
@@ -11691,6 +12155,31 @@ function draw() {
       ctx.lineTo(offsetX + (maxX + 1) * cell, py);
     }
     ctx.stroke();
+  }
+
+  /* K1: туман за пределами ROI. Рисуется после сетки и до рамки карты, чтобы
+     гасить и клетки, и линии, но не трогать игроков, эффекты и HUD. */
+  if (roi && (gMinX > minX || gMinY > minY || gMaxX < maxX || gMaxY < maxY)) {
+    const kx = offsetX + roi.rx * cell;
+    const ky = offsetY + roi.ry * cell;
+    const kw = roi.rw * cell;
+    const kh = roi.rh * cell;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, cw, ch);
+    ctx.rect(kx, ky, kw, kh);
+    ctx.fillStyle = 'rgba(6,8,12,0.82)';
+    ctx.fill('evenodd');
+    ctx.restore();
+
+    // Тонкая граница известной области: игрок должен понимать, что дальше не
+    // «пусто», а «неизвестно».
+    ctx.save();
+    ctx.strokeStyle = 'rgba(148,163,184,0.20)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 6]);
+    ctx.strokeRect(kx + 0.5, ky + 0.5, Math.max(1, kw - 1), Math.max(1, kh - 1));
+    ctx.restore();
   }
 
   {
@@ -12318,7 +12807,13 @@ function draw() {
   if (started) {
     renderMetaHud();
     renderTopHud();
-    if (rightSidebarEl?.dataset?.tab === 'team') {
+    /* K3: условие `rightSidebarEl.dataset.tab === 'team'` не выполнялось никогда
+       — в разметке жёстко прописан `data-tab="match"`, и его никто не менял, так
+       что живая таблица игроков не отрисовывалась ни разу за матч. Рендерим
+       безусловно, но не 60 раз в секунду: таблица собирается через innerHTML. */
+    const nowTeam = performance.now();
+    if (nowTeam - (renderTeamHud._at || 0) >= 400) {
+      renderTeamHud._at = nowTeam;
       renderTeamHud();
     }
   }

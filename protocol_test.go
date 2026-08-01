@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -2351,5 +2352,95 @@ func TestLoadWSAllowLocalhostEnv(t *testing.T) {
 		if !loadWSAllowLocalhost() {
 			t.Fatalf("WS_ALLOW_LOCALHOST=%q должен оставлять localhost включённым", v)
 		}
+	}
+}
+
+// TestCapturePointsRewardBigLoops фиксирует G20: очки за захват обязаны расти
+// быстрее корня из площади, иначе доход в единицу времени не зависит от размера
+// петли и «покусывание» становится оптимальной стратегией.
+func TestCapturePointsRewardBigLoops(t *testing.T) {
+	want := []struct {
+		cells int
+		pts   uint16
+	}{
+		{100, 11},
+		{400, 31},
+		{1600, 88},
+		{4000, 176},
+	}
+	for _, w := range want {
+		if got := capturePoints(w.cells, PhaseConflict, 0); got != w.pts {
+			t.Fatalf("capturePoints(%d) = %d, ожидалось %d", w.cells, got, w.pts)
+		}
+	}
+
+	// Ключевое свойство: очки на клетку периметра (то есть на тик риска)
+	// строго растут вместе с размером петли. Для квадрата стороной s периметр
+	// следа ~3s, s = sqrt(area).
+	prev := 0.0
+	for _, area := range []int{100, 400, 900, 1600, 2500, 4000} {
+		side := math.Sqrt(float64(area))
+		rate := float64(capturePoints(area, PhaseConflict, 0)) / (3 * side)
+		if rate <= prev {
+			t.Fatalf("доход в единицу времени не растёт: площадь=%d rate=%.4f, предыдущий=%.4f", area, rate, prev)
+		}
+		prev = rate
+	}
+
+	// Финал платит вдвое и поднимает потолок вдвое.
+	if got, base := capturePoints(4000, PhaseFinal, 0), capturePoints(4000, PhaseConflict, 0); got != base*2 {
+		t.Fatalf("финал: %d, ожидалось %d", got, base*2)
+	}
+	if got := capturePoints(1<<20, PhaseFinal, 0); got != 400 {
+		t.Fatalf("потолок в финале = %d, ожидалось 400", got)
+	}
+	if got := capturePoints(1<<20, PhaseConflict, 0); got != 200 {
+		t.Fatalf("потолок = %d, ожидалось 200", got)
+	}
+}
+
+// TestSpawnAvoidsOwnCoolingPatch фиксирует G22: pickSpawnCell считал остывающие
+// клетки свободными и максимизировал расстояние до чужих голов, поэтому
+// погибший игрок систематически возрождался посреди собственного остывающего
+// пятна и забирал его назад даром.
+func TestSpawnAvoidsOwnCoolingPatch(t *testing.T) {
+	r := newTestRoom()
+	r.rng = rand.New(rand.NewSource(7))
+	r.tick = 10
+
+	const num = uint16(5)
+	// Остывающее пятно 40x40 в левом верхнем углу игровой зоны.
+	x0, y0, x1, y1 := 12, 12, 51, 51
+	for y := y0; y <= y1; y++ {
+		for x := x0; x <= x1; x++ {
+			i := r.idx(x, y)
+			r.coolOwner[i] = num
+			r.coolUntil[i] = r.tick + ReclaimTicks
+		}
+	}
+
+	inside := 0
+	const tries = 40
+	for k := 0; k < tries; k++ {
+		x, y := r.pickSpawnCell(num)
+		if x >= x0 && x <= x1 && y >= y0 && y <= y1 {
+			inside++
+		}
+	}
+	if inside != 0 {
+		t.Fatalf("спавн попал внутрь своего остывающего пятна %d раз из %d", inside, tries)
+	}
+
+	// Контроль: без указания игрока (чужое пятно) штраф не действует, иначе
+	// тест доказывал бы просто «спавн не любит центр карты».
+	other := 0
+	for k := 0; k < tries; k++ {
+		x, y := r.pickSpawnCell(num + 1)
+		if x >= x0 && x <= x1 && y >= y0 && y <= y1 {
+			other++
+		}
+	}
+	if other == 0 {
+		t.Fatal("чужое остывающее пятно тоже стало запретным — штраф применяется не к тому игроку")
 	}
 }

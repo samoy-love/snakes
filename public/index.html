@@ -60,6 +60,19 @@
             </div>
           </div>
 
+          <div class="menuSideCol">
+          <!-- Правая колонка была пустой на ~409px: аккордеон комнат занимал
+               47px из 456. Превью экипированного облика закрывает пустоту и
+               отвечает на вопрос «как я буду выглядеть». Канвас наполняет
+               client.js (#menuSkinPreview). -->
+          <div class="menuPanel menuSkinPanel">
+            <div class="menuPanelTitle" data-i18n="menu.your_look">Ваш облик</div>
+            <div class="menuSkinPreviewWrap">
+              <canvas id="menuSkinPreview" width="420" height="260"></canvas>
+            </div>
+            <div class="overlayHint" data-i18n="menu.your_look_hint">Экипированное видят все игроки в матче</div>
+          </div>
+
           <!-- H6: панель комнат свёрнута по умолчанию — первый экран остаётся простым -->
           <details id="roomsDetails" class="menuPanel roomsDetails">
             <summary class="roomsDetailsSummary">
@@ -103,6 +116,7 @@
             <div id="roomsList" aria-live="polite"></div>
             </div>
           </details>
+          </div>
         </div>
 
         <!-- H19: переключатель языка живёт в футере карточки, а не поверх её угла -->
@@ -166,6 +180,10 @@
             <div id="cosmeticsEarnStyle" class="cosmeticsEarnStyle"></div>
 
             <div id="cosmeticsTabs" class="cosmeticsTabs" role="tablist" aria-label="Категории косметики" data-i18n-aria-label="cosmetics.categories_aria"></div>
+            <!-- «Где это видно» — свойство категории, а не предмета: одна строка
+                 в шапке вместо восьми одинаковых строк в карточках.
+                 Текст пишет client.js: t(`cosmetics.where_${cosmeticsCat}`). -->
+            <div id="cosmeticsWhere" class="cosmeticsWhere"></div>
             <div id="cosmeticsItems" class="cosmeticsItems"></div>
           </div>
 
@@ -364,6 +382,9 @@
           <div id="roomInfo"></div>
         </div>
         <div class="hudActions">
+          <!-- Тач-вход в миникарту: на мобильном #minimapPanel скрыт, а оверлей
+               открывался только клавишей M. Обработчик вешает client.js. -->
+          <button id="minimapMobileBtn" class="iconBtn hudMinimapBtn" type="button" aria-label="Открыть карту" data-i18n-aria-label="hud.minimap">🗺</button>
           <button id="lbBtn" class="iconBtn" type="button" aria-label="Показать лидеров" data-i18n-aria-label="hud.leaders">🏆</button>
           <button id="cosmeticsBtn" class="iconBtn" type="button" aria-label="Открыть косметику" data-i18n-aria-label="hud.cosmetics">🎨</button>
           <button id="settingsBtn" class="iconBtn" type="button" aria-label="Открыть настройки" data-i18n-aria-label="hud.settings">⚙</button>
@@ -391,7 +412,7 @@
         <div id="stats"></div>
       </div>
 
-      <div id="help" data-i18n="hud.help">Управление: стрелки / WASD • Чат: Enter</div>
+      <div id="help" data-i18n="hud.help">Управление: стрелки / WASD • Чат: Enter • Карта: M</div>
     </div>
 
     <div id="topHud" aria-hidden="true">
@@ -410,7 +431,10 @@
       <div class="topHudBar"><div id="topHudBarFill" class="topHudBarFill"></div></div>
     </div>
 
-    <div id="rightSidebar" data-tab="match">
+    <!-- data-tab убран: он был жёстко «match» и никогда не менялся, из-за чего
+         живая таблица игроков не рисовалась ни разу. Обе панели (Матч и
+         Команда) видны одновременно, переключать нечего. -->
+    <div id="rightSidebar">
       <div id="minimapPanel" class="minimapPanel">
         <canvas id="minimap"></canvas>
         <div id="minimapLegend" class="minimapLegend" aria-hidden="true"></div>

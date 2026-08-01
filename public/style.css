@@ -30,8 +30,8 @@ html, body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: var(--control-h);
+  height: var(--control-h);
   border-radius: 999px;
   border: 1px solid var(--border);
   background: rgba(0, 0, 0, 0.42);
@@ -100,7 +100,16 @@ html, body {
    --pad-lg: 12px;
    --shadow-float: 0 12px 28px rgba(0,0,0,0.35);
    --shadow-float-strong: 0 18px 60px rgba(0, 0, 0, 0.55);
-   --control-h: 40px;
+   /* Тач-минимум 44px как единая база всех контролов: раньше 40px давало
+      фактические 39–43px и ни одна цель, кроме «Играть», не проходила порог. */
+   --control-h: 44px;
+   /* Типографическая шкала оверлеев: ровно пять ступеней вместо 13 комбинаций.
+      display → lead → title → body → meta. Начертания: 800 / 700 / 600. */
+   --fs-display: clamp(30px, 6.4vw, 52px);
+   --fs-lead: clamp(22px, 3.2vw, 26px);
+   --fs-title: 18px;
+   --fs-body: 15px;
+   --fs-meta: 13px;
    --z-game: 0;
    --z-hud: 10;
    --z-minimap: 10;
@@ -166,7 +175,7 @@ html, body {
    --pad-lg: 12px;
    --shadow-float: 0 12px 28px rgba(0,0,0,0.35);
    --shadow-float-strong: 0 18px 60px rgba(0, 0, 0, 0.55);
-   --control-h: 40px;
+   --control-h: 44px;
    --z-game: 0;
    --z-hud: 10;
    --z-minimap: 10;
@@ -5679,6 +5688,408 @@ body.overlayActive .reclaimHint {
   .matchFirstSkinFill,
   .firstSkinProgressFill,
   .reclaimHintFill {
+    transition: none;
+  }
+}
+
+/* ==========================================================================
+   ВОЛНА 6. Правки по UX-ревью флоу нового игрока.
+   Блок идёт последним в файле: перекрывает ранние правила порядком, а не
+   !important. Всё, что относится к одному пункту отчёта, лежит рядом.
+   ========================================================================== */
+
+/* --- U1. Экран смерти: убран дубль, кнопки всегда в зоне видимости ---------
+   .deathYou (рисует client.js) дословно повторял три из пяти строк
+   .deathStatsGrid — Место, Очки, Киллы. Скрываем именно повторы; остаются
+   Зона и Контракт, которых в верхней сетке нет.
+   Порядок строк внутри .deathYou фиксирован разметкой client.js:
+   1 — заголовок, 2 Место, 3 Очки, 4 Зона, 5 Киллы, 6 Контракт (опц.).
+   Правильное решение — убрать дубли в самом client.js; до этого правило
+   ниже безопасно вырождается в no-op, если блока не будет вовсе. */
+.deathStats .deathYou > .deathYouRow:nth-child(2),
+.deathStats .deathYou > .deathYouRow:nth-child(3),
+.deathStats .deathYou > .deathYouRow:nth-child(5) {
+  display: none;
+}
+
+/* Ряд действий закреплён у нижней кромки карточки: карточка скроллится,
+   но «Играть снова» видна на любом экране без прокрутки. */
+.deathOverlay .toastBody {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.deathOverlay .toastRow {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: var(--pad-md) calc(var(--pad-lg) * -1) calc(var(--pad-lg) * -1);
+  padding: var(--pad-md) var(--pad-lg) var(--pad-lg);
+  border-top: 1px solid var(--border2);
+  background: rgba(9, 11, 15, 0.92);
+  backdrop-filter: blur(8px);
+}
+
+/* На низком экране топ-5 съедает высоту, ради которой всё и затевалось:
+   оставляем три строки — полный список есть в итогах матча. */
+@media (max-height: 720px) {
+  .deathStats .deathTop tbody tr:nth-child(n + 4) {
+    display: none;
+  }
+
+  .deathStats {
+    gap: var(--pad-sm);
+    margin: var(--pad-sm) 0;
+  }
+}
+
+/* --- U2. Правая панель: килфид не вываливается за экран и не лезет под чат -
+   Раньше #rightInfo получал max-height из «магической» константы 170px,
+   которая не совпадала с реальной высотой миникарты, а снизу вообще ничего
+   не резервировалось под #chat (z-index 14 — он всегда сверху).
+   Теперь сайдбар — флекс-колонка: миникарта занимает своё, #rightInfo
+   забирает ровно остаток и скроллится сам. */
+:root {
+  --right-top: calc(12px + var(--sa-top));
+  --right-bottom-reserve: 0px;
+}
+
+#rightSidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  max-height: calc(100dvh - var(--right-top) - 12px - var(--sa-bottom) - var(--right-bottom-reserve));
+}
+
+#rightSidebar > #minimapPanel {
+  flex: 0 0 auto;
+}
+
+/* display:grid здесь был причиной «scrollHeight == clientHeight»: строки с
+   auto-размером ужимались под заданную высоту контейнера, поэтому панели
+   обрезались по контенту, а прокрутки не появлялось. Флекс-колонка с
+   flex-shrink: 0 у детей честно переполняет контейнер — и он скроллится. */
+#rightInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding-bottom: 0;
+}
+
+#rightInfo > * {
+  flex: 0 0 auto;
+}
+
+@media (min-width: 721px) {
+  /* Свёрнутый чат — это только шапка (~56px) плюс отступ снизу. */
+  :root {
+    --right-bottom-reserve: 80px;
+  }
+
+  /* Развёрнутый чат: шапка + лог + форма ввода. */
+  body:has(#chat:not(.collapsed)) {
+    --right-bottom-reserve: 356px;
+  }
+
+  /* Один источник правды: чат не имеет права вырасти выше того, что под него
+     зарезервировано, иначе он снова накроет килфид (z-index 14 против 12). */
+  #chat {
+    max-height: min(
+      calc(100dvh - 24px - var(--sa-top) - var(--sa-bottom)),
+      calc(var(--right-bottom-reserve) - 12px)
+    );
+  }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --right-top: calc(12px + var(--sa-top) + 104px);
+  }
+}
+
+/* --- U4. Миникарта на телефоне: тач-кнопка вместо единственной клавиши M ---
+   Обработчик (открыть #minimapOverlay) вешает client.js на #minimapMobileBtn. */
+.hudMinimapBtn {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .hudMinimapBtn {
+    display: inline-flex;
+  }
+}
+
+/* --- U5. Типографика оверлеев: пять ступеней вместо тринадцати -------------
+   Правила ограничены оверлеями (.overlay .card, экраны смерти и матча) —
+   игровой HUD живёт по своим плотностям и в аудит не входил. */
+.overlay .card .overlayTitle {
+  font-size: var(--fs-display);
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+/* Продающее предложение было самым мелким и лёгким текстом на экране. */
+.overlay .card .overlaySub {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--muted);
+  opacity: 1;
+  margin-bottom: 16px;
+}
+
+.overlay .card .overlayKicker {
+  font-size: var(--fs-meta);
+  font-weight: 700;
+}
+
+.overlay .card .menuPanelTitle {
+  font-size: var(--fs-title);
+  font-weight: 700;
+}
+
+/* Промежуточная ступень в провале между заголовком 52px и телом. */
+#menuOverlay .menuPanelPrimary > .menuPanelTitle {
+  font-size: var(--fs-lead);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.2px;
+  margin-bottom: 6px;
+}
+
+.overlay .card .menuOnline {
+  font-size: var(--fs-meta);
+}
+
+.overlay .card .menuOnlineCount {
+  font-size: var(--fs-title);
+  font-weight: 800;
+}
+
+.overlay .card .menuOnlineLabel {
+  font-weight: 600;
+}
+
+.overlay .card .menuHowToStep {
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.overlay .card .menuHowToStep::before {
+  font-size: var(--fs-meta);
+  font-weight: 700;
+}
+
+.overlay .card .menuHowToIcon {
+  font-size: var(--fs-title);
+}
+
+.overlay .card .fieldLabel,
+.overlay .card .roomRowTitle,
+.overlay .card .roomsEmptyTitle,
+.overlay .card .cosmeticsItemTitle,
+.overlay .card .menuOnboardingTitle {
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.overlay .card .overlayHint,
+.overlay .card .fieldHint,
+.overlay .card .fieldError,
+.overlay .card .roomsDetailsHint,
+.overlay .card .roomsStats,
+.overlay .card .roomRowMeta,
+.overlay .card .roomRowSub,
+.overlay .card .roomsEmptyDesc,
+.overlay .card .menuOnboardingDesc,
+.overlay .card .cosmeticsItemSub,
+.overlay .card .cosmeticsItemWhere,
+.overlay .card .cosmeticsPrice,
+.overlay .card .cosmeticsStatus,
+.overlay .card .tierBadge {
+  font-size: var(--fs-meta);
+  font-weight: 600;
+}
+
+/* Вес 800–900 на 11–13px по тёмному фону читается как замыленное пятно:
+   акцент оставляем только капителям-разделителям. */
+.overlay .card .settingsGroupTitle,
+.overlay .card .tierDivider {
+  font-size: var(--fs-meta);
+  font-weight: 700;
+}
+
+.overlay .card .cosmeticsPrice .num {
+  font-weight: 700;
+}
+
+/* Кнопки и поля не наследовали шрифт: наружу протекал дефолт 13.3333px. */
+.overlay .card button,
+.overlay .card input,
+.overlay .card select,
+.overlay .card textarea,
+.deathOverlay button,
+.deathOverlay input,
+.matchOverlay button {
+  font-family: inherit;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.overlay .card .btnPlay {
+  font-size: var(--fs-title);
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.overlay .card .iconBtn {
+  font-size: var(--fs-title);
+}
+
+.overlay .card .cosmeticsStyleTitle .iconBtn {
+  font-size: var(--fs-meta);
+}
+
+/* iOS зумит форму при кегле меньше 16px — на телефоне поля крупнее шкалы. */
+@media (max-width: 720px) {
+  .overlay .card input,
+  .overlay .card select,
+  .overlay .card textarea {
+    font-size: 16px;
+  }
+}
+
+/* --- U6. Композиция меню: правая колонка перестала быть пустотой -----------
+   Было: левая панель 478×456, правая (аккордеон «Комнаты») 364×47 — около
+   409px пустоты, ~30% площади карточки. Схлопывание в одну колонку решало
+   перекос, но делало карточку выше вьюпорта 768px и включало прокрутку на
+   самом ноутбучном разрешении. Поэтому колонки остались две, а правая
+   заполнена превью экипированного облика — канвас рисует client.js. */
+.menuSideCol {
+  display: grid;
+  gap: var(--pad-lg);
+  align-content: start;
+  min-width: 0;
+}
+
+.menuSkinPreviewWrap {
+  margin-top: var(--pad-md);
+  border-radius: var(--r-tab);
+  border: 1px solid var(--border2);
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.06), rgba(0, 0, 0, 0.24));
+  overflow: hidden;
+}
+
+#menuSkinPreview {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 42 / 26;
+}
+
+@media (max-width: 720px) {
+  /* На телефоне колонка одна, а превью — лишние 200px до кнопки «Играть». */
+  .menuSkinPanel {
+    display: none;
+  }
+}
+
+/* --- U7. Тач-цели ---------------------------------------------------------
+   База поднята до 44px через --control-h. Здесь — то, что мимо неё. */
+.overlay .card .roomsSearchWrap input {
+  padding-right: 52px;
+}
+
+#emojiPanelTop {
+  width: var(--control-h);
+  height: var(--control-h);
+}
+
+/* --- U8. Магазин: тройное дублирование информации в карточке ---------------
+   Категорийное «где это видно» стояло в каждой из восьми карточек подряд.
+   Место такой строки — один раз в шапке категории (#cosmeticsWhere).
+   Во вкладке титулов тот же элемент несёт условие получения — предметное,
+   а не категорийное, — поэтому там он остаётся. */
+.cosmeticsItems:not(.isTitles) .cosmeticsItem .cosmeticsItemWhere {
+  display: none;
+}
+
+/* Редкость названа разделителем группы («ОБЫЧНЫЙ») — бейдж в заголовке лишний. */
+.cosmeticsItemTitle .tierBadge {
+  display: none;
+}
+
+/* «До покупки N стиль» дублирует и ценник, и подпись кнопки покупки. */
+.cosmeticsItemSub.isBlocked {
+  display: none;
+}
+
+.cosmeticsWhere {
+  margin-top: 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border2);
+  background: rgba(0, 0, 0, 0.20);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.cosmeticsWhere:empty {
+  display: none;
+}
+
+/* Одна колонка 434px давала около 970px прокрутки на категорию при свободном
+   правом крае. На широком экране лента идёт в две колонки. */
+#cosmeticsOverlay .card {
+  width: min(1120px, calc(100vw - 24px));
+}
+
+@media (min-width: 1180px) {
+  .cosmeticsItems {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
+    max-height: min(56dvh, 520px);
+  }
+
+  .cosmeticsItems > .tierDivider,
+  .cosmeticsItems > .cosmeticsCatSummary,
+  .cosmeticsItems > .roomsEmpty {
+    grid-column: 1 / -1;
+  }
+
+  /* В колонке ~273px строка «превью + название + цена + кнопка» ужимает
+     название до 58px и рвёт его по буквам: раскладываем в два ряда, как на
+     узком экране. */
+  .cosmeticsItems .cosmeticsItem {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .cosmeticsItems .cosmeticsItemLeft {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .cosmeticsItems .cosmeticsItemRight {
+    flex: 1 0 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Новых анимаций волна не добавляет; закрепляем, что липкий ряд действий
+     экрана смерти не получает плавных переходов. */
+  .deathOverlay .toastRow {
     transition: none;
   }
 }

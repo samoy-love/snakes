@@ -224,7 +224,13 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		"cosmeticsPrices": cosmeticsPricesPayload(),
 		"titles":          titlesPayload(),
 		"reclaimTicks":    ReclaimTicks,
-		"version":         Version,
+		// G24: the phase boundaries are static, so the client can render the
+		// arc bar before it ever joins a room.
+		"matchTicks": MatchDurationTicks,
+		"phaseTicks": []uint32{PhaseExpansionEndTick, PhaseConflictEndTick},
+		"phaseNames": []string{"expansion", "conflict", "final"},
+		"finalMult":  2,
+		"version":    Version,
 	})
 	client.sendRooms(r.Context(), hub)
 
@@ -378,7 +384,12 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			if !pl.alive {
 				rm.respawnPlayer(pl)
 			}
-			known := make([]ChatMessage, 0, len(rm.knownNames))
+			type knownNameItem struct {
+				N    uint16
+				Nm   string
+				NmEn string
+			}
+			known := make([]knownNameItem, 0, len(rm.knownNames))
 			for num, kn := range rm.knownNames {
 				nm := kn.Name
 				if nm == "" {
@@ -387,13 +398,18 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				if !kn.Online {
 					nm = nm + " (отключен)"
 				}
-				known = append(known, ChatMessage{N: num, Text: nm})
+				// G25: bots carry an English twin; the client picks by locale.
+				known = append(known, knownNameItem{N: num, Nm: nm, NmEn: rm.displayNameEnLocked(num)})
 			}
 			rm.mu.Unlock()
 
 			sort.Slice(known, func(i, j int) bool { return known[i].N < known[j].N })
 			for _, it := range known {
-				client.sendJSON(r.Context(), "nameUpdate", map[string]any{"n": it.N, "nm": it.Text})
+				payload := map[string]any{"n": it.N, "nm": it.Nm}
+				if it.NmEn != "" {
+					payload["nmEn"] = it.NmEn
+				}
+				client.sendJSON(r.Context(), "nameUpdate", payload)
 			}
 		case "matchContinue":
 			if !client.lastMatchContinueAt.IsZero() && time.Since(client.lastMatchContinueAt) < 600*time.Millisecond {
@@ -415,10 +431,13 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			}
 			rm.resetMatchLocked()
 			payload := map[string]any{
-				"tick":    rm.tick,
-				"seq":     rm.matchSeq,
-				"endTick": rm.matchEndTick,
+				"tick":       rm.tick,
+				"seq":        rm.matchSeq,
+				"endTick":    rm.matchEndTick,
+				"phase":      rm.matchPhase(),
+				"phaseUntil": rm.phaseUntilTick(),
 			}
+			rm.phaseSent = rm.matchPhase()
 			rm.mu.Unlock()
 			rm.broadcastJSON(context.Background(), "matchStart", payload)
 		case "cosmeticsBuy":

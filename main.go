@@ -733,16 +733,23 @@ const (
 	StyleTop5        = 7
 	StyleCapture     = 8
 	StyleAchievement = 9
+	// StyleSurvive: G23 consolation for finishing the match alive.
+	StyleSurvive = 10
 )
 
 // StyleReasonCount sizes the per-match breakdown arrays (matchResult.Sb): the
 // highest reason code plus one.
-const StyleReasonCount = 10
+const StyleReasonCount = 11
 
 // Per-match Style budgets and rates.
 const (
-	StyleCaptureCellsPer = 40  // cells captured per 1 Style
-	StyleCaptureMatchCap = 25  // E2: max Style from captures per match
+	// G20: at 40 cells per Style with a 25 cap the ceiling was reached after
+	// 1000 new cells, i.e. in the first 60-90 seconds, after which the core
+	// mechanic of the game paid literally nothing for the remaining 3.5-4
+	// minutes. 70/70 keeps roughly the same total for a good match but spreads
+	// it over the whole match.
+	StyleCaptureCellsPer = 70  // cells captured per 1 Style
+	StyleCaptureMatchCap = 70  // E2: max Style from captures per match
 	StyleKillMatchCap    = 100 // E4: max Style from kills (incl. streaks) per match
 
 	StyleKillHuman   = 14
@@ -758,9 +765,19 @@ const (
 	PointsBountySurvive = 20
 
 	// E3: placement rewards use the absolute place among every participant.
+	// G23: a room holds ~15 participants and every one of the 14 bots really
+	// does outrank a beginner, so paying only the top 5 meant a new player saw
+	// a flat 0 for the single most visible line of the summary, every match.
+	// The tail now reaches 8th place and everyone who is still standing at the
+	// final tick gets a consolation payment.
 	StylePlace1  = 40
 	StylePlace23 = 25
 	StylePlace45 = 15
+	StylePlace6  = 10
+	StylePlace7  = 8
+	StylePlace8  = 6
+	// StyleSurviveReward: paid to every human alive at the final tick.
+	StyleSurviveReward = 5
 
 	// E13: soft daily income ceiling; everything past it pays 40%.
 	// Raised 600 -> 800 after the "terr" and
@@ -768,6 +785,10 @@ const (
 	// at 600 the average player needed ~24 days to close the shop instead of
 	// the intended 2-3 weeks. Reclaim itself does not inflate income — the
 	// reclaim path bypasses the capture Style award, which is capped anyway.
+	// G20/G23 raised the capture budget 25 -> 70 and extended placement pay to
+	// 8th place plus a 5 survival consolation, which adds ~40 Style to a good
+	// match. The soft cap absorbs most of it: a measured average session still
+	// lands near 1000 Style/day, i.e. ~15 days for the 14865 full collection.
 	StyleDaySoftCap    = 800
 	StyleOverCapNumer  = 2
 	StyleOverCapDenom  = 5
@@ -922,13 +943,17 @@ const (
 // BotCount. They are scaled with largest-remainder for smaller populations.
 var (
 	tierMix = [TierCount]int{5, 6, 3}
-	archMix = [ArchCount]int{4, 4, 3, 3}
+	// G21: only the Aggressor archetype could actually give chase (the Farmer
+	// needed dist<=2, the Coward dist<=6, the Territorial its own land), so
+	// 4 of 14 bots carried all the pressure. One Farmer slot moves over.
+	archMix = [ArchCount]int{3, 5, 3, 3}
 )
 
 const (
-	// Hunter caps per victim (G2). Humans get the tighter one: being chased by
-	// three bots at once is unreadable.
-	HuntCapHuman = 2
+	// Hunter caps per victim (G2). G21: the human cap used to be tighter than
+	// the bot one, which made the human the safest creature on the map
+	// (~0.5 deaths per match against ~2.4 for a bot). They are level now.
+	HuntCapHuman = 3
 	HuntCapBot   = 3
 
 	// G14: windup before a hunt actually starts. The bot drives straight at
@@ -938,7 +963,9 @@ const (
 
 	// G17: tryHunt is the most expensive part of a bot tick, so it only runs
 	// every few ticks and only over a bounded number of BFS probes.
-	BotHuntScanEvery = 5
+	// G21: 5 ticks (half a second) let a player walk straight past a bot
+	// between two scans; 3 keeps the cost bounded and the reaction visible.
+	BotHuntScanEvery = 3
 	BotHuntMaxProbes = 40
 )
 
@@ -1082,6 +1109,9 @@ type Room struct {
 	matchPointsBy    map[uint16][8]uint16
 	matchContractsBy map[uint16][4]uint16
 	matchEndSentSeq  uint32
+	// G24: last match phase announced to clients. 0xff means "nothing sent
+	// yet for this match", which is distinct from PhaseExpansion (0).
+	phaseSent uint8
 
 	nextPlayerNum uint16
 	humanCount    int
@@ -1114,8 +1144,10 @@ type Room struct {
 }
 
 type matchResult struct {
-	N     uint16 `json:"n"`
-	Nm    string `json:"nm"`
+	N  uint16 `json:"n"`
+	Nm string `json:"nm"`
+	// NmEn is the English twin of a bot nickname (G25); omitted for humans.
+	NmEn  string `json:"nmEn,omitempty"`
 	Bot   bool   `json:"bot"`
 	P     uint16 `json:"p"`
 	Cells uint16 `json:"cells"`
@@ -1139,7 +1171,10 @@ type matchResult struct {
 }
 
 type KnownName struct {
-	Name   string
+	Name string
+	// NameEn is the English-language twin of a bot nickname (G25). Empty for
+	// humans, whose name is whatever they typed and is never translated.
+	NameEn string
 	Online bool
 }
 
@@ -1147,7 +1182,9 @@ type Player struct {
 	num uint16
 
 	name string
-	bot  bool
+	// nameEn: G25, the English nickname of a bot. Empty for humans.
+	nameEn string
+	bot    bool
 
 	x int
 	y int
@@ -2498,13 +2535,18 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	rm.setKnownNameLocked(pnum, name, true)
 	rm.sendDailyStateToPlayer(pl)
 
-	known := make([]ChatMessage, 0, len(rm.knownNames))
+	type knownNameItem struct {
+		N    uint16
+		Nm   string
+		NmEn string
+	}
+	known := make([]knownNameItem, 0, len(rm.knownNames))
 	for num := range rm.knownNames {
 		nm := rm.displayNameLocked(num)
 		if nm == "" {
 			continue
 		}
-		known = append(known, ChatMessage{N: num, Text: nm})
+		known = append(known, knownNameItem{N: num, Nm: nm, NmEn: rm.displayNameEnLocked(num)})
 	}
 	rm.mu.Unlock()
 
@@ -2521,6 +2563,10 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	matchEndTick := rm.matchEndTick
 	matchEnded := rm.matchEnded
 	matchResetAt := rm.matchResetAt
+	// G24: the match arc was invisible to the player even though the server
+	// has always changed the rules by phase.
+	matchPhaseNow := rm.matchPhase()
+	matchPhaseUntil := rm.phaseUntilTick()
 	var matchResults []matchResult
 	if matchEnded {
 		matchResults = rm.buildMatchResultsLocked()
@@ -2540,6 +2586,8 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 		"matchEnd":   matchEndTick,
 		"matchEnded": matchEnded,
 		"matchReset": matchResetAt,
+		"phase":      matchPhaseNow,
+		"phaseUntil": matchPhaseUntil,
 	}
 	initPayload["cosmetics"] = cosmeticsStatePayload(pl)
 	if matchEnded {
@@ -2556,7 +2604,11 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	rm.mu.Unlock()
 
 	for _, it := range known {
-		c.sendJSON(ctx, "nameUpdate", map[string]any{"n": it.N, "nm": it.Text})
+		payload := map[string]any{"n": it.N, "nm": it.Nm}
+		if it.NmEn != "" {
+			payload["nmEn"] = it.NmEn
+		}
+		c.sendJSON(ctx, "nameUpdate", payload)
 	}
 	if len(chatHistory) > 0 {
 		c.sendJSON(ctx, "chatInit", chatHistory)
@@ -2880,6 +2932,7 @@ func newRoom(hub *Hub, id int, limit int) *Room {
 		matchPointsBy:    make(map[uint16][8]uint16),
 		matchContractsBy: make(map[uint16][4]uint16),
 		matchEndSentSeq:  0,
+		phaseSent:        0xff,
 		metaDirty:        true,
 		powerUps:         make([]PowerUp, 0, 8),
 		nextPowerUpID:    1,
@@ -2903,8 +2956,10 @@ func (r *Room) buildMatchResultsLocked() []matchResult {
 			continue
 		}
 		name := ""
+		nameEn := ""
 		if p.bot {
 			name = p.name
+			nameEn = p.nameEn
 		} else {
 			name = r.displayNameLocked(num)
 		}
@@ -2927,6 +2982,7 @@ func (r *Room) buildMatchResultsLocked() []matchResult {
 		res = append(res, matchResult{
 			N:     num,
 			Nm:    name,
+			NmEn:  nameEn,
 			Bot:   p.bot,
 			P:     r.points[num],
 			Cells: r.scores[num],
@@ -3010,6 +3066,7 @@ func (r *Room) resetMatchLocked() {
 	r.matchEnded = false
 	r.matchResetAt = 0
 	r.matchEndSentSeq = 0
+	r.phaseSent = 0xff
 	for k := range r.matchKills {
 		delete(r.matchKills, k)
 	}
@@ -3124,6 +3181,39 @@ func (r *Room) matchElapsed() uint32 {
 	return el
 }
 
+// capturePoints is the score paid for a capture that added `delta` cells.
+//
+// G20: the previous curve was 1.6*sqrt(delta). For a square of side s the
+// trail costs ~3s ticks and the payout was 1.6*s, i.e. points per second were
+// a constant independent of loop size — a huge loop paid the same rate as a
+// tiny one while spending four times as long under the knife, so the optimal
+// strategy was nibbling and skill had nothing to express. An exponent above
+// 0.5 makes the rate grow with the loop: 11 points for 100 cells, 31 for 400,
+// 88 for 1600, 176 for 4000.
+func capturePoints(delta int, phase uint8, mutator uint8) uint16 {
+	if delta <= 0 {
+		return 0
+	}
+	ptsF := 0.35 * math.Pow(float64(delta), 0.75)
+	maxPts := 200.0
+	if phase == PhaseFinal {
+		// F4: the endgame pays double for territory.
+		ptsF *= 2
+		maxPts *= 2
+	}
+	if mutator == MutatorDoubleCapture {
+		ptsF *= 1.25
+		maxPts *= 1.3
+	}
+	if ptsF > maxPts {
+		ptsF = maxPts
+	}
+	if ptsF < 3 {
+		ptsF = 3
+	}
+	return uint16(ptsF)
+}
+
 // matchPhase derives the match arc phase from the elapsed match time (F4).
 func (r *Room) matchPhase() uint8 {
 	el := r.matchElapsed()
@@ -3134,6 +3224,31 @@ func (r *Room) matchPhase() uint8 {
 		return PhaseConflict
 	default:
 		return PhaseFinal
+	}
+}
+
+// phaseUntilTick is the absolute tick at which the current phase ends. For the
+// final phase that is the end of the match itself (G24).
+func (r *Room) phaseUntilTick() uint32 {
+	switch r.matchPhase() {
+	case PhaseExpansion:
+		return r.matchStartTick + PhaseExpansionEndTick
+	case PhaseConflict:
+		return r.matchStartTick + PhaseConflictEndTick
+	default:
+		return r.matchEndTick
+	}
+}
+
+// matchPhasePayload is the shared JSON shape for the phase indicator (G24).
+// It is embedded in "init" / "matchStart" and broadcast on its own as
+// "matchPhase" whenever the phase changes.
+func (r *Room) matchPhasePayload() map[string]any {
+	return map[string]any{
+		"phase": r.matchPhase(),
+		"until": r.phaseUntilTick(),
+		"tick":  r.tick,
+		"seq":   r.matchSeq,
 	}
 }
 
@@ -3857,6 +3972,121 @@ var botNickSuffixRu = []string{
 	"уля",
 }
 
+// G25: the English UI showed an all-Cyrillic leaderboard, which reads as a
+// broken localisation rather than as flavour. Every bot now carries a second,
+// English nickname of the same silly register; the client picks by its locale.
+var botNickAdjEn = []string{
+	"Angry",
+	"Sweet",
+	"Sneaky",
+	"Quiet",
+	"Loud",
+	"Snappy",
+	"Speedy",
+	"Sleepy",
+	"Cheeky",
+	"Brave",
+	"Cringe",
+	"Toxic",
+	"Plushy",
+	"Hungry",
+	"Salty",
+	"Chunky",
+}
+
+var botNickNounEn = []string{
+	"Dumpling",
+	"Kebab",
+	"Kitty",
+	"Beaver",
+	"Raccoon",
+	"Goose",
+	"Boar",
+	"Carp",
+	"Bumble",
+	"Grandpa",
+	"Schooler",
+	"Tanker",
+	"Ninja",
+	"Donut",
+	"Pickle",
+	"Sausage",
+}
+
+var botNickDumbEn = []string{
+	"Kvass",
+	"Compote",
+	"Noodle",
+	"Slipper",
+	"Boot",
+	"Hat",
+	"Muffin",
+	"Pancake",
+	"Kefir",
+	"Squish",
+	"Pfft",
+	"Nom",
+	"Hamster",
+	"Seal",
+	"Owlet",
+	"Bun",
+	"Herring",
+	"Sardine",
+	"Crabby",
+	"Lemon",
+	"Bellybtn",
+	"Cream",
+	"Buckwheat",
+	"Cutlet",
+}
+
+var botNickFixedEn = []string{
+	"Wreckerator",
+	"KittyInShock",
+	"GrandpaSwag",
+	"DumplingFate",
+	"KebabDaddy",
+	"GooseUltima",
+	"RaccoonOops",
+	"BeaverEng",
+	"CringeMachine",
+	"QuietRiot",
+	"AngryCompote",
+	"SweetBoar",
+}
+
+var botNickSuffixEn = []string{
+	"ster",
+	"inator",
+	"ie",
+	"zz",
+	"oid",
+}
+
+// botNamePools groups one language's word lists so the generator can be run
+// twice over the same rng without duplicating its logic.
+type botNamePools struct {
+	adj       []string
+	noun      []string
+	dumb      []string
+	fixed     []string
+	suffix    []string
+	fallback  string
+	fallback2 string
+}
+
+var botPoolsRu = botNamePools{
+	adj: botNickAdjRu, noun: botNickNounRu, dumb: botNickDumbRu,
+	fixed: botNickFixedRu, suffix: botNickSuffixRu,
+	fallback: "Нагибатор", fallback2: "Котик",
+}
+
+var botPoolsEn = botNamePools{
+	adj: botNickAdjEn, noun: botNickNounEn, dumb: botNickDumbEn,
+	fixed: botNickFixedEn, suffix: botNickSuffixEn,
+	fallback: "Wreckerator", fallback2: "Kitty",
+}
+
 var botNickDecor = []string{
 	"☆",
 	"✦",
@@ -3903,6 +4133,10 @@ func botNameStartKey(nm string) string {
 	check(botNickAdjRu)
 	check(botNickNounRu)
 	check(botNickDumbRu)
+	check(botNickFixedEn)
+	check(botNickAdjEn)
+	check(botNickNounEn)
+	check(botNickDumbEn)
 
 	if best != "" {
 		return best
@@ -3920,7 +4154,7 @@ func botNameStartKey(nm string) string {
 	return string(out)
 }
 
-func pickUniqueBotName(rng *rand.Rand, used map[string]struct{}, usedStarts map[string]struct{}, fallbackN int) string {
+func pickUniqueBotName(rng *rand.Rand, pools botNamePools, used map[string]struct{}, usedStarts map[string]struct{}, fallbackN int) string {
 	if used == nil {
 		used = make(map[string]struct{})
 	}
@@ -3944,25 +4178,25 @@ func pickUniqueBotName(rng *rand.Rand, used map[string]struct{}, usedStarts map[
 		}
 
 		if rng.Float64() < 0.18 {
-			adj = botNickAdjRu[rng.Intn(len(botNickAdjRu))]
+			adj = pools.adj[rng.Intn(len(pools.adj))]
 		}
 
 		roll := rng.Float64()
 		switch {
 		case roll < 0.20:
-			w1 = botNickFixedRu[rng.Intn(len(botNickFixedRu))]
+			w1 = pools.fixed[rng.Intn(len(pools.fixed))]
 			pickedFixed = true
 		case roll < 0.70:
-			w1 = botNickNounRu[rng.Intn(len(botNickNounRu))]
+			w1 = pools.noun[rng.Intn(len(pools.noun))]
 		default:
-			w1 = botNickDumbRu[rng.Intn(len(botNickDumbRu))]
+			w1 = pools.dumb[rng.Intn(len(pools.dumb))]
 		}
 
 		if !pickedFixed && rng.Float64() < 0.22 {
 			if rng.Float64() < 0.55 {
-				w2 = botNickDumbRu[rng.Intn(len(botNickDumbRu))]
+				w2 = pools.dumb[rng.Intn(len(pools.dumb))]
 			} else {
-				w2 = botNickNounRu[rng.Intn(len(botNickNounRu))]
+				w2 = pools.noun[rng.Intn(len(pools.noun))]
 			}
 			if w2 == w1 {
 				w2 = ""
@@ -3970,7 +4204,7 @@ func pickUniqueBotName(rng *rand.Rand, used map[string]struct{}, usedStarts map[
 		}
 
 		if !pickedFixed && rng.Float64() < 0.10 {
-			suf = botNickSuffixRu[rng.Intn(len(botNickSuffixRu))]
+			suf = pools.suffix[rng.Intn(len(pools.suffix))]
 		}
 
 		if rng.Float64() < 0.20 {
@@ -4050,14 +4284,20 @@ func pickUniqueBotName(rng *rand.Rand, used map[string]struct{}, usedStarts map[
 		return nm
 	}
 
-	nm := sanitizeName(fmt.Sprintf("Нагибатор%d", fallbackN))
+	nm := sanitizeName(fmt.Sprintf("%s%d", pools.fallback, fallbackN))
 	if nm == "" {
-		return sanitizeName(fmt.Sprintf("Котик%d", fallbackN))
+		return sanitizeName(fmt.Sprintf("%s%d", pools.fallback2, fallbackN))
 	}
 	return nm
 }
 
 func (r *Room) setKnownNameLocked(num uint16, name string, online bool) {
+	r.setKnownNameLocalizedLocked(num, name, "", online)
+}
+
+// setKnownNameLocalizedLocked stores a name plus its optional English twin
+// (G25). nameEn is only ever non-empty for bots.
+func (r *Room) setKnownNameLocalizedLocked(num uint16, name, nameEn string, online bool) {
 	if r.knownNames == nil {
 		r.knownNames = make(map[uint16]KnownName)
 	}
@@ -4065,7 +4305,20 @@ func (r *Room) setKnownNameLocked(num uint16, name string, online bool) {
 	if base == "" {
 		base = sanitizeName(fmt.Sprintf("Игрок %d", num))
 	}
-	r.knownNames[num] = KnownName{Name: base, Online: online}
+	r.knownNames[num] = KnownName{Name: base, NameEn: sanitizeName(nameEn), Online: online}
+}
+
+// displayNameEnLocked returns the English twin of a name, or "" when there is
+// none and the client should just use "nm".
+func (r *Room) displayNameEnLocked(num uint16) string {
+	kn, ok := r.knownNames[num]
+	if !ok || kn.NameEn == "" {
+		return ""
+	}
+	if kn.Online {
+		return kn.NameEn
+	}
+	return kn.NameEn + " (offline)"
 }
 
 func (r *Room) displayNameLocked(num uint16) string {
@@ -4171,7 +4424,8 @@ func (r *Room) applyBotPersonality(p *Player, tier uint8, arch uint8) {
 		p.aiCooldownMin, p.aiCooldownMax = 6, 9
 		p.aiPredictDepth = 1
 		p.aiROIW, p.aiROIH = 48, 34
-		p.aiHuntGate = 0.25
+		// G21: 0.25 made the five easy bots effectively pacifists.
+		p.aiHuntGate = 0.40
 	case TierHard:
 		tierBudgetLo, tierBudgetHi = 18, 26
 		p.aiCooldownMin, p.aiCooldownMax = 2, 2
@@ -4300,16 +4554,18 @@ func (r *Room) botROIBounds(p *Player) (minX, minY, maxX, maxY int) {
 }
 
 // newBotLocked creates one bot with the given personality and spawns it.
-func (r *Room) newBotLocked(used, usedStarts map[string]struct{}, tier, arch uint8, fallbackN int) *Player {
+func (r *Room) newBotLocked(used, usedStarts, usedEn, usedStartsEn map[string]struct{}, tier, arch uint8, fallbackN int) *Player {
 	pnum := r.allocPlayerNumLocked()
 	if pnum == 0 {
 		return nil
 	}
-	name := pickUniqueBotName(r.rng, used, usedStarts, fallbackN)
+	name := pickUniqueBotName(r.rng, botPoolsRu, used, usedStarts, fallbackN)
+	nameEn := pickUniqueBotName(r.rng, botPoolsEn, usedEn, usedStartsEn, fallbackN)
 	hue := r.allocUniqueHue()
 	p := &Player{
 		num:             pnum,
 		name:            name,
+		nameEn:          nameEn,
 		bot:             true,
 		x:               -1,
 		y:               -1,
@@ -4339,7 +4595,7 @@ func (r *Room) newBotLocked(used, usedStarts map[string]struct{}, tier, arch uin
 	r.players[pnum] = p
 	r.scores[pnum] = 0
 	r.points[pnum] = 0
-	r.setKnownNameLocked(pnum, name, true)
+	r.setKnownNameLocalizedLocked(pnum, name, nameEn, true)
 	r.respawnPlayer(p)
 	return p
 }
@@ -4355,6 +4611,23 @@ func (r *Room) usedBotNamesLocked() (map[string]struct{}, map[string]struct{}) {
 		}
 		used[kn.Name] = struct{}{}
 		if k := botNameStartKey(kn.Name); k != "" {
+			usedStarts[k] = struct{}{}
+		}
+	}
+	return used, usedStarts
+}
+
+// usedBotNamesEnLocked is the same census over the English twins (G25); the two
+// name spaces are kept unique independently of each other.
+func (r *Room) usedBotNamesEnLocked() (map[string]struct{}, map[string]struct{}) {
+	used := make(map[string]struct{}, BotCount)
+	usedStarts := make(map[string]struct{}, BotCount)
+	for _, kn := range r.knownNames {
+		if kn.NameEn == "" {
+			continue
+		}
+		used[kn.NameEn] = struct{}{}
+		if k := botNameStartKey(kn.NameEn); k != "" {
 			usedStarts[k] = struct{}{}
 		}
 	}
@@ -4410,12 +4683,13 @@ func (r *Room) syncBotPopulationLocked() {
 	}
 
 	used, usedStarts := r.usedBotNamesLocked()
+	usedEn, usedStartsEn := r.usedBotNamesEnLocked()
 	tierT := mixTargets(tierMix[:], want)
 	archT := mixTargets(archMix[:], want)
 	for have < want {
 		tier := pickUnderfilled(tiers, tierT)
 		arch := pickUnderfilled(archs, archT)
-		if r.newBotLocked(used, usedStarts, tier, arch, have+1) == nil {
+		if r.newBotLocked(used, usedStarts, usedEn, usedStartsEn, tier, arch, have+1) == nil {
 			// Player numbers exhausted: stop instead of spinning forever.
 			break
 		}
@@ -4557,8 +4831,12 @@ func (r *Room) broadcastJSON(ctx context.Context, typ string, data any) {
 
 // F5 "Reclaim" tunables.
 const (
-	// ReclaimTicks: 200 ticks == 20s at 100ms per tick.
-	ReclaimTicks = 200
+	// ReclaimTicks: 120 ticks == 12s at 100ms per tick.
+	// G22: at 200 ticks (20s) death cost nothing — the whole estate was still
+	// waiting when the player got back, and the logs showed single reclaims of
+	// +1556 and +2745 cells. 12 seconds still rewards a deliberate run back to
+	// your own land but no longer refunds the entire match.
+	ReclaimTicks = 120
 	// ReclaimExpireBudget bounds how many cells the expiry queue retires per
 	// tick, so a huge estate can never stall a tick.
 	ReclaimExpireBudget = 1024
@@ -4901,7 +5179,12 @@ func isOpposite(a, b Dir) bool {
 	return (a == DirUp && b == DirDown) || (a == DirDown && b == DirUp) || (a == DirLeft && b == DirRight) || (a == DirRight && b == DirLeft)
 }
 
-func (r *Room) pickSpawnCell() (int, int) {
+// pickSpawnCell picks a respawn cell for player `forNum`. G22: the scoring
+// used to treat cooling cells as free space and only maximised the distance to
+// enemy heads, so a dead player was systematically dropped back into the middle
+// of his own cooling estate and reclaimed it for free. Own cooling cells now
+// carry a penalty of their own.
+func (r *Room) pickSpawnCell(forNum uint16) (int, int) {
 	clearOK := func(x, y int) bool {
 		if x < 2 || x > W-3 || y < 2 || y > H-3 {
 			return false
@@ -4939,6 +5222,7 @@ func (r *Room) pickSpawnCell() (int, int) {
 
 		// Prefer "free" space: low density of painted/trails nearby.
 		occ := 0
+		ownCool := 0
 		rad := 10
 		x0 := x - rad
 		y0 := y - rad
@@ -4965,6 +5249,10 @@ func (r *Room) pickSpawnCell() (int, int) {
 				i := row + xx
 				if r.gridOwner[i] != 0 || r.trailOwner[i] != 0 {
 					occ++
+					continue
+				}
+				if forNum != 0 && r.coolOwner != nil && r.coolOwner[i] == forNum && r.coolUntil[i] > r.tick {
+					ownCool++
 				}
 			}
 		}
@@ -4989,8 +5277,10 @@ func (r *Room) pickSpawnCell() (int, int) {
 			borderPenalty = 30
 		}
 
-		// Weights chosen to keep it fast and stable.
-		return int32(minD*14) - int32(occ*3) - borderPenalty
+		// Weights chosen to keep it fast and stable. The own-cooling penalty is
+		// deliberately steeper than the distance bonus can repay: landing on
+		// top of your own cooling patch must never be the best cell on the map.
+		return int32(minD*14) - int32(occ*3) - borderPenalty - int32(ownCool*8)
 	}
 
 	bestX := -1
@@ -5477,7 +5767,7 @@ func (r *Room) botRespawnDelay(p *Player) uint32 {
 }
 
 func (r *Room) respawnPlayer(p *Player) {
-	x, y := r.pickSpawnCell()
+	x, y := r.pickSpawnCell(p.num)
 	p.x = x
 	p.y = y
 	p.homeX = x
@@ -6464,7 +6754,8 @@ func (r *Room) botMayHunt(p *Player, tx, ty int, dist int) bool {
 	switch p.aiArchetype {
 	case ArchFarmer:
 		// Farmers only swat a trail that is already under their nose.
-		return dist <= 2
+		// G21: "under their nose" was 2 cells, which almost never fired.
+		return dist <= 5
 	case ArchAggressor:
 		return true
 	case ArchCoward:
@@ -7750,26 +8041,7 @@ func (r *Room) capture(playerNum uint16) {
 				y = uint16(p.y)
 			}
 			r.pushEvent(Event{Kind: EventCapture, A: p.num, X: x, Y: y, C: uint32(delta), D: p.cosCaptureFx})
-			// E9: sqrt curve instead of delta/4 with a cap of 60. A 1000 cell
-			// loop is nine seconds of lethal risk and must beat a 240 cell one.
-			ptsF := 1.6 * math.Sqrt(float64(delta))
-			maxPts := 100.0
-			if r.matchPhase() == PhaseFinal {
-				// F4: the endgame pays double for territory.
-				ptsF *= 2
-				maxPts *= 2
-			}
-			if r.mutatorType == MutatorDoubleCapture {
-				ptsF *= 1.25
-				maxPts *= 1.3
-			}
-			if ptsF > maxPts {
-				ptsF = maxPts
-			}
-			if ptsF < 3 {
-				ptsF = 3
-			}
-			r.awardPoints(p.num, uint16(ptsF), PointsCapture)
+			r.awardPoints(p.num, capturePoints(delta, r.matchPhase(), r.mutatorType), PointsCapture)
 
 			// E2: territory finally feeds the meta. Without this the optimal
 			// strategy was to ignore the map and farm bot tails.
@@ -8180,7 +8452,7 @@ func (r *Room) step() {
 			// room a guaranteed "winner" no matter how badly they played.
 			// Only humans are paid; bots have nothing to spend Style on.
 			for _, mr := range res {
-				if mr.Bot || mr.Place > 5 {
+				if mr.Bot {
 					continue
 				}
 				p := r.players[mr.N]
@@ -8193,8 +8465,19 @@ func (r *Room) step() {
 					r.grantFirstWinBonus(p)
 				case mr.Place <= 3:
 					r.addStyle(p, StylePlace23, StyleTop5)
-				default:
+				case mr.Place <= 5:
 					r.addStyle(p, StylePlace45, StyleTop5)
+				case mr.Place == 6:
+					r.addStyle(p, StylePlace6, StyleTop5)
+				case mr.Place == 7:
+					r.addStyle(p, StylePlace7, StyleTop5)
+				case mr.Place == 8:
+					r.addStyle(p, StylePlace8, StyleTop5)
+				}
+				// G23: surviving to the final tick always pays something, so
+				// the last line of the summary is never a flat zero.
+				if p.alive {
+					r.addStyle(p, StyleSurviveReward, StyleSurvive)
 				}
 			}
 			matchEndPayload = map[string]any{
@@ -8219,10 +8502,13 @@ func (r *Room) step() {
 		if r.matchResetAt != 0 && tickNow >= r.matchResetAt {
 			r.resetMatchLocked()
 			matchStartPayload = map[string]any{
-				"tick":    r.tick,
-				"seq":     r.matchSeq,
-				"endTick": r.matchEndTick,
+				"tick":       r.tick,
+				"seq":        r.matchSeq,
+				"endTick":    r.matchEndTick,
+				"phase":      r.matchPhase(),
+				"phaseUntil": r.phaseUntilTick(),
 			}
+			r.phaseSent = r.matchPhase()
 			r.mu.Unlock()
 			r.broadcastJSON(context.Background(), "matchStart", matchStartPayload)
 			return
@@ -8253,6 +8539,15 @@ func (r *Room) step() {
 			r.broadcastJSON(context.Background(), "matchEnd", matchEndPayload)
 		}
 		return
+	}
+
+	// G24: announce a phase boundary exactly once per match phase. The binary
+	// events header (type 5) is frozen by the golden tests, so the phase rides
+	// its own small JSON message instead.
+	var phasePayload map[string]any
+	if ph := r.matchPhase(); ph != r.phaseSent {
+		r.phaseSent = ph
+		phasePayload = r.matchPhasePayload()
 	}
 
 	// F5: retire cooling cells whose window has run out (amortized).
@@ -8402,6 +8697,10 @@ func (r *Room) step() {
 	eventsPD := r.buildEventsPooledLocked(forceEvents)
 
 	r.mu.Unlock()
+
+	if phasePayload != nil {
+		r.broadcastJSON(context.Background(), "matchPhase", phasePayload)
+	}
 
 	reqs := r.tmpReqs
 	if reqs == nil {
