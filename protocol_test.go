@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"net/http"
 	"testing"
 	"time"
 
@@ -46,6 +48,7 @@ var eventPayloadLen = map[uint8]int{
 	EventAchievement:      3,  // A u16, D u8
 	EventCapture:          11, // A u16, X u16, Y u16, C u32, D u8
 	EventReclaim:          8,  // A u16, B u16, X u16, Y u16
+	EventCoolBatch:        8,  // A u16, B u16, C u32
 }
 
 // eventsHeaderBase — размер заголовка пакета событий без списка powerup'ов
@@ -151,14 +154,14 @@ func TestEventPayloadLengths(t *testing.T) {
 		EventPowerupUse, EventContractAssign, EventContractProgress,
 		EventContractComplete, EventStyle, EventRevenge, EventDailyAssign,
 		EventDailyProgress, EventDailyComplete, EventAchievement, EventCapture,
-		EventReclaim,
+		EventReclaim, EventCoolBatch,
 	}
 
-	if len(kinds) != 20 {
-		t.Fatalf("ожидалось 20 типов событий, получено %d", len(kinds))
+	if len(kinds) != 21 {
+		t.Fatalf("ожидалось 21 типов событий, получено %d", len(kinds))
 	}
-	if len(eventPayloadLen) != 20 {
-		t.Fatalf("таблица длин должна содержать 20 записей, содержит %d", len(eventPayloadLen))
+	if len(eventPayloadLen) != 21 {
+		t.Fatalf("таблица длин должна содержать 21 записей, содержит %d", len(eventPayloadLen))
 	}
 
 	for _, kind := range kinds {
@@ -293,6 +296,10 @@ func checkEventPayload(t *testing.T, rd *reader, want Event) {
 		eq("B", rd.u16(), want.B)
 		eq("X", rd.u16(), want.X)
 		eq("Y", rd.u16(), want.Y)
+	case EventCoolBatch:
+		eq("A", rd.u16(), want.A)
+		eq("B", rd.u16(), want.B)
+		eq("C", rd.u32(), want.C)
 	default:
 		t.Fatalf("неизвестный kind=%d в эталонном парсере", want.Kind)
 	}
@@ -321,6 +328,11 @@ func TestEventPayloadExactBytes(t *testing.T) {
 			name: "Capture_11_bytes",
 			ev:   Event{Kind: EventCapture, A: 1, X: 2, Y: 3, C: 4, D: 5},
 			want: []byte{EventCapture, 1, 0, 2, 0, 3, 0, 4, 0, 0, 0, 5},
+		},
+		{
+			name: "CoolBatch_9_bytes",
+			ev:   Event{Kind: EventCoolBatch, A: 0x0102, B: 0x0304, C: 0x05060708},
+			want: []byte{EventCoolBatch, 0x02, 0x01, 0x04, 0x03, 0x08, 0x07, 0x06, 0x05},
 		},
 		{
 			name: "MutatorEnd_1_byte",
@@ -1020,6 +1032,7 @@ func TestEventConstants(t *testing.T) {
 		"Achievement":      {EventAchievement, 18},
 		"Capture":          {EventCapture, 19},
 		"Reclaim":          {EventReclaim, 20},
+		"CoolBatch":        {EventCoolBatch, 21},
 	}
 	for name, p := range pairs {
 		if p[0] != p[1] {
@@ -1333,5 +1346,239 @@ func TestWSCosExtraAndTitleEquip(t *testing.T) {
 	typ, _ := wsWaitAny(ctx, t, c, "error", "cosmetics")
 	if typ != "cosmetics" {
 		t.Fatalf("titleEquip(0) вернул %q, ожидалось cosmetics", typ)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WS_ORIGINS: наш allowlist — единственный арбитр рукопожатия.
+//
+// Регрессия: websocket.Accept по умолчанию сам делает same-origin проверку
+// (Origin против Host) и отдавал 403 ДО wsOriginAllowed. Из-за этого
+// WS_ORIGINS мог только сузить набор, но никогда не расширить: Origin из
+// allowlist с чужим хостом отвергался. Тест поднимает настоящий
+// httptest.Server и проверяет все четыре случая на реальном рукопожатии.
+// ---------------------------------------------------------------------------
+
+func TestWSOriginAllowlistIsTheOnlyArbiter(t *testing.T) {
+	_, wsURL := wsSmokeEnv(t)
+
+	prev := allowedWSOrigins
+	allowedWSOrigins = map[string]struct{}{
+		"http://example.test:18080": {},
+	}
+	t.Cleanup(func() { allowedWSOrigins = prev })
+
+	cases := []struct {
+		name       string
+		origin     string
+		wantAccept bool
+	}{
+		// Хост не совпадает с Host сервера — раньше это было 403.
+		{"origin_in_allowlist_cross_host", "http://example.test:18080", true},
+		// Регистр схемы/хоста и хвостовой слэш не значимы.
+		{"origin_in_allowlist_normalized", "HTTP://Example.Test:18080/", true},
+		{"origin_localhost_dev", "http://127.0.0.1:12345", true},
+		{"origin_not_in_allowlist", "https://evil.example.com", false},
+		{"no_origin_non_browser", "", true},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			var opts *websocket.DialOptions
+			if tc.origin != "" {
+				h := http.Header{}
+				h.Set("Origin", tc.origin)
+				opts = &websocket.DialOptions{HTTPHeader: h}
+			}
+			c, resp, err := websocket.Dial(ctx, wsURL, opts)
+			if resp != nil && resp.Body != nil {
+				defer resp.Body.Close()
+			}
+			if tc.wantAccept {
+				if err != nil {
+					code := 0
+					if resp != nil {
+						code = resp.StatusCode
+					}
+					t.Fatalf("Origin %q: ожидалось 101, получено %d (%v)", tc.origin, code, err)
+				}
+				if resp.StatusCode != http.StatusSwitchingProtocols {
+					t.Fatalf("Origin %q: статус %d, ожидалось 101", tc.origin, resp.StatusCode)
+				}
+				c.Close(websocket.StatusNormalClosure, "ok")
+				return
+			}
+			if err == nil {
+				c.Close(websocket.StatusNormalClosure, "unexpected")
+				t.Fatalf("Origin %q: рукопожатие прошло, ожидалось 403", tc.origin)
+			}
+			if resp == nil {
+				t.Fatalf("Origin %q: нет HTTP-ответа (%v)", tc.origin, err)
+			}
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("Origin %q: статус %d, ожидалось 403", tc.origin, resp.StatusCode)
+			}
+		})
+	}
+}
+
+// TestWSOriginAllowlistLoaderNormalizes фиксирует, что WS_ORIGINS парсится в
+// тот же канонический вид, с которым сравнивается заголовок Origin.
+func TestWSOriginAllowlistLoaderNormalizes(t *testing.T) {
+	t.Setenv("WS_ORIGINS", " HTTPS://Snakes.Example.COM/ , http://a.test:8080 ")
+	got := loadAllowedWSOrigins()
+	want := []string{"https://snakes.example.com", "http://a.test:8080"}
+	if len(got) != len(want) {
+		t.Fatalf("allowlist = %v, ожидалось %v", got, want)
+	}
+	for _, w := range want {
+		if _, ok := got[w]; !ok {
+			t.Fatalf("в allowlist нет %q: %v", w, got)
+		}
+	}
+}
+
+// TestCoolBatchEventOnDeath: на каждую смерть уходит ровно одно событие
+// EventCoolBatch с числом клеток и tick'ом окончательного исчезновения —
+// по нему клиент ведёт собственный обратный отсчёт.
+func TestCoolBatchEventOnDeath(t *testing.T) {
+	r := newTestRoom()
+	r.tick = 42
+	p := &Player{num: 3, alive: true}
+	r.players[3] = p
+
+	cells := []int{200, 201, 202, 203}
+	for _, i := range cells {
+		r.setGrid(i, 3)
+	}
+	r.events = r.events[:0]
+	r.clearPlayerCells(3, p)
+
+	var got []Event
+	for _, e := range r.events {
+		if e.Kind == EventCoolBatch {
+			got = append(got, e)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("EventCoolBatch = %d, ожидалось 1 (события: %+v)", len(got), r.events)
+	}
+	if got[0].A != 3 {
+		t.Fatalf("владелец = %d, ожидалось 3", got[0].A)
+	}
+	if int(got[0].B) != len(cells) {
+		t.Fatalf("клеток = %d, ожидалось %d", got[0].B, len(cells))
+	}
+	if got[0].C != 42+ReclaimTicks {
+		t.Fatalf("tick истечения = %d, ожидалось %d", got[0].C, 42+ReclaimTicks)
+	}
+
+	// Уход из комнаты (cool=false) события не порождает: возвращать нечего.
+	q := &Player{num: 4, alive: true}
+	r.players[4] = q
+	r.setGrid(300, 4)
+	r.events = r.events[:0]
+	r.clearPlayerCellsCooling(4, q, false)
+	for _, e := range r.events {
+		if e.Kind == EventCoolBatch {
+			t.Fatal("EventCoolBatch при окончательном уходе игрока")
+		}
+	}
+}
+
+// TestBotSeeksOwnCoolingTerritory: бот с остывающей территорией в ROI
+// выбирает её приоритетной целью (aiMode 5) вместо случайного возврата.
+func TestBotSeeksOwnCoolingTerritory(t *testing.T) {
+	r := newTestRoom()
+	r.rng = rand.New(rand.NewSource(1))
+	r.bfsMark = make([]uint32, N)
+	r.bfsDist = make([]uint16, N)
+	r.bfsGen = 1
+	r.bfsQ = make([]int, 0, 4096)
+	r.tick = 100
+
+	p := &Player{num: 1, alive: true, bot: true, x: W / 2, y: H / 2, dir: DirRight}
+	p.pendingDir = p.dir
+	p.aiCoolCell = -1
+	r.applyBotPersonality(p, TierNormal, ArchFarmer)
+	r.players[1] = p
+
+	// Пятно остывающих клеток в двух шагах от головы.
+	for _, d := range []int{2, 3, 4} {
+		i := r.idx(p.x+d, p.y)
+		r.coolOwner[i] = 1
+		r.coolUntil[i] = r.tick + ReclaimTicks
+	}
+
+	found := false
+	for k := 0; k < 40 && !found; k++ {
+		p.aiCoolScanTick = 0
+		p.aiNextDecisionTick = 0
+		p.aiMode = 0
+		p.aiModeUntil = 0
+		r.botStep(p)
+		if p.aiMode == 5 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("бот-Фермер ни разу не выбрал aiMode 5 (реклейм) при остывающей территории в ROI")
+	}
+	if r.coolOwner[p.aiCoolCell] != 1 {
+		t.Fatalf("aiCoolCell=%d не принадлежит боту", p.aiCoolCell)
+	}
+}
+
+// TestBotReclaimGateFavoursFarmer фиксирует требование G4: «Фермер»
+// пользуется реклеймом охотнее «Агрессора».
+func TestBotReclaimGateFavoursFarmer(t *testing.T) {
+	if botReclaimGate[ArchFarmer] <= botReclaimGate[ArchAggressor] {
+		t.Fatalf("Фермер %v должен тянуться к реклейму сильнее Агрессора %v",
+			botReclaimGate[ArchFarmer], botReclaimGate[ArchAggressor])
+	}
+	if botReclaimGate[ArchTerritorial] <= botReclaimGate[ArchAggressor] {
+		t.Fatalf("Территориальный %v должен быть выше Агрессора %v",
+			botReclaimGate[ArchTerritorial], botReclaimGate[ArchAggressor])
+	}
+	for a := uint8(0); a < ArchCount; a++ {
+		if botReclaimGate[a] <= 0 || botReclaimGate[a] > 1 {
+			t.Fatalf("botReclaimGate[%d] = %v вне (0,1]", a, botReclaimGate[a])
+		}
+	}
+}
+
+// TestHelloCarriesVersion: поле version в hello — единственный способ увидеть,
+// какая сборка реально крутится на проде.
+func TestHelloCarriesVersion(t *testing.T) {
+	_, wsURL := wsSmokeEnv(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close(websocket.StatusNormalClosure, "test done")
+
+	raw := wsSmokeWaitJSON(ctx, t, c, "hello")
+	var hello struct {
+		Version *string `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &hello); err != nil {
+		t.Fatalf("hello не разобрался: %v", err)
+	}
+	if hello.Version == nil || *hello.Version == "" {
+		t.Fatalf("в hello нет непустого version: %s", string(raw))
+	}
+	if *hello.Version != Version {
+		t.Fatalf("hello.version = %q, ожидалось %q", *hello.Version, Version)
+	}
+	if Version == "" || Commit == "" || BuildTime == "" {
+		t.Fatal("Version/Commit/BuildTime должны иметь значения по умолчанию")
 	}
 }

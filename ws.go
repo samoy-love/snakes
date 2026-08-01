@@ -105,9 +105,23 @@ func (l *ipRateLimiter) allow(key string, rate float64, burst float64) bool {
 
 var wsIPLimiter = &ipRateLimiter{buckets: make(map[string]*tokenBucket)}
 
+// normalizeWSOrigin makes both sides of the allowlist comparison canonical:
+// scheme and host are case-insensitive, a trailing slash is not significant.
+func normalizeWSOrigin(s string) string {
+	s = strings.TrimRight(strings.TrimSpace(s), "/")
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return strings.ToLower(s)
+	}
+	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
+}
+
+// wsOriginAllowed is the single arbiter of the WebSocket Origin check;
+// websocket.Accept runs with InsecureSkipVerify so nothing rejects earlier.
 func wsOriginAllowed(r *http.Request) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
+		// Non-browser client: no Origin to judge.
 		return true
 	}
 	u, err := url.Parse(origin)
@@ -117,7 +131,7 @@ func wsOriginAllowed(r *http.Request) bool {
 			return true
 		}
 	}
-	_, ok := allowedWSOrigins[origin]
+	_, ok := allowedWSOrigins[normalizeWSOrigin(origin)]
 	return ok
 }
 
@@ -129,6 +143,12 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionNoContextTakeover,
+		// wsOriginAllowed above is the only origin arbiter. The library's own
+		// check compares Origin against the Host header and would reject every
+		// cross-domain Origin before our allowlist is consulted, so WS_ORIGINS
+		// could only narrow the set, never widen it. It also broke on any
+		// non-default port where the proxy rewrites Host.
+		InsecureSkipVerify: true,
 	})
 	if err != nil {
 		return
@@ -154,6 +174,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		"cosmeticsPrices": cosmeticsPricesPayload(),
 		"titles":          titlesPayload(),
 		"reclaimTicks":    ReclaimTicks,
+		"version":         Version,
 	})
 	client.sendRooms(r.Context(), hub)
 

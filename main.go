@@ -92,12 +92,24 @@ func loadAllowedWSOrigins() map[string]struct{} {
 		return out
 	}
 	for _, part := range strings.Split(raw, ",") {
-		o := strings.TrimRight(strings.TrimSpace(part), "/")
-		if o != "" {
+		if o := normalizeWSOrigin(part); o != "" {
 			out[o] = struct{}{}
 		}
 	}
 	return out
+}
+
+// Build metadata, injected by the linker:
+//
+//	-ldflags "-X main.Version=... -X main.Commit=... -X main.BuildTime=..."
+var (
+	Version   = "dev"
+	Commit    = "none"
+	BuildTime = "unknown"
+)
+
+func init() {
+	log.Printf("snakes build version=%s commit=%s buildTime=%s", Version, Commit, BuildTime)
 }
 
 // CosmeticsMaxID is the highest cosmetic id; the inventory mask is a uint8, so
@@ -671,6 +683,10 @@ const (
 	EventCapture          = 19
 	// EventReclaim: F5, a player took his cooling territory back.
 	EventReclaim = 20
+	// EventCoolBatch: F5, one death's worth of territory started cooling.
+	// Sent once per death so the client can run its own countdown over the
+	// cells it already sees flagged with coolOwnerFlag.
+	EventCoolBatch = 21
 )
 
 const (
@@ -720,7 +736,12 @@ const (
 	StylePlace45 = 15
 
 	// E13: soft daily income ceiling; everything past it pays 40%.
-	StyleDaySoftCap    = 600
+	// Raised 600 -> 800 after the "terr" and
+	// "death" categories added 4750 Style to the full collection (14865 total):
+	// at 600 the average player needed ~24 days to close the shop instead of
+	// the intended 2-3 weeks. Reclaim itself does not inflate income — the
+	// reclaim path bypasses the capture Style award, which is capped anyway.
+	StyleDaySoftCap    = 800
 	StyleOverCapNumer  = 2
 	StyleOverCapDenom  = 5
 	MaxContractsMatch  = 4 // E5
@@ -1153,6 +1174,11 @@ type Player struct {
 
 	// G17: throttle for the expensive trail scan in botStep.
 	aiHuntScanTick uint32
+
+	// F5: throttle for the cooling-territory scan, and the cell aiMode 5
+	// is currently driving at.
+	aiCoolScanTick uint32
+	aiCoolCell     int
 
 	// G8: ring of recent death ticks driving the respawn progression.
 	aiDeathAt [aiDeathCap]uint32
@@ -3623,6 +3649,10 @@ func (r *Room) buildEventsPooledLocked(force bool) *pooledData {
 			b = appendU16LE(b, e.B)
 			b = appendU16LE(b, e.X)
 			b = appendU16LE(b, e.Y)
+		case EventCoolBatch:
+			b = appendU16LE(b, e.A)
+			b = appendU16LE(b, e.B)
+			b = appendU32LE(b, e.C)
 		default:
 			b = append(b, 0)
 		}
@@ -4200,6 +4230,7 @@ func (r *Room) newBotLocked(used, usedStarts map[string]struct{}, tier, arch uin
 		aiModeUntil:     0,
 		aiTargetX:       -1,
 		aiTargetY:       -1,
+		aiCoolCell:      -1,
 	}
 	r.applyBotPersonality(p, tier, arch)
 	r.players[pnum] = p
@@ -4428,7 +4459,26 @@ const (
 	// coolOwnerFlag marks a grid value on the wire as "cooling territory of
 	// player (value &^ coolOwnerFlag)". Player numbers never reach 0x8000.
 	coolOwnerFlag = uint16(0x8000)
+
+	// Bot reclaim (aiMode 5) tunables. The scan is a strided sweep of the
+	// bot's own ROI, so it stays far cheaper than the hunt scan.
+	BotReclaimScanEvery = 7  // ticks between scans
+	BotReclaimStride    = 2  // ROI sampling stride
+	BotReclaimMaxSteps  = 26 // BFS budget to the patch
+	// A detour is only worth it if the patch still exists on arrival.
+	BotReclaimTimeMargin = 6
+	// Bots do not abandon a long trail for a reclaim; that trade is bad.
+	BotReclaimMaxTrail = 6
 )
+
+// botReclaimGate is the per-archetype appetite for a reclaim detour (G4):
+// the Farmer lives off its estate, the Aggressor would rather chase.
+var botReclaimGate = [ArchCount]float32{
+	ArchFarmer:      0.95,
+	ArchAggressor:   0.35,
+	ArchCoward:      0.60,
+	ArchTerritorial: 0.85,
+}
 
 // coolBatch is one death's worth of cooling cells, retired together.
 type coolBatch struct {
@@ -4688,6 +4738,13 @@ func (r *Room) clearPlayerCellsCooling(num uint16, p *Player, cool bool) {
 	}
 	if len(batch) > 0 {
 		r.coolBatches = append(r.coolBatches, coolBatch{until: until, cells: batch})
+		// F5: tell clients when this batch expires so they can fade the cells
+		// out instead of only knowing "cooling / not cooling".
+		cells := uint16(len(batch))
+		if len(batch) > int(^uint16(0)) {
+			cells = ^uint16(0)
+		}
+		r.pushEvent(Event{Kind: EventCoolBatch, A: num, B: cells, C: until})
 	}
 	for len(p.trail) > 0 {
 		i := p.trail[len(p.trail)-1]
@@ -5343,6 +5400,8 @@ func (r *Room) respawnPlayer(p *Player) {
 	p.aiHuntTarget = 0
 	p.aiWindupUntil = 0
 	p.aiHuntScanTick = 0
+	p.aiCoolScanTick = 0
+	p.aiCoolCell = -1
 	for i := 0; i < aiRecentCap; i++ {
 		p.aiRecentX[i] = 0
 		p.aiRecentY[i] = 0
@@ -6655,7 +6714,57 @@ doFullBot:
 			}
 		}
 
-		if p.aiMode != 2 && len(r.powerUps) > 0 {
+		// F5: go take your own cooling ground back on purpose. Only when not
+		// already committed to a chase or a pickup, and never while dragging a
+		// long trail — the detour must not become a suicide.
+		if p.aiMode != 2 && p.aiMode != 4 && r.coolOwner != nil && p.num != 0 &&
+			(!outside || len(p.trail) <= BotReclaimMaxTrail) &&
+			(p.aiCoolScanTick == 0 || r.tick >= p.aiCoolScanTick) {
+			p.aiCoolScanTick = r.tick + BotReclaimScanEvery + uint32(r.rng.Intn(3))
+			gate := float32(0.6)
+			if int(p.aiArchetype) < len(botReclaimGate) {
+				gate = botReclaimGate[p.aiArchetype]
+			}
+			if r.rng.Float32() < gate {
+				minX, minY, maxX, maxY := r.botROIBounds(p)
+				bestI := -1
+				bestD := 1 << 30
+				for yy := minY; yy < maxY; yy += BotReclaimStride {
+					row := yy * W
+					for xx := minX; xx < maxX; xx += BotReclaimStride {
+						i := row + xx
+						if r.coolOwner[i] != p.num || r.coolUntil[i] <= r.tick {
+							continue
+						}
+						d := manhattan(p.x, p.y, xx, yy)
+						if d >= bestD || d > BotReclaimMaxSteps {
+							continue
+						}
+						// Reject a patch that expires before arrival.
+						if r.coolUntil[i] < r.tick+uint32(d)+BotReclaimTimeMargin {
+							continue
+						}
+						bestD = d
+						bestI = i
+					}
+				}
+				if bestI >= 0 {
+					// One BFS on the single best candidate keeps the cost flat.
+					if bd := r.bfsToCell(p.x, p.y, bestI, 0, BotReclaimMaxSteps); bd < 9999 &&
+						r.coolUntil[bestI] >= r.tick+uint32(bd)+BotReclaimTimeMargin {
+						p.aiMode = 5
+						p.aiCoolCell = bestI
+						p.aiTargetX = bestI % W
+						p.aiTargetY = bestI / W
+						p.aiHuntTarget = 0
+						p.aiModeUntil = r.tick + uint32(bd+8)
+						p.aiExpandPhase = 0
+					}
+				}
+			}
+		}
+
+		if p.aiMode != 2 && p.aiMode != 5 && len(r.powerUps) > 0 {
 			bestScore := int32(-1 << 30)
 			bestX := -1
 			bestY := -1
@@ -6961,6 +7070,27 @@ doFullBot:
 		d := r.bestGreedyDir(p, p.aiTargetX, p.aiTargetY)
 		r.botTrySetDir(p, d, true)
 		return
+	}
+
+	// F5: drive at the cooling patch until it is reclaimed or gone.
+	if p.aiMode == 5 {
+		i := p.aiCoolCell
+		if r.coolOwner == nil || i < 0 || i >= N ||
+			r.coolOwner[i] != p.num || r.coolUntil[i] <= r.tick {
+			p.aiMode = 0
+			p.aiModeUntil = 0
+			p.aiCoolCell = -1
+		} else {
+			d, ok := r.pickDirToCell(p, i, 0)
+			if !ok {
+				d = r.bestGreedyDir(p, p.aiTargetX, p.aiTargetY)
+			}
+			if r.lookaheadBad(p, d, 2, 0) {
+				d = r.pickDirToOwned(p)
+			}
+			r.botTrySetDir(p, d, urgent)
+			return
+		}
 	}
 
 	if p.aiMode == 4 {

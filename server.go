@@ -145,12 +145,13 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-		// CSP: allow twemoji from jsdelivr, keep everything else on self.
+		// CSP: everything is same-origin. twemoji is vendored at
+		// public/vendor/twemoji.min.js, so no CDN exception is needed.
 		// Note: client uses inline styles (element.style), so style-src includes 'unsafe-inline'.
 		w.Header().Set(
 			"Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' https://cdn.jsdelivr.net; "+
+				"script-src 'self'; "+
 				"style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data: https:; "+
 				"connect-src 'self' ws: wss:; "+

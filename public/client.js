@@ -330,6 +330,20 @@ const I18N = {
     'death.hint.wall': 'Ты врезался в границу поля. Край карты убивает так же, как чужой след.',
     'death.hint.generic': 'Выйди из своей зоны, обведи участок и вернись в свою территорию — петля замкнётся и участок станет твоим.',
 
+    'onb.return_here': 'Вернись сюда',
+    'onb.bonus_title': 'Бонусы на поле',
+    'onb.bonus_desc': 'Кружки на карте дают щит и ускорение. Подбирай их по дороге домой.',
+    'onb.contract_title': 'Контракт',
+    'onb.contract_desc': 'Небольшая задача в углу экрана. Выполнил — получил ✨ Стиль.',
+    'onb.bounty_title': 'Убийства и награда',
+    'onb.bounty_desc': 'Пересеки чужой след — и он погибнет. За голову с меткой 🎯 дают больше очков.',
+    'onb.shop_title': 'Магазин открыт',
+    'onb.shop_desc': 'Копи ✨ Стиль и меняй его на внешний вид змейки.',
+
+    'reclaim.hint': 'Твоя земля остывает 20 секунд — успей вернуться и забрать её обратно.',
+    'reclaim.toast': 'Земля возвращена',
+    'reclaim.toast_desc': 'Ты успел вернуться до конца остывания.',
+
     'match.peak': 'Пик зоны',
     'match.avg': 'Средняя',
     'match.deaths': 'Смерти',
@@ -355,6 +369,8 @@ const I18N = {
     'cosmetics.title_equipped': 'Надет',
     'cosmetics.title_req_prefix': 'Как получить',
     'cosmetics.title_free_hint': 'Титулы не продаются — их выдают за достижения',
+    'cosmetics.title_earned_for': 'Получен за',
+    'cosmetics.title_none_desc': 'Ник показывается без титула',
     'cosmetics.titles_unavailable': 'Список титулов появится после входа в матч',
 
     'cosmetics.tier_base': 'База',
@@ -685,6 +701,20 @@ const I18N = {
     'death.hint.wall': 'You hit the map border. The edge kills just like an enemy trail.',
     'death.hint.generic': 'Leave your zone, draw a loop around some land and come back into your territory — the loop closes and the land becomes yours.',
 
+    'onb.return_here': 'Come back here',
+    'onb.bonus_title': 'Pickups on the field',
+    'onb.bonus_desc': 'The circles give you a shield or a dash. Grab them on your way home.',
+    'onb.contract_title': 'Contract',
+    'onb.contract_desc': 'A small task in the corner of the screen. Finish it and earn ✨ Style.',
+    'onb.bounty_title': 'Kills and bounty',
+    'onb.bounty_desc': 'Cross an enemy trail and they die. The head marked 🎯 is worth extra points.',
+    'onb.shop_title': 'Shop unlocked',
+    'onb.shop_desc': 'Bank ✨ Style and spend it on the look of your snake.',
+
+    'reclaim.hint': 'Your land stays warm for 20 seconds — get back in time and take it back.',
+    'reclaim.toast': 'Land reclaimed',
+    'reclaim.toast_desc': 'You made it back before the land cooled down.',
+
     'match.peak': 'Peak zone',
     'match.avg': 'Average',
     'match.deaths': 'Deaths',
@@ -710,6 +740,8 @@ const I18N = {
     'cosmetics.title_equipped': 'Worn',
     'cosmetics.title_req_prefix': 'How to unlock',
     'cosmetics.title_free_hint': 'Titles are not for sale — they are earned through achievements',
+    'cosmetics.title_earned_for': 'Earned for',
+    'cosmetics.title_none_desc': 'Your nick is shown without a title',
     'cosmetics.titles_unavailable': 'The title list appears once you join a match',
 
     'cosmetics.tier_base': 'Base',
@@ -2300,10 +2332,38 @@ function cosTitleReq(id) {
   return list[i] || '';
 }
 
-// Титул перед ником: «⟨Охотник⟩ Вася». Возвращает готовую строку для плашки.
+// Титул перед ником: «⟨Охотник⟩ Вася». Возвращает готовую строку для плашки
+// в канвасе, где никакой разметки быть не может.
 function cosTitlePrefix(titleId) {
   const nm = cosTitleName(titleId);
   return nm ? `«${nm}» ` : '';
+}
+
+// В HTML-таблицах титул — отдельный элемент .playerTitle первым потомком
+// ячейки имени, а не часть текста: у него своя вёрстка и своё усечение.
+function playerTitleHtml(titleId) {
+  const nm = cosTitleName(titleId);
+  return nm ? `<span class="playerTitle">${escapeHtml(nm)}</span>` : '';
+}
+
+// То же для DOM-пути таблицы лидеров, которая обновляется каждый кадр:
+// пересобираем ячейку только при смене титула или ника.
+function setNameCellWithTitle(td, titleId, name) {
+  if (!td) return;
+  const tid = Math.max(0, Number(titleId) || 0);
+  const nm = String(name || '');
+  if (td._tid === tid && td._nm === nm) return;
+  td._tid = tid;
+  td._nm = nm;
+  const tn = cosTitleName(tid);
+  if (!tn) {
+    td.textContent = nm;
+    return;
+  }
+  const sp = document.createElement('span');
+  sp.className = 'playerTitle';
+  sp.textContent = tn;
+  td.replaceChildren(sp, document.createTextNode(nm));
 }
 
 /* --- FRAME: рамка профиля --------------------------------------------------
@@ -3035,6 +3095,9 @@ let cosmeticsOpen = false;
 let cosmeticsCat = 'terr';
 let cosmeticsSelId = 0;
 
+// Последняя категория, к которой уже подскроллили ленту вкладок.
+let cosmeticsTabsScrolledCat = '';
+
 let cosmeticsFilter = 'all';
 let cosmeticsEarnExpanded = false;
 
@@ -3222,6 +3285,44 @@ function fxBannerEnabled() {
 
 function fxVolumeScale() {
   return Math.max(0, fxPresetDef().volume);
+}
+
+/* ==========================================================================
+ * J12 — hitstop
+ *
+ * На джекпот-события интерполяция игроков идёт с множителем 0.15 в течение
+ * 90-140 мс. Эффекты (вспышки, бурсты, тосты) живут по реальному времени —
+ * замедляется только движение змеек, поэтому удар «звенит», а не тормозит UI.
+ * В пресете «Спокойно» hitstop равен 0 и весь механизм выключен.
+ * ======================================================================== */
+
+const HITSTOP_TIME_SCALE = 0.15;
+
+let hitstopFrom = 0;
+let hitstopUntil = 0;
+
+function triggerHitstop(ms) {
+  const k = fxHitstopScale();
+  if (k <= 0) return;
+  const dur = Math.max(0, Number(ms) || 0) * k;
+  if (dur <= 0) return;
+  const now = performance.now();
+  if (now < hitstopUntil) {
+    hitstopUntil = Math.max(hitstopUntil, now + dur);
+    return;
+  }
+  hitstopFrom = now;
+  hitstopUntil = now + dur;
+}
+
+// Сколько «съел» hitstop из окна [since, now]. Вычитается из времени
+// интерполяции, поэтому змейки в эти миллисекунды почти стоят.
+function hitstopLostMs(since, now) {
+  if (!hitstopUntil) return 0;
+  const s = Math.max(hitstopFrom, Number(since) || 0);
+  const e = Math.min(now, hitstopUntil);
+  if (e <= s) return 0;
+  return (e - s) * (1 - HITSTOP_TIME_SCALE);
 }
 
 function normalizeFxPreset(v) {
@@ -3553,6 +3654,8 @@ function celebrateFirstCapture(delta) {
   trackEvent('first_capture');
   sfx.firstCapture();
   fxFlashScreen([170, 255, 210], 1);
+  // J12: момент озарения тоже заслуживает hitstop.
+  triggerHitstop(120);
   const sub = `+${fmtInt(delta)} · ${t('banner.first_capture_sub')}`;
   if (!showBigBanner('🎉', t('banner.first_capture'), sub, 'jackpot')) {
     addToast('🎉', t('banner.first_capture'), 'big', sub, { key: 'first_capture', prio: 'jackpot' });
@@ -3839,6 +3942,21 @@ let trailOwner = null;
 let minimapGridOwner = null;
 
 let gridFillAt = null;
+
+/* F5 «Реклейм»: сервер пока не передаёт момент истечения остывающей клетки,
+   поэтому окно отсчитывается от того кадра, в котором клетка впервые пришла
+   с флагом остывания. Ошибка не превышает задержки одного пакета.
+   TODO: заменить на серверное время истечения, когда появится событие с
+   его байтовым layout — тогда coolSeenAt станет coolUntilMs. */
+const RECLAIM_WINDOW_MS = 20000;
+let coolSeenAt = null;
+
+// Бывший владелец -> момент (performance.now), когда его остывающая земля
+// исчезнет окончательно. Приходит событием EventCoolBatch (21).
+const coolDeadlineByOwner = new Map();
+
+// Точка замыкания петли по игроку — из неё расходится волна заливки (J15).
+const captureAnchorByOwner = new Map();
 
 let prevPlayers = new Map();
 let currPlayers = new Map();
@@ -4763,6 +4881,13 @@ function renderTopHud() {
 
   topHudEl.setAttribute('aria-hidden', 'false');
 
+  // F17: постепенное раскрытие мета-систем в первом матче.
+  obTick();
+  const obKills = obUnlocked('bounty');
+  const obContract = obUnlocked('contract');
+  // Магазин — со второго матча: в первом тратить ещё нечего и незачем.
+  if (cosmeticsBtn) cosmeticsBtn.classList.toggle('hidden', !obSecondMatchPlus());
+
   const me = lastState.players?.find((p) => p.n === you);
   const cells = Number(me?.s) || 0;
   const pct = mapCells ? (cells / mapCells) * 100 : 0;
@@ -4779,8 +4904,11 @@ function renderTopHud() {
   }
   if (topHudPctEl) topHudPctEl.textContent = `${pct.toFixed(1)}%`;
 
-  if (topHudKillsEl) topHudKillsEl.textContent = `⚔ ${youKills}`;
-  renderComboHud();
+  if (topHudKillsEl) {
+    topHudKillsEl.textContent = obKills ? `⚔ ${youKills}` : '';
+    topHudKillsEl.classList.toggle('hidden', !obKills);
+  }
+  if (obKills) renderComboHud();
 
   // I5: таймер матча — отдельный крупный элемент. Только время, без «•»-склейки,
   // иначе самое важное («сколько до конца») обрезается по ellipsis.
@@ -4798,7 +4926,7 @@ function renderTopHud() {
   // I5: баунти — отдельный элемент, а не часть таймерной строки.
   const bountyEl = ensureTopHudBountyEl();
   if (bountyEl) {
-    if (bountyTarget) {
+    if (bountyTarget && obKills) {
       const bn = nameById.get(bountyTarget) || String(bountyTarget);
       const rem = formatTickRemain(bountyUntil);
       bountyEl.textContent = rem ? `🎯 ${bn} (${rem})` : `🎯 ${bn}`;
@@ -4830,7 +4958,7 @@ function renderTopHud() {
   if (obj) obj.textContent = `${t('hud.objective')}: ${t('hud.objective_capture')}`;
 
   if (chip) {
-    if (youContractType) {
+    if (youContractType && obContract) {
       const cn = contractLabel(youContractType) || infoPack().labels.contract;
       const goal = Number(youContractGoal) || 0;
       const prog = Number(youContractProgress) || 0;
@@ -4970,9 +5098,16 @@ function showDeathOverlay() {
   sfx.death();
   comboBreak();
 
+  // F16b: человеческое объяснение только на первых трёх смертях — дальше
+  // ветеран читает сухую причину быстрее, чем абзац текста.
+  const deathsSeen = obDeathsSeen();
+  obBumpDeaths();
+
   if (deathReasonEl) {
     const reasonText = deathReasonText(lastDeathInfo);
-    const hintText = deathReasonHint(lastDeathInfo);
+    const hintText = deathsSeen < 3 ? deathReasonHint(lastDeathInfo) : '';
+    // F5 «Реклейм»: механика нигде не объяснена, показываем её на первой смерти.
+    const reclaimText = deathsSeen < 1 ? t('reclaim.hint') : '';
     try {
       const frag = document.createDocumentFragment();
       if (reasonText) {
@@ -4987,11 +5122,17 @@ function showDeathOverlay() {
         h.textContent = hintText;
         frag.appendChild(h);
       }
+      if (reclaimText) {
+        const rc = document.createElement('div');
+        rc.className = 'deathReasonHint';
+        rc.textContent = `♻ ${reclaimText}`;
+        frag.appendChild(rc);
+      }
       deathReasonEl.replaceChildren(frag);
     } catch {
       deathReasonEl.textContent = reasonText || hintText;
     }
-    deathReasonEl.style.display = reasonText || hintText ? '' : 'none';
+    deathReasonEl.style.display = reasonText || hintText || reclaimText ? '' : 'none';
   }
 
   overlayManager.focusDefault('death');
@@ -5081,6 +5222,137 @@ function bumpMatchesPlayed() {
   try {
     localStorage.setItem(FIRST_MATCH_KEY, String(matchesPlayed() + 1));
   } catch {}
+}
+
+/* ==========================================================================
+ * F15/F17 — мягкая первая сессия
+ *
+ * Новичок видит шесть мета-систем одновременно поверх непонятой базовой
+ * механики. В первом матче они открываются по одной, а путь домой
+ * подсвечивается стрелкой, пока игрок ни разу не замкнул петлю.
+ * ======================================================================== */
+
+const OB_DEATHS_KEY = 'snakes_deaths_seen_v1';
+const OB_STAGE_KEY = 'snakes_onboarding_stages_v1';
+
+// Пороги подобраны так, чтобы первый захват (15-20 с) успел случиться раньше
+// любой мета-системы: сначала правило игры, потом надстройки над ним.
+const OB_STAGES = [
+  { id: 'bonus', at: 105000, icon: '🎁', title: 'onb.bonus_title', desc: 'onb.bonus_desc' },
+  { id: 'contract', at: 135000, icon: '📜', title: 'onb.contract_title', desc: 'onb.contract_desc' },
+  { id: 'bounty', at: 165000, icon: '🎯', title: 'onb.bounty_title', desc: 'onb.bounty_desc' }
+];
+
+let obMatchStartAt = 0;
+let obStagesShown = null;
+
+function obLoadStages() {
+  if (obStagesShown) return obStagesShown;
+  obStagesShown = new Set();
+  try {
+    const raw = localStorage.getItem(OB_STAGE_KEY);
+    if (raw) for (const s of String(raw).split(',')) if (s) obStagesShown.add(s);
+  } catch {}
+  return obStagesShown;
+}
+
+function obMarkStageShown(id) {
+  const set = obLoadStages();
+  if (set.has(id)) return;
+  set.add(id);
+  try {
+    localStorage.setItem(OB_STAGE_KEY, Array.from(set).join(','));
+  } catch {}
+}
+
+// Первый матч в жизни игрока: только в нём мета-системы придерживаются.
+function obFirstMatch() {
+  return obMatchesEntered() <= 1;
+}
+
+// Второй и дальше — ежедневки и магазин уже показываем.
+function obSecondMatchPlus() {
+  return obMatchesEntered() >= 2;
+}
+
+function obDeathsSeen() {
+  try {
+    return Math.max(0, Number(localStorage.getItem(OB_DEATHS_KEY)) || 0);
+  } catch {}
+  return 99;
+}
+
+function obBumpDeaths() {
+  try {
+    localStorage.setItem(OB_DEATHS_KEY, String(obDeathsSeen() + 1));
+  } catch {}
+}
+
+function obMatchElapsed() {
+  if (!obMatchStartAt) return 0;
+  return performance.now() - obMatchStartAt;
+}
+
+/* Отдельный счётчик «сколько матчей игрок начал». FIRST_MATCH_KEY растёт только
+   в onMatchEnd, а тот приходит не всегда (умер и досидел до конца в оверлее
+   смерти — экран итогов не показывается). Онбординг на таком счётчике завис бы
+   в режиме «первый матч» навсегда, поэтому у него свой, по входам. */
+const OB_ENTERED_KEY = 'snakes_ob_matches_v1';
+
+function obMatchesEntered() {
+  try {
+    return Math.max(0, Number(localStorage.getItem(OB_ENTERED_KEY)) || 0);
+  } catch {}
+  return 99;
+}
+
+function obBumpMatchesEntered() {
+  try {
+    localStorage.setItem(OB_ENTERED_KEY, String(obMatchesEntered() + 1));
+  } catch {}
+}
+
+// Разблокирована ли мета-система. Вне первого матча — всё открыто.
+function obUnlocked(id) {
+  if (!obFirstMatch()) return true;
+  const st = OB_STAGES.find((s) => s.id === id);
+  if (!st) return true;
+  return obMatchElapsed() >= st.at;
+}
+
+// F15: стрелка домой живёт, пока игрок ни разу не замкнул петлю.
+function obGuideActive() {
+  return !hasFirstCapture() && obMatchesEntered() <= 2;
+}
+
+function obResetMatch() {
+  obMatchStartAt = performance.now();
+  obBumpMatchesEntered();
+}
+
+// Вызывается из renderTopHud (каждый кадр), поэтому дешёвая: сравнение чисел.
+function obTick() {
+  if (!started || !obMatchStartAt || obMatchesEntered() > 2) return;
+  const el = obMatchElapsed();
+  for (const st of OB_STAGES) {
+    if (el < st.at) continue;
+    const set = obLoadStages();
+    if (set.has(st.id)) continue;
+    obMarkStageShown(st.id);
+    addToast(st.icon, t(st.title), 'big', t(st.desc), { key: `onb_${st.id}`, prio: 'important' });
+  }
+}
+
+// Магазин и ежедневки — со второго матча, одним тостом и один раз.
+function obAnnounceShop() {
+  if (!obSecondMatchPlus()) return;
+  if (obMatchesEntered() > 3) return;
+  const set = obLoadStages();
+  if (set.has('shop')) return;
+  obMarkStageShown('shop');
+  setTimeout(() => {
+    addToast('🎨', t('onb.shop_title'), 'big', t('onb.shop_desc'), { key: 'onb_shop', prio: 'important' });
+  }, 2500);
 }
 
 // F16: крючок «до первого скина N ✨» на экране результатов первого матча.
@@ -5188,7 +5460,7 @@ function renderMatchResults(results) {
       return `
         <tr class="${isMe ? 'matchRowMe' : ''} ${frClass}">
           <td class="num">${i + 1}</td>
-          <td>${escapeHtml(`${cosTitlePrefix(cosTitleByPlayer.get(n) || 0)}${nm}`)}</td>
+          <td class="name">${playerTitleHtml(cosTitleByPlayer.get(n) || 0)}${escapeHtml(nm)}</td>
           <td class="num">${fmtInt(p)}</td>
           <td class="num">${fmtInt(peak)}</td>
           <td class="num">${fmtInt(k)}</td>
@@ -5506,6 +5778,8 @@ function onMatchStart(d) {
     toggleEmojiPanel(false);
     syncMatchOverlayActions();
     started = true;
+    obResetMatch();
+    obAnnounceShop();
     try {
       document.body.classList.add('inGame');
     } catch {}
@@ -6053,6 +6327,7 @@ function createLeaderboardRow(p) {
   const tdRank = document.createElement('td');
   tdRank.className = 'rank';
   const tdName = document.createElement('td');
+  tdName.className = 'name';
   const tdCells = document.createElement('td');
   tdCells.className = 'num';
   const tdPct = document.createElement('td');
@@ -6106,7 +6381,7 @@ function renderDeathStats() {
       return `
         <tr class="${isMe ? 'me' : ''} ${isTop1 ? 'top1' : ''} frame${Math.max(0, Math.min(7, Number(p.cosFrame) || 0))}" data-pid="${pid}">
           <td class="num">${i + 1}</td>
-          <td class="name">${escapeHtml(`${cosTitlePrefix(cosTitleByPlayer.get(p.n) || 0)}${nm}`)}</td>
+          <td class="name">${playerTitleHtml(cosTitleByPlayer.get(p.n) || 0)}${escapeHtml(nm)}</td>
           <td class="num">${Number(p.p) || 0}</td>
         </tr>
       `;
@@ -6302,7 +6577,7 @@ function updateLeaderboard() {
     if (lb) {
       if (lb.tdRank) lb.tdRank.textContent = String(it.rank);
       // Титул перед ником — как в плашке над головой и в итогах матча.
-      lb.tdName.textContent = `${cosTitlePrefix(cosTitleByPlayer.get(p.n) || 0)}${p.nm || String(p.n)}`;
+      setNameCellWithTitle(lb.tdName, cosTitleByPlayer.get(p.n) || 0, p.nm || String(p.n));
       lb.tdCells.textContent = `${p.p || 0} • ${p.s || 0}`;
       const pct = mapCells ? ((p.s || 0) / mapCells) * 100 : 0;
       lb.tdPct.textContent = pct.toFixed(1);
@@ -7304,6 +7579,8 @@ function onInit(msg) {
   // F13: раньше подсказка гасилась прямо здесь, ещё до того как игрок её прочитал.
   // Теперь её снимает первое реальное действие (см. setDir).
   syncMenuOnboardingUi();
+  obResetMatch();
+  obAnnounceShop();
   try {
     document.body.classList.add('inGame');
   } catch {}
@@ -7316,6 +7593,9 @@ function onInit(msg) {
   minimapOwnerRgbCache.clear();
 
   gridFillAt = new Float32Array(N);
+  coolSeenAt = new Float32Array(N);
+  captureAnchorByOwner.clear();
+  coolDeadlineByOwner.clear();
 
   minimap.width = W;
   minimap.height = H;
@@ -7790,6 +8070,14 @@ function cosTitleUnlocked(id) {
   return (Number(youTitleMask) & (1 << i)) !== 0;
 }
 
+// Доля выполнения условия титула: 1 — открыт, null — данных нет.
+// TODO: сервер пока не передаёт накопленную статистику по ачивкам.
+function cosTitleProgress(id) {
+  const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
+  if (i === 0) return null;
+  return cosTitleUnlocked(i) ? 1 : null;
+}
+
 function cosTitlesUnlockedCount() {
   let n = 0;
   for (let i = 1; i <= COS_TITLE_MAX; i++) {
@@ -7835,12 +8123,15 @@ function renderCosmeticsTitles() {
     if (cosmeticsFilter === 'owned' && !unlocked) continue;
     if (cosmeticsFilter === 'available' && unlocked) continue;
 
+    // Разметка карточки титула согласована с вёрсткой (.titleItem): медаль
+    // вместо превью-канваса, условие получения вместо цены, никакой валюты.
     const card = document.createElement('div');
-    card.className = 'cosmeticsItem' + (cosmeticsSelId === id ? ' isSelected' : '');
-    card.classList.toggle('isOwned', unlocked);
+    card.className = 'titleItem' + (cosmeticsSelId === id ? ' isSelected' : '');
+    card.classList.toggle('isUnlocked', unlocked);
     card.classList.toggle('isEquipped', worn);
     card.classList.toggle('isLocked', !unlocked);
     card.tabIndex = 0;
+    card.setAttribute('role', 'button');
     card.addEventListener('click', () => {
       cosmeticsSelId = id;
       cosmeticsHoverId = null;
@@ -7852,45 +8143,57 @@ function renderCosmeticsTitles() {
     card.addEventListener('mouseleave', () => cosmeticsSetHover(null, null));
     card.addEventListener('blur', () => cosmeticsSetHover(null, null));
 
-    const prev = document.createElement('div');
-    prev.className = 'cosmeticsItemPreview';
-    const cvs = document.createElement('canvas');
-    prev.appendChild(cvs);
-    drawMiniCosmeticPreview(cvs, 'title', id);
+    const medal = document.createElement('span');
+    medal.className = 'titleMedal';
+    medal.setAttribute('aria-hidden', 'true');
+    medal.textContent = id === 0 ? '—' : '🏅';
 
     const left = document.createElement('div');
-    left.className = 'cosmeticsItemLeft';
-    const titleEl = document.createElement('div');
-    titleEl.className = 'cosmeticsItemTitle';
-    titleEl.textContent = id === 0 ? t('cosmetics.title_none') : `«${cosTitleName(id)}»`;
+    left.className = 'titleItemLeft';
 
-    const where = document.createElement('div');
-    where.className = 'cosmeticsItemWhere';
-    where.textContent = id === 0 ? t('cosmetics.where_title') : `${t('cosmetics.title_req_prefix')}: ${cosTitleReq(id)}`;
+    const nameEl = document.createElement('div');
+    nameEl.className = 'titleName';
+    nameEl.textContent = id === 0 ? t('cosmetics.title_none') : `«${cosTitleName(id)}»`;
+    left.appendChild(nameEl);
 
-    const sub = document.createElement('div');
-    sub.className = 'cosmeticsItemSub';
-    sub.textContent = worn ? t('cosmetics.title_equipped') : unlocked ? t('cosmetics.title_unlocked') : t('cosmetics.title_locked');
-    if (!unlocked) sub.classList.add('isBlocked');
+    if (unlocked) {
+      const desc = document.createElement('div');
+      desc.className = 'titleDesc';
+      desc.textContent =
+        id === 0 ? t('cosmetics.title_none_desc') : `${t('cosmetics.title_earned_for')}: ${cosTitleReq(id)}`;
+      left.appendChild(desc);
+    } else {
+      const req = document.createElement('div');
+      req.className = 'titleReq';
+      req.textContent = cosTitleReq(id) || t('cosmetics.title_locked');
+      left.appendChild(req);
+    }
 
-    left.appendChild(titleEl);
-    left.appendChild(where);
-    left.appendChild(sub);
+    // Прогресс к ачивке. Сервер пока не присылает накопленные значения, поэтому
+    // честно показываем только «открыт / не открыт».
+    // TODO: заполнять реальным прогрессом, когда сервер начнёт его отдавать.
+    const prog = cosTitleProgress(id);
+    if (prog != null) {
+      const bar = document.createElement('div');
+      bar.className = 'cosmeticsItemProgress';
+      const fill = document.createElement('span');
+      fill.style.width = `${Math.round(Math.max(0, Math.min(1, prog)) * 100)}%`;
+      bar.appendChild(fill);
+      left.appendChild(bar);
+    }
 
     const right = document.createElement('div');
-    right.className = 'cosmeticsItemRight';
+    right.className = 'titleItemRight';
     const btn = document.createElement('button');
     btn.type = 'button';
+    btn.className = 'btnSecondary';
     if (!unlocked) {
-      btn.className = 'btnSecondary';
       btn.disabled = true;
       btn.textContent = t('cosmetics.locked');
     } else if (worn) {
-      btn.className = 'btnGhost';
       btn.disabled = true;
       btn.textContent = t('cosmetics.title_equipped');
     } else {
-      btn.className = 'btnPrimary';
       btn.textContent = t('cosmetics.wear');
       btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -7900,11 +8203,14 @@ function renderCosmeticsTitles() {
     }
     right.appendChild(btn);
 
-    card.appendChild(prev);
+    card.appendChild(medal);
     card.appendChild(left);
     card.appendChild(right);
     items.push(card);
   }
+
+  // Контейнер несёт --title-accent для вкладки титулов (см. .cosmeticsItems.isTitles).
+  cosmeticsItemsEl.classList.add('isTitles');
 
   if (items.length <= 1) {
     setSafeHtml(
@@ -7918,8 +8224,6 @@ function renderCosmeticsTitles() {
     );
     return;
   }
-  // Контейнер несёт --title-accent для вкладки титулов (см. .cosmeticsItems.isTitles).
-  cosmeticsItemsEl.classList.toggle('isTitles', cosmeticsCat === 'title');
   cosmeticsItemsEl.replaceChildren(...items);
 }
 
@@ -8213,6 +8517,15 @@ function syncCosmeticsUi() {
       return b;
     });
     cosmeticsTabsEl.replaceChildren(...btns);
+    // Вкладок восемь и лента скроллится: активная вкладка после смены категории
+    // может оказаться за краем. scroll-margin для неё уже задан в CSS.
+    if (cosmeticsTabsScrolledCat !== cosmeticsCat) {
+      cosmeticsTabsScrolledCat = cosmeticsCat;
+      try {
+        const active = btns.find((b) => b.getAttribute('aria-selected') === 'true');
+        active?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
+      } catch {}
+    }
   }
 
   if (cosmeticsItemsEl && cosmeticsCat === 'title') {
@@ -8223,6 +8536,7 @@ function syncCosmeticsUi() {
   }
 
   if (cosmeticsItemsEl) {
+    cosmeticsItemsEl.classList.remove('isTitles');
     const mask = cosmeticsMaskForCat(cosmeticsCat);
     const eq = cosmeticsEqForCat(cosmeticsCat);
     // C9: until the server confirms the inventory, everything we show is provisional.
@@ -9505,8 +9819,13 @@ function renderMetaHud() {
   const cells = Number(me?.s) || 0;
   const pct = mapCells ? (cells / mapCells) * 100 : 0;
 
+  // F17: в первом матче мета-системы открываются по одной (см. OB_STAGES).
+  const obBonus = obUnlocked('bonus');
+  const obKills = obUnlocked('bounty');
+  const obDaily = obSecondMatchPlus();
+
   const matchRows = [];
-  if (mutatorType) {
+  if (mutatorType && obBonus) {
     const mt = mutatorLabel(mutatorType);
     const rem = formatTickRemain(mutatorUntil);
     if (mt) {
@@ -9514,7 +9833,7 @@ function renderMetaHud() {
       addRow(matchRows, infoPack().labels.round, rem ? `${mt} (${rem})` : mt, sec != null && sec <= 6);
     }
   }
-  if (bountyTarget) {
+  if (bountyTarget && obKills) {
     const bn = nameById.get(bountyTarget) || String(bountyTarget);
     const rem = formatTickRemain(bountyUntil);
     const sec = tickRemainSeconds(bountyUntil);
@@ -9522,11 +9841,13 @@ function renderMetaHud() {
   }
 
   const fightRows = [];
-  addRow(fightRows, t('meta.kills'), String(youKills));
-  if (youStreak >= 2) addRow(fightRows, t('meta.streak'), `x${youStreak}`);
+  if (obKills) {
+    addRow(fightRows, t('meta.kills'), String(youKills));
+    if (youStreak >= 2) addRow(fightRows, t('meta.streak'), `x${youStreak}`);
+  }
   const buffs = [];
-  if (youShield) buffs.push(infoName(infoPack().powerups, 1, powerupLabel(1)));
-  if (youSpeedUntilTick && lastEventsTick && youSpeedUntilTick > lastEventsTick) {
+  if (youShield && obBonus) buffs.push(infoName(infoPack().powerups, 1, powerupLabel(1)));
+  if (obBonus && youSpeedUntilTick && lastEventsTick && youSpeedUntilTick > lastEventsTick) {
     const rem = formatTickRemain(youSpeedUntilTick);
     const tpe = youSpeedType === 4 ? 4 : 2;
     const dash = infoName(infoPack().powerups, tpe, powerupLabel(tpe));
@@ -9544,11 +9865,15 @@ function renderMetaHud() {
   }
   // I6: контракт живёт только в чипе #topHudContract. Третья копия здесь
   // (плюс копия в строке таймера) просто съедала место в HUD.
-  if (youStyle) addRow(mainRows, infoPack().labels.style, String(youStyle));
+  // Стиль как валюта имеет смысл только вместе с контрактом, который его даёт.
+  if (youStyle && obUnlocked('contract')) addRow(mainRows, infoPack().labels.style, String(youStyle));
 
+  // Ежедневки — со второго матча: в первом они только добавляют шума.
   const dailyRows = [];
-  if (youDaily1Type) addRow(dailyRows, dailyLabel(youDaily1Type), `${youDaily1Prog}/${youDaily1Goal}`);
-  if (youDaily2Type) addRow(dailyRows, dailyLabel(youDaily2Type), `${youDaily2Prog}/${youDaily2Goal}`);
+  if (obDaily) {
+    if (youDaily1Type) addRow(dailyRows, dailyLabel(youDaily1Type), `${youDaily1Prog}/${youDaily1Goal}`);
+    if (youDaily2Type) addRow(dailyRows, dailyLabel(youDaily2Type), `${youDaily2Prog}/${youDaily2Goal}`);
+  }
 
   const detailSections = [];
   const addDetailSection = (title, rows) => {
@@ -9623,7 +9948,7 @@ function renderTeamHud() {
       return `
         <tr class="${isMe ? 'me' : ''} ${frClass}" data-pid="${pid}">
           <td class="num">${i + 1}</td>
-          <td class="name">${escapeHtml(`${cosTitlePrefix(cosTitleByPlayer.get(p.n) || 0)}${nm}`)}</td>
+          <td class="name">${playerTitleHtml(cosTitleByPlayer.get(p.n) || 0)}${escapeHtml(nm)}</td>
           <td class="num">${Number(p.p) || 0}</td>
           <td class="num">${pp.toFixed(1)}%</td>
         </tr>
@@ -10068,6 +10393,8 @@ function handleStateBinary(buf) {
           if (jackpot) {
             addShakeClass('large', ...shakeDirFrom(ex, ey));
             fxFlashScreen([255, 215, 120], 1);
+            // J12: 140 мс на самом жирном событии игры.
+            triggerHitstop(140);
             sfx.jackpot();
             bumpMatchTabBadge();
             if (!showBigBanner('💎', t('banner.jackpot'), `+${fmtInt(delta)} · ${t('banner.jackpot_sub')}`, 'jackpot')) {
@@ -10106,7 +10433,40 @@ function handleStateBinary(buf) {
         const pn = nameById.get(pid) || String(pid);
         pushEventFeed(`${pn} ${lang === 'en' ? 'reclaimed' : 'вернул'} +${cells}`, 'Reclaim');
         addFxBurst(ex, ey, `cap${cosClampId(cosCaptureFxByPlayer(pid))}`, { pid });
-        if (pid === you && cells > 0) addScorePopup(ex, ey, cells);
+        if (pid === you && cells > 0) {
+          addScorePopup(ex, ey, cells);
+          // F5: возврат своей земли должен читаться иначе, чем обычный захват —
+          // это отыгранная назад потеря, а не прирост.
+          addFxBurst(ex, ey, 'reclaim', { life: 900 });
+          addShakeClass(cells >= 120 ? 'medium' : 'small', ...shakeDirFrom(ex, ey));
+          fxFlashScreen([120, 220, 255], Math.min(1, 0.35 + cells / 400));
+          sfx.bountyClaimed();
+          addToast('♻', t('reclaim.toast'), cells >= 120 ? 'big' : '', `+${fmtInt(cells)} · ${t('reclaim.toast_desc')}`, {
+            key: 'reclaim',
+            prio: cells >= 120 ? 'jackpot' : 'important'
+          });
+          if (cells >= 120) triggerHitstop(110);
+        }
+        coolDeadlineByOwner.delete(pid);
+        continue;
+      }
+
+      // F5 «Реклейм»: EventCoolBatch (21) — территория погибшего пошла остывать.
+      // A=бывший владелец, B=клетки, C=тик окончательного исчезновения.
+      // Даёт честное время истечения вместо клиентской оценки по первому кадру.
+      if (kind === 21) {
+        if (!need(2 + 2 + 4)) return;
+        const pid = dv.getUint16(o, true);
+        o += 2;
+        const cells = dv.getUint16(o, true);
+        o += 2;
+        const untilTick = dv.getUint32(o, true);
+        o += 4;
+        if (cells > 0) {
+          const nt = approxNowTick();
+          const remMs = nt != null && tickMs ? Math.max(0, (untilTick - nt) * tickMs) : RECLAIM_WINDOW_MS;
+          coolDeadlineByOwner.set(pid, performance.now() + Math.min(RECLAIM_WINDOW_MS * 1.5, remMs));
+        }
         continue;
       }
 
@@ -10182,6 +10542,7 @@ function handleStateBinary(buf) {
           bumpMatchTabBadge();
           sfx.achievement();
           fxFlashScreen([255, 225, 150], 0.8);
+          triggerHitstop(90);
           // J13: ачивка идёт в центральный баннер, а не тонет за тремя мелкими тостами.
           if (!showBigBanner('🏅', achvLabel(achv), infoDesc(infoPack().achv, achv, ''), 'jackpot')) {
             addToast('🏅', `${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'big', infoDesc(infoPack().achv, achv, ''), { tab: 'match', key: `achv_${achv}`, prio: 'jackpot' });
@@ -10642,6 +11003,43 @@ function applyPackedDelta(u16, buf) {
   }
 }
 
+/* J15 — заливка расходится волной от точки замыкания петли.
+   Раньше задержка была `(i * 37) % 170` — псевдослучайный шум, который читался
+   как «мигание». Теперь честная дистанция от головы владельца до клетки на 8 мс,
+   так что фронт заливки идёт из той точки, где игрок вернулся в свою зону.
+   Стоимость — один sqrt на изменённую клетку. */
+const FILL_WAVE_MS_PER_CELL = 8;
+const FILL_WAVE_MAX_MS = 700;
+
+function fillDelayFor(i, owner) {
+  const a = captureAnchorByOwner.get(owner);
+  if (!a || !W) return (i * 37) % fillDelayMod;
+  const dx = (i % W) - a.x;
+  const dy = ((i / W) | 0) - a.y;
+  const d = Math.sqrt(dx * dx + dy * dy);
+  return Math.min(FILL_WAVE_MAX_MS, d * FILL_WAVE_MS_PER_CELL);
+}
+
+// Головы всех живых игроков в момент прихода снапшота — они же точки замыкания
+// для тех, кто именно в этом тике захватил территорию.
+function refreshCaptureAnchors(players) {
+  if (!Array.isArray(players)) return;
+  captureAnchorByOwner.clear();
+  for (const p of players) {
+    if (!p || !p.a) continue;
+    captureAnchorByOwner.set(p.n, { x: Number(p.x) || 0, y: Number(p.y) || 0 });
+  }
+}
+
+function markCoolSeen(i, raw, now) {
+  if (!coolSeenAt) return;
+  if (gridCellIsCooling(raw)) {
+    if (!coolSeenAt[i]) coolSeenAt[i] = now;
+  } else if (coolSeenAt[i]) {
+    coolSeenAt[i] = 0;
+  }
+}
+
 function applyPackedDeltaGridWithAnim(buf, now) {
   if (!gridOwner || !buf || !gridFillAt) return;
   const d = new Uint32Array(buf);
@@ -10654,10 +11052,10 @@ function applyPackedDeltaGridWithAnim(buf, now) {
     const prev = gridOwner[i];
     if (prev !== o) {
       gridOwner[i] = o;
+      markCoolSeen(i, o, now);
       // Остывающие клетки (старший бит) не анимируем как свежий захват.
       if (o !== 0 && !gridCellIsCooling(o)) {
-        const delay = ((i * 37) % fillDelayMod);
-        gridFillAt[i] = now + delay;
+        gridFillAt[i] = now + fillDelayFor(i, o);
       }
     }
   }
@@ -10668,19 +11066,26 @@ function onState(s) {
 
   const now = performance.now();
 
+  // J15: якоря должны быть готовы до применения дельты сетки — именно в этом
+  // снапшоте голова стоит там, где петля замкнулась.
+  refreshCaptureAnchors(s.players);
+
   if (s.full) {
     const prev = gridOwner;
     gridOwner = new Uint16Array(s.grid);
     trailOwner = new Uint16Array(s.trail);
     if (!gridFillAt || gridFillAt.length !== gridOwner.length) gridFillAt = new Float32Array(gridOwner.length);
+    if (!coolSeenAt || coolSeenAt.length !== gridOwner.length) coolSeenAt = new Float32Array(gridOwner.length);
     if (prev && prev.length === gridOwner.length) {
       for (let i = 0; i < gridOwner.length; i++) {
         const n = gridOwner[i];
+        if (prev[i] !== n) markCoolSeen(i, n, now);
         if (n !== 0 && !gridCellIsCooling(n) && prev[i] !== n) {
-          const delay = ((i * 37) % fillDelayMod);
-          gridFillAt[i] = now + delay;
+          gridFillAt[i] = now + fillDelayFor(i, n);
         }
       }
+    } else {
+      for (let i = 0; i < gridOwner.length; i++) markCoolSeen(i, gridOwner[i], now);
     }
   } else {
     applyPackedDeltaGridWithAnim(s.dg, now);
@@ -10968,7 +11373,10 @@ function draw() {
 
   const viewH = Math.max(1, ch - occludedBottom);
 
-  const interp = Math.max(0, Math.min(1, (performance.now() - lastPacketAt) / tickMs));
+  // J12: hitstop замедляет только интерполяцию игроков, не эффекты.
+  const interpNow = performance.now();
+  const interpElapsed = interpNow - lastPacketAt - hitstopLostMs(lastPacketAt, interpNow);
+  const interp = Math.max(0, Math.min(1, interpElapsed / tickMs));
 
   const my = getInterpPlayer(you, interp);
   const nt = approxNowTick();
@@ -11127,16 +11535,29 @@ function draw() {
       if (cooling) {
         // Остывающая территория: полупрозрачная заливка, пунктирная граница,
         // ритм пульса подсказывает, что время уходит.
+        // F5: плюс затухание по мере приближения к концу окна — чем ближе
+        // истечение, тем бледнее клетка и тем чаще пульс.
         const px = offsetX + x * cell;
         const py = offsetY + y * cell;
-        const pulse = 0.5 + 0.5 * Math.sin(nowFrame * 0.005 - (x + y) * 0.35);
-        ctx.fillStyle = getOwnerFillStyle(coolOwner, 0.14 + 0.10 * pulse);
+        // Точное время истечения — из EventCoolBatch; клиентская оценка по
+        // первому увиденному кадру остаётся запасным вариантом.
+        const deadline = coolDeadlineByOwner.get(coolOwner) || 0;
+        const seen = coolSeenAt ? coolSeenAt[i] : 0;
+        const prog = deadline
+          ? Math.max(0, Math.min(1, 1 - (deadline - nowFrame) / RECLAIM_WINDOW_MS))
+          : seen
+            ? Math.max(0, Math.min(1, (nowFrame - seen) / RECLAIM_WINDOW_MS))
+            : 0;
+        const fade = 1 - prog * 0.8;
+        const rate = 0.005 + 0.012 * prog;
+        const pulse = 0.5 + 0.5 * Math.sin(nowFrame * rate - (x + y) * 0.35);
+        ctx.fillStyle = getOwnerFillStyle(coolOwner, (0.14 + 0.10 * pulse) * fade);
         ctx.fillRect(px, py, cell, cell);
         if (cell >= 7) {
           ctx.save();
           ctx.setLineDash([Math.max(2, cell * 0.22), Math.max(2, cell * 0.22)]);
           ctx.lineDashOffset = -nowFrame * 0.02;
-          ctx.strokeStyle = getOwnerFillStyle(coolOwner, 0.45 + 0.25 * pulse);
+          ctx.strokeStyle = getOwnerFillStyle(coolOwner, (0.45 + 0.25 * pulse) * fade);
           ctx.lineWidth = 1;
           ctx.strokeRect(px + 0.5, py + 0.5, cell - 1, cell - 1);
           ctx.restore();
@@ -11692,6 +12113,66 @@ function draw() {
         ctx.restore();
       }
     }
+
+    // F15: пока игрок ни разу не замкнул петлю, компас — слишком тихая
+    // подсказка. Ведём пунктирную линию прямо к своей земле и подписываем её.
+    if (obGuideActive() && !youInOwnZone && youNearestHomeX >= 0) {
+      const tx = offsetX + (youNearestHomeX + 0.5) * cell;
+      const ty = offsetY + (youNearestHomeY + 0.5) * cell;
+      const ddx = tx - hpx;
+      const ddy = ty - hpy;
+      const dpx = Math.sqrt(ddx * ddx + ddy * ddy);
+      if (dpx > cell * 1.5) {
+        const ang = Math.atan2(ddy, ddx);
+        // Линия не доходит до самой головы и до самой цели — чтобы не мешать.
+        const x0 = hpx + Math.cos(ang) * cell * 0.9;
+        const y0 = hpy + Math.sin(ang) * cell * 0.9;
+        const reduce = prefersReducedMotion();
+        const pulse = reduce ? 0.85 : 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(nowFrame * 0.006));
+
+        ctx.save();
+        ctx.globalAlpha = 0.9 * pulse;
+        ctx.strokeStyle = 'rgba(120,255,190,0.95)';
+        ctx.lineWidth = Math.max(2, cell * 0.16);
+        ctx.lineCap = 'round';
+        ctx.setLineDash([Math.max(4, cell * 0.5), Math.max(4, cell * 0.45)]);
+        ctx.lineDashOffset = reduce ? 0 : -nowFrame * 0.06;
+        ctx.shadowColor = 'rgba(0,0,0,0.65)';
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Наконечник у цели.
+        const hw = Math.max(6, cell * 0.55);
+        ctx.fillStyle = 'rgba(120,255,190,0.98)';
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx + Math.cos(ang + 2.5) * hw, ty + Math.sin(ang + 2.5) * hw);
+        ctx.lineTo(tx + Math.cos(ang - 2.5) * hw, ty + Math.sin(ang - 2.5) * hw);
+        ctx.closePath();
+        ctx.fill();
+
+        // Подпись у цели, но всегда внутри вьюпорта.
+        const label = t('onb.return_here');
+        const lf = Math.max(12, Math.round(cell * 0.85));
+        ctx.font = `800 ${lf}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.globalAlpha = 1;
+        const lx = Math.max(70, Math.min(cw - 70, tx));
+        const ly = Math.max(28, Math.min(viewH - 28, ty - cell * 1.4));
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+        ctx.strokeText(label, lx, ly);
+        ctx.fillStyle = 'rgba(160,255,215,0.98)';
+        ctx.fillText(label, lx, ly);
+        ctx.restore();
+      }
+    }
   }
 
   if (!chat.classList.contains('collapsed')) {
@@ -11783,6 +12264,8 @@ function draw() {
 
       let col = 'rgba(255,215,0,0.92)';
       if (knd === 'kill') col = 'rgba(255,45,85,0.95)';
+      // F5: возврат остывшей земли — холодный голубой, а не «золото захвата».
+      else if (knd === 'reclaim') col = 'rgba(120,220,255,0.96)';
       else if (knd === 'use') col = 'rgba(0,255,255,0.95)';
       else if (knd === 'pickup2') col = 'rgba(255,215,0,0.95)';
       else if (knd === 'pickup4') col = 'rgba(190,150,255,0.96)';

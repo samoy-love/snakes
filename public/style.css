@@ -2618,6 +2618,10 @@ html, body {
   transform: translate(-50%, -50%);
   z-index: var(--z-banner);
   display: none;
+  /* Без width: max-content fixed-элемент с одним left:50% получает в распоряжение
+     только правую половину экрана: на 375px «ПЕРВЫЙ ЗАХВАТ!» ужимался до 79px и
+     рвался по одному слову в строку. max-width ниже по-прежнему держит потолок. */
+  width: max-content;
   max-width: min(760px, calc(100vw - 32px));
   text-align: center;
   line-height: var(--lh-tight);
@@ -3223,9 +3227,18 @@ html, body {
    font-size: var(--fs-12);
   }
 
-  /* Развёрнутый чат занимает до 40dvh — поднимаем стек над ним */
+  /* Стек тостов поднимается ровно на высоту развёрнутого чата. Значение
+     вынесено в --chat-max-mobile: раньше здесь было зашито 40dvh, и после
+     снижения потолка чата тосты уезжали в центр экрана, прямо на голову
+     змейки (камера центрирует игрока на 50% высоты). */
   body:has(#chat:not(.collapsed)) #eventToasts {
-   bottom: calc(8px + var(--sa-bottom) + 40dvh + 8px);
+   bottom: calc(8px + var(--sa-bottom) + var(--chat-max-mobile) + 8px);
+  }
+
+  /* Развёрнутый чат + два тоста = стек доезжает до головы змейки. Пока чат
+     открыт, игрок печатает, а не рулит: оставляем один, самый свежий. */
+  body:has(#chat:not(.collapsed)) #eventToasts > .eventToast:nth-child(n + 2) {
+   display: none;
   }
  }
 
@@ -4624,4 +4637,1048 @@ img.emoji {
   min-height: 56px;
   font-size: var(--fs-18);
   font-weight: 900;
+}
+
+/* ==========================================================================
+   ВОЛНА ОНБОРДИНГА. Разметку создаёт client.js, здесь только оформление.
+   Общий принцип всей секции: камера центрирует игрока, поэтому вертикальная
+   полоса 28%–72% высоты экрана — заповедник змейки. Ни один элемент ниже
+   не имеет права туда заходить, отсюда явные top/bottom вместо центрирования.
+   ========================================================================== */
+
+:root {
+  /* Верхняя и нижняя границы «мёртвой зоны» вокруг головы змейки.
+     Нижняя больше верхней: низ экрана уже занят стеком тостов и чатом,
+     подсказка обязана встать НАД ними, а не поверх. */
+  --onboard-top: calc(var(--sa-top) + 96px);
+  --onboard-bottom: calc(var(--sa-bottom) + 188px);
+}
+
+/* --- Подсказка-объяснение механики поверх поля -----------------------------
+   Живёт над полем, но вне центра. .isTop/.isBottom выбирает client.js в
+   зависимости от того, где сейчас голова игрока. */
+.onboardHint {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-toasts);
+  /* width: max-content обязателен. У fixed-элемента с одним только left:50%
+     доступная ширина считается от left до правого края экрана, то есть ровно
+     половина вьюпорта: на 375px подсказка ужималась до 188px и рвала строку
+     пополам. max-width ниже возвращает потолок. */
+  width: max-content;
+  max-width: min(420px, calc(100vw - 32px - var(--sa-left) - var(--sa-right)));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent2) 34%, var(--border2));
+  /* Намеренно полупрозрачно: сквозь подсказку должно быть видно поле. */
+  background: color-mix(in srgb, var(--panel) 74%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-float);
+  color: var(--text);
+  font-size: var(--fs-13);
+  font-weight: 800;
+  line-height: var(--lh-tight);
+  text-align: center;
+  text-wrap: balance;
+  pointer-events: none;
+  animation: onboardHintIn 260ms cubic-bezier(0.2, 1.3, 0.4, 1) both,
+    onboardHintPulse 2.6s ease-in-out 260ms infinite;
+}
+
+.onboardHint.isTop {
+  top: var(--onboard-top);
+  bottom: auto;
+}
+
+.onboardHint.isBottom {
+  top: auto;
+  bottom: var(--onboard-bottom);
+}
+
+/* Без модификатора элемент всё равно обязан оказаться вне центра. */
+.onboardHint:not(.isTop):not(.isBottom) {
+  top: var(--onboard-top);
+}
+
+/* Иконку client.js кладёт отдельным span'ом; если её нет — ничего не ломается. */
+.onboardHintIcon {
+  flex: 0 0 auto;
+  font-size: var(--fs-16);
+  line-height: 1;
+}
+
+.onboardHintIcon img.emoji {
+  width: 18px;
+  height: 18px;
+  vertical-align: -3px;
+}
+
+.onboardHintText {
+  min-width: 0;
+}
+
+@keyframes onboardHintIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Пульсация лёгкая и по прозрачности/тени, а не по transform: сдвиг рядом с
+   игровым полем читается как движение объекта в мире. */
+@keyframes onboardHintPulse {
+  0%,
+  100% {
+    opacity: 0.86;
+    box-shadow: var(--shadow-float);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: var(--shadow-float), 0 0 0 4px color-mix(in srgb, var(--accent2) 12%, transparent);
+  }
+}
+
+/* --- Подсказка про Реклейм -------------------------------------------------
+   Отдельный смысл: не «сделай», а «у тебя есть окно времени». Поэтому янтарь
+   вместо синего и место под таймер. Работает и как .onboardHint.reclaimHint,
+   и самостоятельным элементом. */
+.reclaimHint {
+  border-color: color-mix(in srgb, var(--tier-legendary) 42%, var(--border2));
+  background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--tier-legendary) 14%, transparent),
+      transparent
+    ),
+    color-mix(in srgb, var(--panel) 78%, transparent);
+  color: color-mix(in srgb, var(--tier-legendary) 26%, var(--text));
+}
+
+.reclaimHint:not(.onboardHint) {
+  position: fixed;
+  left: 50%;
+  top: var(--onboard-top);
+  transform: translateX(-50%);
+  z-index: var(--z-toasts);
+  width: max-content;
+  max-width: min(420px, calc(100vw - 32px - var(--sa-left) - var(--sa-right)));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-float);
+  font-size: var(--fs-13);
+  font-weight: 800;
+  line-height: var(--lh-tight);
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Обратный отсчёт «остывания» земли — моноширинные цифры, чтобы не дёргался. */
+.reclaimHintTimer {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  color: var(--tier-legendary);
+}
+
+/* Полоска остывания: ширину задаёт client.js инлайном на .reclaimHintFill */
+.reclaimHintBar {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.reclaimHintFill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: var(--tier-legendary);
+  transition: width 200ms linear;
+}
+
+/* Оверлеи модальны — подсказки поля под ними не должны просвечивать. */
+body.overlayActive .onboardHint,
+body.overlayActive .reclaimHint {
+  display: none !important;
+}
+
+/* --- Одноразовый тост-объяснение системы -----------------------------------
+   Отличается от .eventToast намеренно: событие — это «что произошло», а это —
+   «как устроена игра». Спокойный синий вместо алого, лампочка вместо иконки
+   события, без «влёта» с подскоком. Длительность жизни задаёт client.js. */
+.onboardStepToast {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: var(--pad-md) var(--pad-lg);
+  border-radius: var(--r-lg);
+  border: 1px solid color-mix(in srgb, var(--accent2) 40%, var(--border2));
+  border-left: 3px solid color-mix(in srgb, var(--accent2) 70%, transparent);
+  background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent2) 13%, transparent),
+      transparent 62%
+    ),
+    color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(12px);
+  color: var(--text);
+  max-width: 100%;
+  word-break: break-word;
+  pointer-events: auto;
+  /* Мягче и дольше, чем toastIn у обычного тоста: это не тревога. */
+  animation: onboardStepIn 380ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
+}
+
+/* Лампочка. ::before, чтобы client.js не был обязан класть иконку в разметку;
+   если он всё же кладёт .onboardStepToastIcon — псевдоэлемент отключается. */
+.onboardStepToast::before {
+  content: '💡';
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  font-size: var(--fs-16);
+  line-height: 1;
+  border: 1px solid color-mix(in srgb, var(--accent2) 34%, transparent);
+  background: color-mix(in srgb, var(--accent2) 12%, rgba(0, 0, 0, 0.28));
+}
+
+.onboardStepToast:has(.onboardStepToastIcon)::before {
+  content: none;
+}
+
+.onboardStepToastIcon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  font-size: var(--fs-16);
+  line-height: 1;
+  border: 1px solid color-mix(in srgb, var(--accent2) 34%, transparent);
+  background: color-mix(in srgb, var(--accent2) 12%, rgba(0, 0, 0, 0.28));
+}
+
+.onboardStepToastBody {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.onboardStepToastTitle {
+  font-size: var(--fs-13);
+  font-weight: 900;
+  letter-spacing: 0.2px;
+}
+
+/* Объяснение — это текст, который читают; ему нужен нормальный интерлиньяж. */
+.onboardStepToastText {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+@keyframes onboardStepIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --- Баннер первого захвата ------------------------------------------------
+   Модификатор существующего #bigBanner: первый успешный захват — единственный
+   момент, когда игрок понимает игру. Разрешено быть громким. */
+#bigBanner.firstCaptureBanner {
+  color: #fffbe8;
+  text-shadow: 0 0 28px color-mix(in srgb, var(--gold) 75%, transparent),
+    0 0 8px color-mix(in srgb, var(--gold) 60%, transparent),
+    0 6px 30px rgba(0, 0, 0, 0.75);
+}
+
+#bigBanner.firstCaptureBanner .bigBannerTitle {
+  background: linear-gradient(180deg, #fff6d0 0%, var(--gold) 52%, #b8860b 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  /* text-shadow не рисуется под прозрачной заливкой — свечение даёт drop-shadow */
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--gold) 70%, transparent))
+    drop-shadow(0 6px 22px rgba(0, 0, 0, 0.7));
+}
+
+#bigBanner.firstCaptureBanner .bigBannerIcon {
+  filter: drop-shadow(0 0 16px color-mix(in srgb, var(--gold) 70%, transparent));
+}
+
+#bigBanner.firstCaptureBanner .bigBannerSub {
+  color: color-mix(in srgb, var(--gold) 55%, #fff);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.75);
+}
+
+/* Золотое гало за баннером — рисуем псевдоэлементом, чтобы не трогать разметку */
+#bigBanner.firstCaptureBanner::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 150%;
+  height: 220%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: -1;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--gold) 26%, transparent),
+    transparent 72%
+  );
+}
+
+/* Масштабирование: сильнее и с «отдачей», чем базовый bannerIn.
+   Специфичность (0,2,0) перебивает `#bigBanner.isOn` (0,1,1)? Нет —
+   (1,1,0) против (1,1,0) при равенстве побеждает более поздний, а этот блок
+   идёт в самом низу файла, поэтому анимация тут выигрывает. */
+#bigBanner.isOn.firstCaptureBanner {
+  animation: firstCaptureIn 900ms cubic-bezier(0.16, 1.5, 0.3, 1) both;
+}
+
+@keyframes firstCaptureIn {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.4) rotate(-4deg);
+  }
+  45% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.18) rotate(1.5deg);
+  }
+  70% {
+    transform: translate(-50%, -50%) scale(0.97) rotate(-0.6deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1) rotate(0deg);
+  }
+}
+
+/* --- Человеческое объяснение в оверлее смерти ------------------------------
+   Соседние .deathStat — сухие числа. Этот блок — единственное место, где игроку
+   объясняют, что он сделал не так, поэтому он крупнее всего остального. */
+.deathExplain {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 0;
+  padding: var(--pad-lg);
+  border-radius: var(--r-lg);
+  border: 1px solid color-mix(in srgb, var(--accent2) 30%, var(--border2));
+  background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent2) 12%, transparent),
+      transparent 60%
+    ),
+    rgba(0, 0, 0, 0.20);
+  /* Крупнее .deathReason (12px) и .toastSub (12px) — это главный текст карточки */
+  font-size: var(--fs-14);
+  font-weight: 700;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.deathExplain::before {
+  content: '💡';
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-16);
+  line-height: 1;
+  border: 1px solid color-mix(in srgb, var(--accent2) 30%, transparent);
+  background: color-mix(in srgb, var(--accent2) 12%, rgba(0, 0, 0, 0.26));
+}
+
+.deathExplain:has(.deathExplainIcon)::before {
+  content: none;
+}
+
+.deathExplainIcon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-16);
+  line-height: 1;
+  border: 1px solid color-mix(in srgb, var(--accent2) 30%, transparent);
+  background: color-mix(in srgb, var(--accent2) 12%, rgba(0, 0, 0, 0.26));
+}
+
+.deathExplainBody {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.deathExplainTitle {
+  font-size: var(--fs-14);
+  font-weight: 900;
+  letter-spacing: 0.2px;
+}
+
+/* Вторая строка — «как не повторить». Тише заголовка, но всё ещё читаемая. */
+.deathExplainTip {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* client.js уже собирает две строки причины смерти — правил для них не было */
+.deathReasonMain {
+  font-size: var(--fs-13);
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.deathReasonHint {
+  margin-top: 2px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   ЭКРАН РЕЗУЛЬТАТОВ МАТЧА: «итоги», а не отладочный дамп.
+   ========================================================================== */
+
+/* Место — самое крупное число экрана; остальные KPI выравниваются по нему. */
+.matchKpiGrid .matchKpi:first-child .matchKpiValue {
+  font-size: clamp(30px, 8vw, 42px);
+  line-height: 1;
+  color: var(--gold);
+  text-shadow: 0 0 18px color-mix(in srgb, var(--gold) 30%, transparent);
+}
+
+.matchKpiGrid .matchKpi:first-child .matchKpiOf {
+  font-size: var(--fs-13);
+  color: var(--muted2);
+  text-shadow: none;
+  /* Число места растёт, «из N» — нет, поэтому выравниваем по базовой линии */
+  vertical-align: baseline;
+}
+
+/* Каскад count-up перерисовывает числа: резервируем ширину заранее, иначе
+   соседние блоки прыгают, пока разряды набегают. */
+.matchKpiValue,
+.matchMiniValue {
+  font-variant-numeric: tabular-nums;
+}
+
+.matchKpiValue [data-count],
+.matchMiniValue[data-count],
+.matchMiniValue [data-count] {
+  display: inline-block;
+  min-width: 2ch;
+}
+
+/* Зебра объявлена ДО .matchRowMe: у обоих правил специфичность (0,3,0),
+   и при равенстве побеждает последнее — своя строка обязана перебивать зебру. */
+.matchTable tbody tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.025);
+}
+
+/* --- Строка игрока в таблице итогов ----------------------------------------
+   Раньше .matchRowMe навешивался client.js, но правила не существовало: своя
+   строка ничем не отличалась от чужих. Фон + левый маркер, но БЕЗ изменения
+   padding/border-width — иначе колонки разъезжаются относительно шапки.
+   border-left уже занят рамками профиля .frame0..7, поэтому маркер рисуем
+   box-shadow'ом внутрь первой ячейки. */
+.matchTable tbody tr.matchRowMe {
+  background-color: color-mix(in srgb, var(--accent2) 16%, transparent);
+  color: #fff;
+  font-weight: 900;
+}
+
+.matchTable tbody tr.matchRowMe td {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent2) 24%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--accent2) 24%, transparent);
+}
+
+.matchTable tbody tr.matchRowMe td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent2),
+    inset 0 1px 0 color-mix(in srgb, var(--accent2) 24%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--accent2) 24%, transparent);
+}
+
+/* Пьедестал: первые три места читаются без счёта в уме */
+.matchTable tbody tr:nth-child(1) td:first-child {
+  color: var(--gold);
+  font-weight: 900;
+}
+
+.matchTable tbody tr:nth-child(2) td:first-child {
+  color: #cbd5e1;
+  font-weight: 900;
+}
+
+.matchTable tbody tr:nth-child(3) td:first-child {
+  color: #d09a6a;
+  font-weight: 900;
+}
+
+/* Шапка таблицы: подписи колонок — служебные, они не должны спорить с числами */
+.matchTable thead th {
+  font-size: var(--fs-11);
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--muted2);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.matchTable th.num,
+.matchTable td.num {
+  text-align: right;
+}
+
+/* Имя игрока — единственная резиновая колонка; остальные держат ширину чисел */
+.matchTable tbody td:nth-child(2) {
+  max-width: 0;
+  width: 99%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- «До первого скина N ✨» -----------------------------------------------
+   .matchFirstSkin — то, что реально рендерит client.js. .firstSkinProgress —
+   имя из контракта онбординга. Оформление общее, чтобы не разъехалось. */
+.matchFirstSkin,
+.firstSkinProgress {
+  margin-top: 10px;
+  padding: var(--pad-md) var(--pad-lg);
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--gold) 28%, var(--border2));
+  background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--gold) 10%, transparent),
+      transparent 62%
+    ),
+    rgba(0, 0, 0, 0.18);
+}
+
+.matchFirstSkinTop,
+.firstSkinProgressTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.matchFirstSkinLabel,
+.firstSkinProgressLabel {
+  font-size: var(--fs-11);
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.matchFirstSkinValue,
+.firstSkinProgressValue {
+  flex: 0 0 auto;
+  font-size: var(--fs-14);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--gold);
+}
+
+.matchFirstSkinBar,
+.firstSkinProgressBar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+
+/* Ширину client.js задаёт инлайновым style="width:…%" */
+.matchFirstSkinFill,
+.firstSkinProgressFill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  max-width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 85%, transparent), var(--gold));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--gold) 45%, transparent);
+  transition: width 420ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.matchFirstSkinSub,
+.firstSkinProgressSub {
+  margin-top: 6px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   ЗАКРЫТИЕ ПРОБЕЛОВ: классы, которые client.js уже навешивает, но правил для
+   них в файле не было — визуально логика была немой.
+   ========================================================================== */
+
+/* Разделитель тиров в магазине. Цвет берёт из .tierBase/.tierRare/... */
+.cosmeticsTierSep {
+  margin-top: 10px;
+  padding: 4px 2px;
+  font-size: var(--fs-11);
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted2);
+  border-bottom: 1px solid var(--border2);
+}
+
+.cosmeticsTierSep.tierCommon { color: var(--tier-common); }
+.cosmeticsTierSep.tierRare { color: var(--tier-rare); }
+.cosmeticsTierSep.tierEpic { color: var(--tier-epic); }
+.cosmeticsTierSep.tierLegendary { color: var(--tier-legendary); }
+.cosmeticsTierSep.tierMythic { color: var(--tier-mythic); }
+
+/* Покупка отправлена, но сервер ещё не подтвердил — состояние было немым */
+.cosmeticsItemSub.isUnconfirmed {
+  color: var(--tier-legendary);
+  font-style: italic;
+}
+
+/* Заливка прогресса до покупки: client.js даёт ей собственный класс */
+.cosmeticsItemProgressFill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  max-width: 100%;
+  border-radius: 999px;
+}
+
+/* --- Верхний HUD: цель, контракт, баунти, срочность ------------------------ */
+.topHudObjective {
+  display: block;
+  color: var(--muted2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topHudChip {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent2) 38%, var(--border2));
+  background: color-mix(in srgb, var(--accent2) 12%, rgba(0, 0, 0, 0.24));
+  color: rgba(255, 255, 255, 0.92);
+  font-size: var(--fs-11);
+  font-weight: 900;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.topHudBounty {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--tier-legendary) 45%, var(--border2));
+  background: color-mix(in srgb, var(--tier-legendary) 14%, rgba(0, 0, 0, 0.24));
+  color: #fff3d6;
+  font-size: var(--fs-11);
+  font-weight: 900;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Баунти на самом игроке — это уже не информация, а угроза */
+.topHudBounty.isMe {
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  background: color-mix(in srgb, var(--accent) 20%, rgba(0, 0, 0, 0.24));
+  color: #ffe3ec;
+  animation: urgentPulse 1.1s ease-in-out infinite;
+}
+
+/* Меньше 30 секунд до конца матча */
+.topHudTime.isUrgent {
+  color: var(--accent);
+  animation: urgentPulse 1.2s ease-in-out infinite;
+}
+
+/* --- Панель команды и перф ------------------------------------------------- */
+.teamTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+
+.teamTable td {
+  padding: 3px 6px;
+}
+
+/* Имя — единственная резиновая колонка; рамки профиля .frame0..7 живут на <tr> */
+.teamTable td:nth-child(2) {
+  max-width: 0;
+  width: 99%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamTable td.num,
+.teamTable td:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.perfValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.perfValue.bad {
+  color: var(--accent);
+}
+
+/* Счётчик киллов в боевом чипе */
+.hudComboKills {
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Уход строки из лидерборда — парная анимация к .lb-enter, правила не было */
+@keyframes lbLeave {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.lb-leave {
+  animation: lbLeave 180ms ease-in both;
+}
+
+/* Подсветка ввода чата под инпутом (twemoji-парсинг) не должна ловить клики */
+.chatInputText {
+  pointer-events: none;
+  white-space: pre;
+}
+
+/* ==========================================================================
+   ТИТУЛЫ: страховка на текущую разметку client.js.
+   Правила .titleItem/.titleMedal/... выше рассчитаны на выделенную разметку.
+   Фактически renderCosmeticsTitles() переиспользует .cosmeticsItem — поэтому
+   золотой «наградной» вид навешиваем и на него, через контейнер .isTitles.
+   Когда client.js перейдёт на .titleItem, оба набора дадут один результат.
+   ========================================================================== */
+.cosmeticsItems.isTitles .cosmeticsItem {
+  border-color: color-mix(in srgb, var(--gold) 22%, var(--border2));
+  border-left: 4px solid color-mix(in srgb, var(--gold) 45%, transparent);
+  background: radial-gradient(
+      120% 140% at 0% 50%,
+      color-mix(in srgb, var(--gold) 10%, transparent),
+      transparent 60%
+    ),
+    rgba(0, 0, 0, 0.18);
+}
+
+/* Титул не покупается — тировая раскраска и валюта сюда не приходят */
+.cosmeticsItems.isTitles .cosmeticsItem::before {
+  content: none;
+}
+
+.cosmeticsItems.isTitles .cosmeticsItem.isLocked {
+  border-left-color: var(--border);
+  background: rgba(0, 0, 0, 0.26);
+}
+
+.cosmeticsItems.isTitles .cosmeticsItem.isLocked .cosmeticsItemPreview {
+  filter: grayscale(1);
+  opacity: 0.7;
+}
+
+.cosmeticsItems.isTitles .cosmeticsItem.isEquipped {
+  border-color: color-mix(in srgb, var(--gold) 60%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 24%, transparent);
+}
+
+.cosmeticsItems.isTitles .cosmeticsItem.isEquipped .cosmeticsItemTitle {
+  color: color-mix(in srgb, var(--gold) 45%, #fff);
+}
+
+/* «Условие получения» вместо «где это видно» — тот же элемент, другой смысл */
+.cosmeticsItems.isTitles .cosmeticsItemWhere {
+  color: color-mix(in srgb, var(--gold) 62%, var(--text));
+  font-weight: 800;
+}
+
+.cosmeticsItems.isTitles .cosmeticsItemProgress {
+  --tier-color: var(--gold);
+}
+
+/* Список из 13 карточек длиннее экрана. Прокручивается сама лента предметов,
+   а фильтры и вкладки категорий остаются на месте — иначе на 375px до
+   последнего титула нужно проскроллить всю карточку оверлея. */
+.cosmeticsItems {
+  max-height: min(52dvh, 460px);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  /* место под скроллбар, чтобы фокус-кольцо карточки не срезалось */
+  padding-right: 4px;
+  scroll-padding-block: 8px;
+}
+
+/* ==========================================================================
+   МОБИЛЬНЫЙ ИГРОВОЙ ЭКРАН: добор после аудита 375×667.
+   ========================================================================== */
+
+@media (max-width: 720px) {
+  /* Мёртвая зона змейки на мобильном шире: HUD-строк две, а не одна. */
+  :root {
+    --onboard-top: calc(var(--sa-top) + 122px);
+    /* 8 (отступ) + 52 (свёрнутый чат) + 128 (стек из двух тостов) + 8 (зазор) */
+    --onboard-bottom: calc(var(--sa-bottom) + 196px);
+    /* Единственный источник правды для высоты развёрнутого чата: её читают
+       и сам #chat, и смещение стека тостов над ним. */
+    --chat-max-mobile: min(30dvh, 220px);
+  }
+
+  .onboardHint {
+    font-size: var(--fs-12);
+    padding: 7px 12px;
+    max-width: calc(100vw - 24px - var(--sa-left) - var(--sa-right));
+  }
+
+  /* Развёрнутый чат съедает низ — подсказку уводим наверх принудительно */
+  body:has(#chat:not(.collapsed)) .onboardHint.isBottom {
+    top: var(--onboard-top);
+    bottom: auto;
+  }
+
+  .onboardStepToast {
+    padding: var(--pad-sm) var(--pad-md);
+    gap: 8px;
+  }
+
+  .onboardStepToast::before,
+  .onboardStepToastIcon {
+    width: 26px;
+    height: 26px;
+    font-size: var(--fs-14);
+  }
+
+  /* Чат по умолчанию свёрнут в кнопку; развёрнутый не должен занимать пол-экрана.
+     Потолок 30dvh держит верхнюю кромку чата ниже 69% высоты — голова змейки
+     (камера центрирует её ровно на 50%) остаётся открытой при любом состоянии.
+     Тот же размер читает стек тостов выше — держим его в одной переменной. */
+  #chat:not(.collapsed) {
+    max-height: var(--chat-max-mobile);
+  }
+
+  /* #emojiBtn оставался 40px шириной: min-height ниже его не расширял */
+  #emojiBtn,
+  #chatBtn {
+    min-width: 44px;
+  }
+
+  /* Восемь колонок эмодзи на 375px давали ячейку 32px. auto-fill сам подбирает
+     столько колонок, сколько влезает при минимуме 44px. */
+  #emojiGrid {
+    grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    padding-right: 46px;
+  }
+
+  #emojiGrid button,
+  #emojiRecent button {
+    min-width: 44px;
+    min-height: 44px;
+    /* aspect-ratio выше уже держит квадрат, но при растянутой колонке
+       высота не должна опускаться ниже тач-минимума */
+    aspect-ratio: auto;
+    height: 44px;
+  }
+
+  #emojiCloseBtn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Тач-цель свёрнутого чата — целиком шапка, а не текст внутри */
+  #chat.collapsed #chatHeader {
+    min-height: 44px;
+  }
+
+  /* .chatCollapseBtn создаётся из client.js и наследует .iconBtn 40×40 —
+     единственная тач-цель игрового экрана, не дотягивавшая до 44px. */
+  .chatCollapseBtn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Магазин на телефоне: лента предметов и так внутри скроллящейся карточки —
+     двойной скролл мешает, отдаём прокрутку карточке. */
+  .cosmeticsItems {
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  /* Итоги матча: место крупнее, но не в ущерб ширине */
+  .matchKpiGrid .matchKpi:first-child .matchKpiValue {
+    font-size: 34px;
+  }
+
+  .matchTable td,
+  .matchTable th {
+    padding: 6px 6px;
+    font-size: var(--fs-12);
+  }
+}
+
+@media (max-width: 520px) {
+  /* Правая панель здесь уже display:none — топ-HUD забирает всю ширину, а
+     подсказка поднимается под один ряд иконок. */
+  :root {
+    --onboard-top: calc(var(--sa-top) + 118px);
+  }
+
+  /* Шесть колонок в 375px помещаются только «в упор»: числа и так табличные,
+     поэтому режем горизонтальные отступы, а не колонки — прятать смерти/киллы
+     нельзя, они и есть новые данные, ради которых экран переделан. */
+  .matchTable td,
+  .matchTable th {
+    padding: 6px 4px;
+  }
+
+  .deathExplain {
+    font-size: var(--fs-13);
+    padding: var(--pad-md);
+  }
+}
+
+/* Тач-цели: игровые контролы вне .overlay блок @media (pointer: coarse) выше
+   не покрывал — там перечислены только элементы внутри оверлеев. */
+@media (pointer: coarse) {
+  #hud .iconBtn,
+  #chat button,
+  .chatCollapseBtn,
+  #emojiPanel button,
+  #nameRow button,
+  #rightSidebar summary,
+  .rightDetailsSummary {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  #emojiGrid button,
+  .emojiRow button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Свёрнутый чат — основная кнопка нижнего края экрана */
+  #chat.collapsed #chatHeader {
+    min-height: 44px;
+  }
+
+  /* Итоговые кнопки матча и смерти: на тач-экране это три соседние цели */
+  .matchNextActions > *,
+  .matchActions > * {
+    min-height: 48px;
+  }
+}
+
+/* ==========================================================================
+   Точечное отключение анимаций волны. Общий блок выше уже сводит длительности
+   к 0.001ms, но здесь снимаем именно бесконечные и «влётные» анимации, чтобы
+   элементы оставались в конечном, читаемом состоянии.
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .onboardHint,
+  .onboardStepToast,
+  .reclaimHint,
+  #bigBanner.isOn.firstCaptureBanner,
+  .topHudBounty.isMe,
+  .topHudTime.isUrgent,
+  .lb-leave,
+  .overlay .card {
+    animation: none;
+  }
+
+  /* Без «влёта» подсказка обязана быть видимой и на месте */
+  .onboardHint {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
+
+  #bigBanner.isOn.firstCaptureBanner {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  .lb-leave {
+    opacity: 0;
+  }
+
+  .matchFirstSkinFill,
+  .firstSkinProgressFill,
+  .reclaimHintFill {
+    transition: none;
+  }
 }
