@@ -113,6 +113,10 @@ var cosmeticsPrices = map[string][CosmeticsMaxID + 1]uint16{
 	"seg":       {0, 160, 55, 210, 360, 90, 580, 950},
 	"head":      {0, 50, 75, 135, 175, 300, 500, 800},
 	"capturefx": {0, 65, 100, 180, 240, 410, 660, 1050},
+	// Territory fill style: the largest painted surface on screen.
+	"terr": {0, 60, 90, 150, 220, 360, 600, 980},
+	// Death effect: seen by the victim and the killer alike.
+	"death": {0, 55, 85, 140, 210, 340, 560, 900},
 }
 
 func cosmeticsCatKey(cat string) string {
@@ -665,6 +669,8 @@ const (
 	EventDailyComplete    = 17
 	EventAchievement      = 18
 	EventCapture          = 19
+	// EventReclaim: F5, a player took his cooling territory back.
+	EventReclaim = 20
 )
 
 const (
@@ -956,6 +962,16 @@ type Room struct {
 	gridStamp  []uint32
 	trailStamp []uint32
 
+	// F5 "Reclaim": cells of a dead player stay unowned but remembered for
+	// ReclaimTicks. Their former owner takes the whole connected patch back by
+	// touching any of it; after the deadline the patch is dropped for good.
+	coolOwner []uint16
+	coolUntil []uint32
+	// coolBatches is the expiry work queue: one entry per death, processed with
+	// a per-tick budget so a big estate never stalls a tick.
+	coolBatches []coolBatch
+	coolCursor  int
+
 	changedGrid  []uint32
 	changedTrail []uint32
 
@@ -1193,6 +1209,13 @@ type Player struct {
 	cosSeg          uint8
 	cosNameplate    uint8
 	cosFrame        uint8
+	// Extra categories and the title travel in the JSON "cosExtra" message, not
+	// in the binary ROI record (its layout is frozen at 21 bytes).
+	cosInvTerr  uint8
+	cosInvDeath uint8
+	cosTerr     uint8
+	cosDeath    uint8
+	titleID     uint8
 
 	contractType     uint8
 	contractGoal     uint16
@@ -1249,8 +1272,17 @@ type Profile struct {
 	CosEqSeg        uint8 `json:"cosEqSeg"`
 	CosEqNameplate  uint8 `json:"cosEqNameplate"`
 	CosEqFrame      uint8 `json:"cosEqFrame"`
+	// Categories added later. Old profile files have no such keys, so they load
+	// as 0 and ensureProfileCosmeticsLocked grants bit 0 (the free default).
+	CosInvTerr  uint8 `json:"cosInvTerr"`
+	CosInvDeath uint8 `json:"cosInvDeath"`
+	CosEqTerr   uint8 `json:"cosEqTerr"`
+	CosEqDeath  uint8 `json:"cosEqDeath"`
 
 	AchvMask uint32 `json:"achvMask"`
+	// TitleID is the equipped title. Titles are never bought, only unlocked by
+	// achievements; 0 means "no title".
+	TitleID uint8 `json:"titleId"`
 
 	LastSeen int64 `json:"lastSeen"`
 
@@ -1264,49 +1296,94 @@ func ensureProfileCosmeticsLocked(pr *Profile) {
 	if pr == nil {
 		return
 	}
-	if pr.CosInvCaptureFx == 0 {
-		pr.CosInvCaptureFx = 1
-	}
-	if pr.CosInvHead == 0 {
-		pr.CosInvHead = 1
-	}
-	if pr.CosInvSeg == 0 {
-		pr.CosInvSeg = 1
-	}
-	if pr.CosInvNameplate == 0 {
-		pr.CosInvNameplate = 1
-	}
-	if pr.CosInvFrame == 0 {
-		pr.CosInvFrame = 1
-	}
-
-	clamp := func(v uint8) uint8 {
-		if v > CosmeticsMaxID {
-			return 0
+	// One pass per category: grant the free default, clamp the equipped id and
+	// drop an equip the profile does not actually own.
+	fix := func(inv *uint8, eq *uint8) {
+		if *inv == 0 {
+			*inv = 1
 		}
-		return v
+		if *eq > CosmeticsMaxID {
+			*eq = 0
+		}
+		if (*inv & (uint8(1) << *eq)) == 0 {
+			*eq = 0
+		}
 	}
-	pr.CosEqCaptureFx = clamp(pr.CosEqCaptureFx)
-	pr.CosEqHead = clamp(pr.CosEqHead)
-	pr.CosEqSeg = clamp(pr.CosEqSeg)
-	pr.CosEqNameplate = clamp(pr.CosEqNameplate)
-	pr.CosEqFrame = clamp(pr.CosEqFrame)
+	fix(&pr.CosInvCaptureFx, &pr.CosEqCaptureFx)
+	fix(&pr.CosInvHead, &pr.CosEqHead)
+	fix(&pr.CosInvSeg, &pr.CosEqSeg)
+	fix(&pr.CosInvNameplate, &pr.CosEqNameplate)
+	fix(&pr.CosInvFrame, &pr.CosEqFrame)
+	fix(&pr.CosInvTerr, &pr.CosEqTerr)
+	fix(&pr.CosInvDeath, &pr.CosEqDeath)
 
-	if (pr.CosInvCaptureFx & (uint8(1) << pr.CosEqCaptureFx)) == 0 {
-		pr.CosEqCaptureFx = 0
+	// A title stays equipped only while its achievement is still unlocked.
+	if pr.TitleID != 0 && (titleMaskLocked(pr)&(uint32(1)<<uint32(pr.TitleID))) == 0 {
+		pr.TitleID = 0
 	}
-	if (pr.CosInvHead & (uint8(1) << pr.CosEqHead)) == 0 {
-		pr.CosEqHead = 0
+}
+
+// ---------------------------------------------------------------------------
+// Titles: status earned from achievements, never sold for currency.
+// ---------------------------------------------------------------------------
+
+// TitleMaxID is the highest title id; ids index bits of a uint32 mask.
+const TitleMaxID = 12
+
+// titleRule binds a title id to the achievement that unlocks it.
+type titleRule struct {
+	id   uint8
+	achv uint8
+	name string
+}
+
+var titleRules = []titleRule{
+	{1, AchvKills10, "Боец"},
+	{2, AchvKills100, "Нагибатор"},
+	{3, AchvKills1000, "Легенда"},
+	{4, AchvCapture10k, "Землевладелец"},
+	{5, AchvCapture100k, "Картограф"},
+	{6, AchvRevenge15, "Мститель"},
+	{7, AchvContracts25, "Подрядчик"},
+	{8, AchvContracts100, "Исполнитель"},
+	{9, AchvBounty15, "Охотник за головами"},
+	{10, AchvStyle10000, "Модник"},
+	{11, AchvStreak7, "Завсегдатай"},
+	{12, AchvStreak30, "Преданный"},
+}
+
+// titlesPayload renders the "achievement -> title" table for the "hello"
+// message, so the client can name titles and know what unlocks them.
+func titlesPayload() []map[string]any {
+	out := make([]map[string]any, 0, len(titleRules))
+	for _, tr := range titleRules {
+		out = append(out, map[string]any{"id": tr.id, "achv": tr.achv, "name": tr.name})
 	}
-	if (pr.CosInvSeg & (uint8(1) << pr.CosEqSeg)) == 0 {
-		pr.CosEqSeg = 0
+	return out
+}
+
+// titleMaskLocked returns the bitmask of unlocked title ids. Bit 0 ("no title")
+// is always set. Caller holds profilesMu.
+func titleMaskLocked(pr *Profile) uint32 {
+	mask := uint32(1)
+	if pr == nil {
+		return mask
 	}
-	if (pr.CosInvNameplate & (uint8(1) << pr.CosEqNameplate)) == 0 {
-		pr.CosEqNameplate = 0
+	for _, tr := range titleRules {
+		if pr.AchvMask&(uint32(1)<<uint32(tr.achv)) != 0 {
+			mask |= uint32(1) << uint32(tr.id)
+		}
 	}
-	if (pr.CosInvFrame & (uint8(1) << pr.CosEqFrame)) == 0 {
-		pr.CosEqFrame = 0
+	return mask
+}
+
+// titleUnlockedLocked reports whether a title id may be equipped.
+// Caller holds profilesMu.
+func titleUnlockedLocked(pr *Profile, id uint8) bool {
+	if id > TitleMaxID {
+		return false
 	}
+	return titleMaskLocked(pr)&(uint32(1)<<uint32(id)) != 0
 }
 
 var profilesMu sync.Mutex
@@ -2285,6 +2362,8 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 		cosInvSeg:       1,
 		cosInvNameplate: 1,
 		cosInvFrame:     1,
+		cosInvTerr:      1,
+		cosInvDeath:     1,
 		cosCaptureFx:    0,
 		cosHead:         0,
 		cosSeg:          0,
@@ -2379,6 +2458,9 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	}
 
 	rm.broadcastJSON(ctx, "nameUpdate", map[string]any{"n": pnum, "nm": rmDisplayName(rm, pnum)})
+	// The newcomer needs the whole room, everyone else needs the newcomer:
+	// one full broadcast covers both.
+	rm.broadcastCosExtra(ctx)
 }
 
 func rmDisplayName(rm *Room, num uint16) string {
@@ -2395,6 +2477,12 @@ func cosmeticsStatePayload(p *Player) map[string]any {
 	if p == nil {
 		return map[string]any{}
 	}
+	titleMask := uint32(1)
+	if pr := profileForKey(p.profileKey); pr != nil {
+		profilesMu.Lock()
+		titleMask = titleMaskLocked(pr)
+		profilesMu.Unlock()
+	}
 	return map[string]any{
 		"style":        p.style,
 		"invCaptureFx": p.cosInvCaptureFx,
@@ -2402,12 +2490,53 @@ func cosmeticsStatePayload(p *Player) map[string]any {
 		"invSeg":       p.cosInvSeg,
 		"invNameplate": p.cosInvNameplate,
 		"invFrame":     p.cosInvFrame,
+		"invTerr":      p.cosInvTerr,
+		"invDeath":     p.cosInvDeath,
 		"eqCaptureFx":  p.cosCaptureFx,
 		"eqHead":       p.cosHead,
 		"eqSeg":        p.cosSeg,
 		"eqNameplate":  p.cosNameplate,
 		"eqFrame":      p.cosFrame,
+		"eqTerr":       p.cosTerr,
+		"eqDeath":      p.cosDeath,
+		"titleId":      p.titleID,
+		"titleMask":    titleMask,
 	}
+}
+
+// cosExtraEntry is one row of the "cosExtra" message: the cosmetic categories
+// that deliberately stay out of the frozen 21-byte binary player record.
+type cosExtraEntry struct {
+	N     uint16 `json:"n"`
+	Terr  uint8  `json:"terr"`
+	Death uint8  `json:"death"`
+	Title uint8  `json:"title"`
+}
+
+// cosExtraPayloadLocked snapshots every player in the room. Caller holds r.mu;
+// the result must be broadcast after releasing it (broadcastJSON takes r.mu).
+func (r *Room) cosExtraPayloadLocked() map[string]any {
+	list := make([]cosExtraEntry, 0, len(r.players))
+	for num, p := range r.players {
+		if p == nil {
+			continue
+		}
+		list = append(list, cosExtraEntry{N: num, Terr: p.cosTerr, Death: p.cosDeath, Title: p.titleID})
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].N < list[j].N })
+	return map[string]any{"players": list}
+}
+
+// broadcastCosExtra rebuilds and pushes the full list. It is small (<= 30 rows)
+// so a full resend on every change is cheaper than tracking deltas.
+func (r *Room) broadcastCosExtra(ctx context.Context) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	payload := r.cosExtraPayloadLocked()
+	r.mu.Unlock()
+	r.broadcastJSON(ctx, "cosExtra", payload)
 }
 
 func cosmeticsStatePayloadFromProfile(pr *Profile) map[string]any {
@@ -2421,11 +2550,17 @@ func cosmeticsStatePayloadFromProfile(pr *Profile) map[string]any {
 		"invSeg":       pr.CosInvSeg,
 		"invNameplate": pr.CosInvNameplate,
 		"invFrame":     pr.CosInvFrame,
+		"invTerr":      pr.CosInvTerr,
+		"invDeath":     pr.CosInvDeath,
 		"eqCaptureFx":  pr.CosEqCaptureFx,
 		"eqHead":       pr.CosEqHead,
 		"eqSeg":        pr.CosEqSeg,
 		"eqNameplate":  pr.CosEqNameplate,
 		"eqFrame":      pr.CosEqFrame,
+		"eqTerr":       pr.CosEqTerr,
+		"eqDeath":      pr.CosEqDeath,
+		"titleId":      pr.TitleID,
+		"titleMask":    titleMaskLocked(pr),
 	}
 }
 
@@ -2594,6 +2729,8 @@ func newRoom(hub *Hub, id int, limit int) *Room {
 		gridPos:          make([]int32, N),
 		gridStamp:        make([]uint32, N),
 		trailStamp:       make([]uint32, N),
+		coolOwner:        make([]uint16, N),
+		coolUntil:        make([]uint32, N),
 		changedGrid:      make([]uint32, 0, 4096),
 		changedTrail:     make([]uint32, 0, 4096),
 		minimapGrid:      make([]uint32, 0, 4096),
@@ -2705,7 +2842,13 @@ func (r *Room) resetMatchLocked() {
 		r.gridPos[i] = 0
 		r.gridStamp[i] = 0
 		r.trailStamp[i] = 0
+		if r.coolOwner != nil {
+			r.coolOwner[i] = 0
+			r.coolUntil[i] = 0
+		}
 	}
+	r.coolBatches = nil
+	r.coolCursor = 0
 	if r.changedGrid != nil {
 		r.changedGrid = r.changedGrid[:0]
 	}
@@ -3475,6 +3618,11 @@ func (r *Room) buildEventsPooledLocked(force bool) *pooledData {
 		case EventAchievement:
 			b = appendU16LE(b, e.A)
 			b = append(b, e.D)
+		case EventReclaim:
+			b = appendU16LE(b, e.A)
+			b = appendU16LE(b, e.B)
+			b = appendU16LE(b, e.X)
+			b = appendU16LE(b, e.Y)
 		default:
 			b = append(b, 0)
 		}
@@ -4270,6 +4418,154 @@ func (r *Room) broadcastJSON(ctx context.Context, typ string, data any) {
 	}
 }
 
+// F5 "Reclaim" tunables.
+const (
+	// ReclaimTicks: 200 ticks == 20s at 100ms per tick.
+	ReclaimTicks = 200
+	// ReclaimExpireBudget bounds how many cells the expiry queue retires per
+	// tick, so a huge estate can never stall a tick.
+	ReclaimExpireBudget = 1024
+	// coolOwnerFlag marks a grid value on the wire as "cooling territory of
+	// player (value &^ coolOwnerFlag)". Player numbers never reach 0x8000.
+	coolOwnerFlag = uint16(0x8000)
+)
+
+// coolBatch is one death's worth of cooling cells, retired together.
+type coolBatch struct {
+	until uint32
+	cells []int
+}
+
+// coolWireAt returns the grid value to put on the wire for an unowned cell:
+// coolOwnerFlag|owner while the cell is still reclaimable, 0 otherwise.
+func (r *Room) coolWireAt(i int) uint16 {
+	if r.coolOwner == nil || i < 0 || i >= len(r.coolOwner) {
+		return 0
+	}
+	if r.coolOwner[i] == 0 || r.coolUntil[i] <= r.tick {
+		return 0
+	}
+	return coolOwnerFlag | r.coolOwner[i]
+}
+
+// gridWireAt is the grid value clients receive for a cell.
+func (r *Room) gridWireAt(i int) uint16 {
+	if v := r.gridOwner[i]; v != 0 {
+		return v
+	}
+	return r.coolWireAt(i)
+}
+
+// clearCoolCell drops the cooling state of a cell without emitting a change:
+// the caller is about to write a real owner into it.
+func (r *Room) clearCoolCell(i int) {
+	if r.coolOwner == nil || i < 0 || i >= len(r.coolOwner) {
+		return
+	}
+	r.coolOwner[i] = 0
+	r.coolUntil[i] = 0
+}
+
+// expireCoolCell retires one cooling cell and tells the clients it is gone.
+func (r *Room) expireCoolCell(i int) {
+	if r.coolOwner[i] == 0 {
+		return
+	}
+	r.coolOwner[i] = 0
+	r.coolUntil[i] = 0
+	if r.gridOwner[i] != 0 {
+		return
+	}
+	r.gridStamp[i] = r.tick
+	r.changedGrid = append(r.changedGrid, packChange(uint16(i), 0))
+	r.minimapGrid = append(r.minimapGrid, packChange(uint16(i), 0))
+	if len(r.minimapGrid) > MinimapMaxChanges {
+		r.minimapDirty = true
+	}
+}
+
+// stepCoolExpiry retires due batches with a fixed per-tick budget.
+// Caller holds r.mu.
+func (r *Room) stepCoolExpiry() {
+	if r.coolOwner == nil {
+		return
+	}
+	budget := ReclaimExpireBudget
+	for budget > 0 && len(r.coolBatches) > 0 {
+		b := r.coolBatches[0]
+		if b.until > r.tick {
+			// Batches are appended in deadline order, so the head gates the rest.
+			return
+		}
+		for r.coolCursor < len(b.cells) && budget > 0 {
+			i := b.cells[r.coolCursor]
+			r.coolCursor++
+			budget--
+			if i < 0 || i >= N {
+				continue
+			}
+			// Skip cells that were reclaimed, retaken, or re-cooled later.
+			if r.coolOwner[i] == 0 || r.coolUntil[i] > r.tick {
+				continue
+			}
+			r.expireCoolCell(i)
+		}
+		if r.coolCursor < len(b.cells) {
+			return
+		}
+		r.coolBatches[0].cells = nil
+		r.coolBatches = r.coolBatches[1:]
+		r.coolCursor = 0
+	}
+}
+
+// reclaimCoolRegion gives the connected patch of cooling cells that touch
+// `start` back to its former owner. Returns the number of cells restored.
+func (r *Room) reclaimCoolRegion(p *Player, start int) int {
+	if p == nil || r.coolOwner == nil {
+		return 0
+	}
+	if start < 0 || start >= N || r.coolOwner[start] != p.num || r.coolUntil[start] <= r.tick {
+		return 0
+	}
+	q := r.bfsQ[:0]
+	q = append(q, start)
+	r.clearCoolCell(start)
+	n := 0
+	for len(q) > 0 {
+		i := q[len(q)-1]
+		q = q[:len(q)-1]
+		r.setGrid(i, p.num)
+		n++
+		x := i % W
+		y := i / W
+		push := func(j int) {
+			if j < 0 || j >= N {
+				return
+			}
+			if r.coolOwner[j] != p.num || r.coolUntil[j] <= r.tick {
+				return
+			}
+			r.clearCoolCell(j)
+			q = append(q, j)
+		}
+		if x > 0 {
+			push(i - 1)
+		}
+		if x < W-1 {
+			push(i + 1)
+		}
+		if y > 0 {
+			push(i - W)
+		}
+		if y < H-1 {
+			push(i + W)
+		}
+	}
+	r.bfsQ = q[:0]
+	return n
+}
+
 func (r *Room) setGrid(i int, owner uint16) {
 	prev := r.gridOwner[i]
 	if prev == owner {
@@ -4279,9 +4575,17 @@ func (r *Room) setGrid(i int, owner uint16) {
 		r.removeOwnedCell(prev, i)
 	}
 	r.gridOwner[i] = owner
+	if owner != 0 {
+		// A real owner always wins over a cooling claim.
+		r.clearCoolCell(i)
+	}
+	wire := owner
+	if owner == 0 {
+		wire = r.coolWireAt(i)
+	}
 	r.gridStamp[i] = r.tick
-	r.changedGrid = append(r.changedGrid, packChange(uint16(i), owner))
-	r.minimapGrid = append(r.minimapGrid, packChange(uint16(i), owner))
+	r.changedGrid = append(r.changedGrid, packChange(uint16(i), wire))
+	r.minimapGrid = append(r.minimapGrid, packChange(uint16(i), wire))
 	if len(r.minimapGrid) > MinimapMaxChanges {
 		r.minimapDirty = true
 	}
@@ -4355,10 +4659,35 @@ func (r *Room) removeOwnedCell(num uint16, i int) {
 	}
 }
 
+// clearPlayerCells wipes a player's territory and trail. On death the cells go
+// into the reclaim cooldown instead of vanishing (F5); when the player leaves
+// the room for good they are dropped immediately.
 func (r *Room) clearPlayerCells(num uint16, p *Player) {
+	r.clearPlayerCellsCooling(num, p, true)
+}
+
+func (r *Room) clearPlayerCellsCooling(num uint16, p *Player, cool bool) {
+	cool = cool && r.coolOwner != nil && num != 0
+	var batch []int
+	if cool && len(p.owned) > 0 {
+		batch = make([]int, 0, len(p.owned))
+	}
+	until := r.tick + ReclaimTicks
 	for len(p.owned) > 0 {
 		i := p.owned[len(p.owned)-1]
+		if cool {
+			// Set before setGrid: the emitted change then already carries the
+			// cooling value, so one delta entry per cell is enough.
+			r.coolOwner[i] = num
+			r.coolUntil[i] = until
+			batch = append(batch, i)
+		} else if r.coolOwner != nil {
+			r.clearCoolCell(i)
+		}
 		r.setGrid(i, 0)
+	}
+	if len(batch) > 0 {
+		r.coolBatches = append(r.coolBatches, coolBatch{until: until, cells: batch})
 	}
 	for len(p.trail) > 0 {
 		i := p.trail[len(p.trail)-1]
@@ -4374,7 +4703,8 @@ func (r *Room) removePlayer(num uint16) {
 	if p == nil {
 		return
 	}
-	r.clearPlayerCells(num, p)
+	// A player who is gone leaves nothing to reclaim.
+	r.clearPlayerCellsCooling(num, p, false)
 	delete(r.players, num)
 	delete(r.scores, num)
 	delete(r.points, num)
@@ -7550,6 +7880,18 @@ func (r *Room) applyMove(p *Player) {
 	}
 
 	owns := r.gridOwner[i] == p.num
+	if !owns && r.coolWireAt(i) == (coolOwnerFlag|p.num) {
+		// F5: stepping on your own cooling ground takes the whole connected
+		// patch back at once.
+		if n := r.reclaimCoolRegion(p, i); n > 0 {
+			owns = true
+			cells := uint16(n)
+			if n > int(^uint16(0)) {
+				cells = ^uint16(0)
+			}
+			r.pushEvent(Event{Kind: EventReclaim, A: p.num, B: cells, X: uint16(p.x), Y: uint16(p.y)})
+		}
+	}
 	if !owns {
 		// F2: stepping outside home ends the grace, so it cannot be used as a
 		// battering ram.
@@ -7671,6 +8013,9 @@ func (r *Room) step() {
 		}
 		return
 	}
+
+	// F5: retire cooling cells whose window has run out (amortized).
+	r.stepCoolExpiry()
 
 	r.maybeUpdateMutator()
 	r.maybeUpdateBounty()
@@ -8117,7 +8462,7 @@ func (r *Room) buildROIPooledScan(rx, ry, rw, rh int, full bool, sinceTick uint3
 		for x := rx; x < rx+rw; x++ {
 			i := row + x
 			if full || r.gridStamp[i] > sinceTick {
-				dg = append(dg, packChange(uint16(i), r.gridOwner[i]))
+				dg = append(dg, packChange(uint16(i), r.gridWireAt(i)))
 			}
 			if full || r.trailStamp[i] > sinceTick {
 				dt = append(dt, packChange(uint16(i), r.trailOwner[i]))
@@ -8273,7 +8618,7 @@ func (r *Room) buildMinimapChunkBinary(full bool) []byte {
 				gy := y0 + yy
 				var v uint16
 				if gx >= 0 && gx < W && gy >= 0 && gy < H {
-					v = r.gridOwner[gy*W+gx]
+					v = r.gridWireAt(gy*W + gx)
 				}
 				binary.LittleEndian.PutUint16(b2[:], v)
 				out = append(out, b2[:]...)
@@ -8294,7 +8639,7 @@ func (r *Room) buildROIBinary(rx, ry, rw, rh int, full bool, sinceTick uint32, p
 		for x := rx; x < rx+rw; x++ {
 			i := row + x
 			if full || r.gridStamp[i] > sinceTick {
-				dg = append(dg, packChange(uint16(i), r.gridOwner[i]))
+				dg = append(dg, packChange(uint16(i), r.gridWireAt(i)))
 			}
 			if full || r.trailStamp[i] > sinceTick {
 				dt = append(dt, packChange(uint16(i), r.trailOwner[i]))
@@ -8454,8 +8799,8 @@ func (r *Room) buildStateBinary(full bool) []byte {
 		o += 4
 		binary.LittleEndian.PutUint32(out[o:], uint32(trailBytes))
 		o += 4
-		for _, v := range r.gridOwner {
-			binary.LittleEndian.PutUint16(out[o:], v)
+		for i := range r.gridOwner {
+			binary.LittleEndian.PutUint16(out[o:], r.gridWireAt(i))
 			o += 2
 		}
 		for _, v := range r.trailOwner {

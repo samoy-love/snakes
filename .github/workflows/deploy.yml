@@ -1,0 +1,98 @@
+name: deploy
+
+# Production deploy of the Snakes server.
+#   * automatically on a v* tag (v1.2.3)
+#   * manually via "Run workflow" (workflow_dispatch)
+#
+# Requires these repository secrets (Settings -> Secrets and variables -> Actions):
+#   SSH_HOST      production host, e.g. 207.127.93.34
+#   SSH_USER      deploy user, e.g. ubuntu
+#   SSH_KEY       full OpenSSH PRIVATE key of that user (BEGIN/END lines included)
+#   SSH_PORT      (optional) ssh port, default 22
+#   DEPLOY_PATH   (optional) release root, default /opt/snakes
+#   HEALTH_URL    (optional) public healthcheck URL, default https://snakes.samoy.love/healthz
+# Optional repository variables (vars.*):
+#   DEPLOY_GOARCH default arm64 (the production host is Oracle Ampere / aarch64)
+#   DEPLOY_SERVICE default snakes
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to deploy (default: the checked out ref)'
+        required: false
+        default: ''
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build (sanity, host arch)
+        run: go build ./...
+
+      - name: Install SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${SSH_PORT:-22}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+        env:
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PORT: ${{ secrets.SSH_PORT || '22' }}
+          DEPLOY_KEY: /home/runner/.ssh/deploy_key
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/snakes' }}
+          DEPLOY_SERVICE: ${{ vars.DEPLOY_SERVICE || 'snakes' }}
+          DEPLOY_GOARCH: ${{ vars.DEPLOY_GOARCH || 'arm64' }}
+          DEPLOY_TRANSPORT: ssh
+          SKIP_TESTS: '1'   # already run above
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/deploy.sh
+
+      - name: Public healthcheck
+        env:
+          HEALTH_URL: ${{ secrets.HEALTH_URL || 'https://snakes.samoy.love/healthz' }}
+        run: |
+          for i in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || true)
+            echo "attempt $i: HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 3
+          done
+          echo "public healthcheck failed"; exit 1
+
+      - name: Cleanup key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -341,6 +341,21 @@ const I18N = {
     'cosmetics.where_head': 'Силуэт головы — на поле и на миникарте, в бою и в превью',
     'cosmetics.where_seg': 'Стиль следа — виден, пока вы вне своей территории',
     'cosmetics.where_capturefx': 'Вспышка захвата — в момент, когда след замыкается в зону',
+    'cosmetics.where_terr': 'Заливка территории — вся ваша зона на поле, самая большая вещь на экране',
+    'cosmetics.where_death': 'Эффект гибели — на месте вашей смерти, его видят все вокруг',
+    'cosmetics.where_title': 'Титул — перед ником в плашке, в таблице лидеров и в итогах матча',
+
+    'cosmetics.cat_terr': 'Территория',
+    'cosmetics.cat_death': 'Гибель',
+    'cosmetics.cat_title': 'Титулы',
+
+    'cosmetics.title_none': 'Без титула',
+    'cosmetics.title_locked': 'Ещё не открыт',
+    'cosmetics.title_unlocked': 'Открыт',
+    'cosmetics.title_equipped': 'Надет',
+    'cosmetics.title_req_prefix': 'Как получить',
+    'cosmetics.title_free_hint': 'Титулы не продаются — их выдают за достижения',
+    'cosmetics.titles_unavailable': 'Список титулов появится после входа в матч',
 
     'cosmetics.tier_base': 'База',
     'cosmetics.tier_common': 'Обычный',
@@ -681,6 +696,21 @@ const I18N = {
     'cosmetics.where_head': 'Head silhouette — on the field and the minimap, in every fight',
     'cosmetics.where_seg': 'Trail style — visible while you are outside your own territory',
     'cosmetics.where_capturefx': 'Capture burst — the moment your trail closes into territory',
+    'cosmetics.where_terr': 'Territory fill — your whole zone, the largest thing on screen',
+    'cosmetics.where_death': 'Death effect — at the spot where you die, everyone nearby sees it',
+    'cosmetics.where_title': 'Title — before your nick on the plate, leaderboard and match results',
+
+    'cosmetics.cat_terr': 'Territory',
+    'cosmetics.cat_death': 'Death',
+    'cosmetics.cat_title': 'Titles',
+
+    'cosmetics.title_none': 'No title',
+    'cosmetics.title_locked': 'Not unlocked yet',
+    'cosmetics.title_unlocked': 'Unlocked',
+    'cosmetics.title_equipped': 'Worn',
+    'cosmetics.title_req_prefix': 'How to unlock',
+    'cosmetics.title_free_hint': 'Titles are not for sale — they are earned through achievements',
+    'cosmetics.titles_unavailable': 'The title list appears once you join a match',
 
     'cosmetics.tier_base': 'Base',
     'cosmetics.tier_common': 'Common',
@@ -1088,9 +1118,35 @@ applyTranslations(document);
 
 let net = null;
 
+/* F5 «Реклейм»: сервер отдаёт остывающую территорию тем же полем сетки, но со
+   старшим битом 0x8000 — значение читается как «клетка ничья, но её ещё может
+   вернуть игрок (v & 0x7FFF)». Обе функции ниже обязаны снимать флаг, иначе
+   0x8000|n читается как несуществующий игрок и клетка становится серой. */
+const COOL_OWNER_FLAG = 0x8000;
+
+function gridCellOwner(v) {
+  return (Number(v) || 0) & 0x7fff;
+}
+
+function gridCellIsCooling(v) {
+  return ((Number(v) || 0) & COOL_OWNER_FLAG) !== 0;
+}
+
+// Вспышка захвата конкретного игрока — берём из последнего снапшота.
+function cosCaptureFxByPlayer(pid) {
+  const list = lastState?.players;
+  if (!Array.isArray(list)) return 0;
+  for (const p of list) {
+    if (p?.n === pid) return Number(p.cosCaptureFx) || 0;
+  }
+  return 0;
+}
+
 function setMinimapPixel(i) {
   if (!minimapImage || !minimapGridOwner) return;
-  const o = minimapGridOwner[i];
+  const raw = minimapGridOwner[i];
+  const cooling = gridCellIsCooling(raw);
+  const o = gridCellOwner(raw);
   let r = 12;
   let g = 16;
   let b = 20;
@@ -1098,13 +1154,15 @@ function setMinimapPixel(i) {
     let rgb = minimapOwnerRgbCache.get(o);
     if (!rgb) {
       const c = boostHsl(colors.get(o) || 'hsl(210 20% 60%)');
-      const raw = hslToRgb(c);
-      rgb = [Math.round(raw[0] * 0.50), Math.round(raw[1] * 0.50), Math.round(raw[2] * 0.50)];
+      const raw2 = hslToRgb(c);
+      rgb = [Math.round(raw2[0] * 0.50), Math.round(raw2[1] * 0.50), Math.round(raw2[2] * 0.50)];
       minimapOwnerRgbCache.set(o, rgb);
     }
-    r = rgb[0];
-    g = rgb[1];
-    b = rgb[2];
+    // Остывающая территория на миникарте заметно тусклее «живой».
+    const k = cooling ? 0.42 : 1;
+    r = Math.round(rgb[0] * k) + (cooling ? 10 : 0);
+    g = Math.round(rgb[1] * k) + (cooling ? 10 : 0);
+    b = Math.round(rgb[2] * k) + (cooling ? 10 : 0);
   }
   const di = i * 4;
   const data = minimapImage.data;
@@ -1771,6 +1829,483 @@ function drawCaptureFx(ctx, cx, cy, cell, hsl, fxId, progress) {
   ctx.restore();
 }
 
+/* --- TERR: заливка территории ----------------------------------------------
+   Самая большая вещь на экране (до 40% площади) — и до этой волны она вообще
+   не продавалась. Заливка зовётся для КАЖДОЙ видимой клетки КАЖДЫЙ кадр
+   (до 40×28 = 1120 вызовов), поэтому здесь нет ни одного createPattern или
+   createLinearGradient внутри цикла: узор один раз рисуется в оффскрин-канвас
+   64×64, из него один раз за кадр делается CanvasPattern, а на клетку остаётся
+   ровно один fillRect.
+
+   Цвет — всегда цвет игрока. Варианты различаются структурой узора. */
+
+const COS_TERR_TILE = 64;
+
+// Ключ — `hsl|id`; хранит оффскрин-канвасы 64×64, независимые от контекста.
+const cosTerrTileCache = new Map();
+
+// Пер-контекстный кэш CanvasPattern: паттерн привязан к своему ctx.
+const cosTerrPatternCache = new WeakMap();
+
+// Какие варианты вообще узорные. 0 (Заливка), 3 (Прилив) и 5 (Витраж)
+// рисуются плоско — их отличие в модуляции альфы и в швах по границе.
+function cosTerrIsPattern(id) {
+  const i = cosClampId(id);
+  return i === 1 || i === 2 || i === 4 || i === 6 || i === 7;
+}
+
+// Вариант 6 «Разлом» рисуется аддитивно.
+function cosTerrIsAdditive(id) {
+  return cosClampId(id) === 6;
+}
+
+function cosTerrTile(hsl, terrId) {
+  const id = cosClampId(terrId);
+  const key = `${hsl}|${id}`;
+  const hit = cosTerrTileCache.get(key);
+  if (hit) return hit;
+
+  const S = COS_TERR_TILE;
+  const cv = document.createElement('canvas');
+  cv.width = S;
+  cv.height = S;
+  const c = cv.getContext('2d');
+  const rgb = hslToRgb(hsl);
+  const r = rgb[0];
+  const g = rgb[1];
+  const b = rgb[2];
+  const col = (a) => `rgba(${r},${g},${b},${a})`;
+
+  if (id === 1) {
+    // Штриховка: диагональные тёмные полосы поверх заливки.
+    c.fillStyle = col(1);
+    c.fillRect(0, 0, S, S);
+    c.strokeStyle = 'rgba(0,0,0,0.55)';
+    c.lineWidth = 7;
+    for (let k = -S; k <= S * 2; k += 16) {
+      c.beginPath();
+      c.moveTo(k, -2);
+      c.lineTo(k + S + 2, S + 2);
+      c.stroke();
+    }
+    c.strokeStyle = 'rgba(255,255,255,0.16)';
+    c.lineWidth = 2;
+    for (let k = -S; k <= S * 2; k += 16) {
+      c.beginPath();
+      c.moveTo(k + 5, -2);
+      c.lineTo(k + S + 7, S + 2);
+      c.stroke();
+    }
+  } else if (id === 2) {
+    // Соты: шестиугольная решётка со светлыми швами. Гексы слегка сплюснуты,
+    // чтобы период узора был ровно 32×64 и плитка стыковалась без шва.
+    c.fillStyle = col(0.55);
+    c.fillRect(0, 0, S, S);
+    const hw = 32;
+    const hh = 42.67;
+    c.lineWidth = 3;
+    c.strokeStyle = col(1);
+    c.lineJoin = 'round';
+    for (let j = -1; j <= 3; j++) {
+      const cy = j * 32;
+      const off = (((j % 2) + 2) % 2) * (hw / 2);
+      for (let i = -1; i <= 3; i++) {
+        const cx = i * hw + off;
+        c.beginPath();
+        c.moveTo(cx, cy - hh / 2);
+        c.lineTo(cx + hw / 2, cy - hh / 4);
+        c.lineTo(cx + hw / 2, cy + hh / 4);
+        c.lineTo(cx, cy + hh / 2);
+        c.lineTo(cx - hw / 2, cy + hh / 4);
+        c.lineTo(cx - hw / 2, cy - hh / 4);
+        c.closePath();
+        c.stroke();
+      }
+    }
+  } else if (id === 4) {
+    // Схема: тёмная подложка и яркие дорожки с контактными площадками.
+    c.fillStyle = col(0.34);
+    c.fillRect(0, 0, S, S);
+    c.strokeStyle = col(1);
+    c.lineWidth = 5;
+    c.beginPath();
+    c.moveTo(0, 32);
+    c.lineTo(S, 32);
+    c.moveTo(32, 0);
+    c.lineTo(32, S);
+    c.stroke();
+    c.lineWidth = 3;
+    c.beginPath();
+    c.moveTo(0, 8);
+    c.lineTo(16, 8);
+    c.lineTo(16, 32);
+    c.moveTo(S, 56);
+    c.lineTo(48, 56);
+    c.lineTo(48, 32);
+    c.stroke();
+    c.fillStyle = 'rgba(255,255,255,0.55)';
+    c.fillRect(28, 28, 8, 8);
+    c.fillRect(12, 4, 8, 8);
+    c.fillRect(44, 52, 8, 8);
+  } else if (id === 6) {
+    // Разлом: тёмная порода с раскалёнными трещинами. Рисуется аддитивно,
+    // поэтому базу держим тёмной — иначе территория выжжется в белый.
+    c.fillStyle = `rgba(${(r * 0.30) | 0},${(g * 0.30) | 0},${(b * 0.30) | 0},1)`;
+    c.fillRect(0, 0, S, S);
+    c.lineCap = 'round';
+    const cracks = [
+      [0, 12, 20, 26, 40, 18, S, 30],
+      [14, S, 26, 44, 44, 50, 58, 0],
+      [S, 58, 40, 60, 24, S]
+    ];
+    for (const path of cracks) {
+      c.beginPath();
+      c.moveTo(path[0], path[1]);
+      for (let k = 2; k < path.length; k += 2) c.lineTo(path[k], path[k + 1]);
+      c.strokeStyle = col(0.85);
+      c.lineWidth = 5;
+      c.stroke();
+      c.strokeStyle = 'rgba(255,255,255,0.75)';
+      c.lineWidth = 1.6;
+      c.stroke();
+    }
+  } else if (id === 7) {
+    // Ткань: переплетение полос — единственный вариант с ощущением объёма.
+    c.fillStyle = col(0.85);
+    c.fillRect(0, 0, S, S);
+    const pitch = 16;
+    for (let y = 0; y < S; y += pitch) {
+      for (let x = 0; x < S; x += pitch) {
+        const over = ((x / pitch) + (y / pitch)) % 2 === 0;
+        c.fillStyle = over ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.34)';
+        if (over) c.fillRect(x, y + 2, pitch, pitch - 4);
+        else c.fillRect(x + 2, y, pitch - 4, pitch);
+      }
+    }
+    c.strokeStyle = 'rgba(0,0,0,0.28)';
+    c.lineWidth = 1;
+    for (let k = 0; k <= S; k += pitch) {
+      c.beginPath();
+      c.moveTo(k + 0.5, 0);
+      c.lineTo(k + 0.5, S);
+      c.moveTo(0, k + 0.5);
+      c.lineTo(S, k + 0.5);
+      c.stroke();
+    }
+  } else {
+    // 0/3/5 — плоская база (в игре они плоские и различаются иначе).
+    c.fillStyle = col(1);
+    c.fillRect(0, 0, S, S);
+  }
+
+  if (cosTerrTileCache.size > 96) cosTerrTileCache.clear();
+  cosTerrTileCache.set(key, cv);
+  return cv;
+}
+
+/* Возвращает fillStyle для территории. Зовётся ОДИН раз на владельца за кадр,
+   не на клетку. originX/originY — экранные координаты клетки (0,0) поля,
+   cell — сторона клетки: по ним паттерн выравнивается по сетке, поэтому в
+   каждой клетке узор выглядит одинаково. */
+function cosTerrFillStyle(ctx, hsl, terrId, originX, originY, cell) {
+  const id = cosClampId(terrId);
+  if (!cosTerrIsPattern(id)) return null;
+  let m = cosTerrPatternCache.get(ctx);
+  if (!m) {
+    m = new Map();
+    cosTerrPatternCache.set(ctx, m);
+  }
+  const key = `${hsl}|${id}`;
+  let pat = m.get(key);
+  if (!pat) {
+    pat = ctx.createPattern(cosTerrTile(hsl, id), 'repeat');
+    if (!pat) return null;
+    if (m.size > 48) m.clear();
+    m.set(key, pat);
+  }
+  const k = cell / COS_TERR_TILE;
+  try {
+    pat.setTransform(new DOMMatrix([k, 0, 0, k, originX, originY]));
+  } catch {}
+  return pat;
+}
+
+/* Модуляция альфы для вариантов без узора. gx,gy — координаты клетки. */
+function cosTerrAlphaMod(terrId, gx, gy, timeMs) {
+  const id = cosClampId(terrId);
+  if (id === 3) {
+    // Прилив: медленная волна яркости через всю территорию.
+    return 0.22 * (0.5 + 0.5 * Math.sin((gx * 0.85 + gy * 1.15) * 0.55 - timeMs * 0.0022));
+  }
+  if (id === 4) {
+    // Схема: импульс, бегущий по диагонали от захвата к краю зоны.
+    const w = Math.sin(timeMs * 0.006 - (gx + gy) * 0.6);
+    return 0.16 * Math.max(0, w) * Math.max(0, w);
+  }
+  return 0;
+}
+
+/* Одна клетка территории — используется превью магазина и любым кодом,
+   которому не нужен горячий путь. В игре тот же узор приходит через
+   cosTerrFillStyle, поэтому расхождение невозможно. */
+function drawTerrTile(ctx, px, py, cell, hsl, terrId, gx, gy, alpha, timeMs) {
+  const id = cosClampId(terrId);
+  const a = Math.max(0, Math.min(1, Number(alpha) + cosTerrAlphaMod(id, gx, gy, Number(timeMs) || 0)));
+  if (!(a > 0.02)) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  if (cosTerrIsAdditive(id)) ctx.globalCompositeOperation = 'lighter';
+  const pat = cosTerrFillStyle(ctx, hsl, id, px - gx * cell, py - gy * cell, cell);
+  if (pat) {
+    ctx.fillStyle = pat;
+  } else {
+    const rgb = hslToRgb(hsl);
+    ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  }
+  ctx.fillRect(px, py, cell, cell);
+  ctx.restore();
+}
+
+/* Витраж: светящийся шов по внешней границе владения. Зовётся только для
+   пограничных клеток, поэтому дешёв. `edges` — битовая маска: 1 верх,
+   2 право, 4 низ, 8 лево. */
+function drawTerrSeam(ctx, px, py, cell, hsl, edges, alpha, glow) {
+  if (!edges) return;
+  const rgb = hslToRgb(hsl);
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.strokeStyle = `rgba(255,255,255,0.85)`;
+  // shadowBlur зовётся только в магазине: в игре шов рисуется до сотни раз за
+  // кадр по периметру владения, а тень — самая дорогая операция канваса.
+  if (glow) {
+    ctx.shadowColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+    ctx.shadowBlur = Math.max(4, cell * 0.55);
+  }
+  ctx.lineWidth = Math.max(1.5, cell * 0.16);
+  ctx.beginPath();
+  if (edges & 1) {
+    ctx.moveTo(px, py + 0.5);
+    ctx.lineTo(px + cell, py + 0.5);
+  }
+  if (edges & 2) {
+    ctx.moveTo(px + cell - 0.5, py);
+    ctx.lineTo(px + cell - 0.5, py + cell);
+  }
+  if (edges & 4) {
+    ctx.moveTo(px, py + cell - 0.5);
+    ctx.lineTo(px + cell, py + cell - 0.5);
+  }
+  if (edges & 8) {
+    ctx.moveTo(px + 0.5, py);
+    ctx.lineTo(px + 0.5, py + cell);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* --- DEATH: эффект гибели --------------------------------------------------
+   Смерть видят все, а обратной связи до этой волны не было вовсе. Длительность
+   бурста — параметр (COS_DEATH_MS), progress 0..1. Цвет — цвет погибшего. */
+
+const COS_DEATH_MS = 900;
+
+function drawDeathFx(ctx, cx, cy, cell, hsl, deathId, progress) {
+  const id = cosClampId(deathId);
+  const p = Math.max(0, Math.min(1, Number(progress) || 0));
+  const rgb = hslToRgb(hsl);
+  const col = (a) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
+  const fade = Math.max(0, 1 - p);
+  if (fade <= 0.01) return;
+  const R = cell * 1.6;
+
+  ctx.save();
+  ctx.globalAlpha = fade;
+
+  if (id === 1) {
+    // Осыпание в пиксели: сетка квадратов разлетается и падает вниз.
+    const n = 5;
+    const sz = Math.max(1.5, cell * 0.22);
+    for (let iy = 0; iy < n; iy++) {
+      for (let ix = 0; ix < n; ix++) {
+        const seed = ((ix * 73856093) ^ (iy * 19349663)) >>> 0;
+        const jx = ((seed & 255) / 255 - 0.5) * 2;
+        const ox = (ix - (n - 1) / 2) * cell * 0.30;
+        const oy = (iy - (n - 1) / 2) * cell * 0.30;
+        const x = cx + ox + jx * R * 0.55 * p;
+        const y = cy + oy + (R * 0.9 * p * p) - R * 0.15 * p;
+        ctx.fillStyle = col(0.95);
+        ctx.fillRect(x - sz / 2, y - sz / 2, sz, sz);
+      }
+    }
+  } else if (id === 2) {
+    // Чёрная дыра: кольца стягиваются внутрь, в центре растёт пустота.
+    for (let k = 0; k < 3; k++) {
+      const q = Math.max(0, Math.min(1, p * 1.2 - k * 0.14));
+      const rr = R * (1.15 - q) * (1 - k * 0.16);
+      if (rr <= 0.5) continue;
+      ctx.strokeStyle = col(0.9 - k * 0.22);
+      ctx.lineWidth = Math.max(1, cell * (0.14 - k * 0.03));
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = fade * 0.95;
+    ctx.fillStyle = 'rgba(2,3,6,1)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 0.42 * Math.min(1, p * 2.2), 0, Math.PI * 2);
+    ctx.fill();
+  } else if (id === 3) {
+    // Стеклянный разлёт: треугольные осколки, каждый со своей осью вращения.
+    for (let k = 0; k < 10; k++) {
+      const seed = ((k + 3) * 2654435761) >>> 0;
+      const ang = ((seed & 1023) / 1023) * Math.PI * 2;
+      const sp = 0.45 + ((seed >>> 10) & 511) / 511;
+      const rr = R * p * sp;
+      const sz = Math.max(2, cell * 0.34 * (1 - p * 0.5));
+      ctx.save();
+      ctx.translate(cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr);
+      ctx.rotate(ang + p * 4.5 * (seed & 1 ? 1 : -1));
+      ctx.fillStyle = col(0.55);
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(sz, 0);
+      ctx.lineTo(-sz * 0.55, -sz * 0.8);
+      ctx.lineTo(-sz * 0.3, sz * 0.7);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+  } else if (id === 4) {
+    // Сверхновая: белое ядро, ударная волна и лучи.
+    const rr = R * (0.15 + 1.5 * p);
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = Math.max(1.5, cell * 0.22 * (1 - p));
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = col(0.9);
+    ctx.lineWidth = Math.max(1.5, cell * 0.14);
+    for (let k = 0; k < 8; k++) {
+      const ang = (k * Math.PI * 2) / 8 + p * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * rr * 0.35, cy + Math.sin(ang) * rr * 0.35);
+      ctx.lineTo(cx + Math.cos(ang) * rr * 1.25, cy + Math.sin(ang) * rr * 1.25);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = fade * Math.max(0, 1 - p * 2);
+    ctx.fillStyle = 'rgba(255,255,255,1)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, cell * 0.55 * (1 - p), 0, Math.PI * 2);
+    ctx.fill();
+  } else if (id === 5) {
+    // Глитч-развал: горизонтальные полосы уезжают в стороны.
+    const bars = 7;
+    const bh = (cell * 1.5) / bars;
+    for (let k = 0; k < bars; k++) {
+      const seed = ((k * 2246822519) ^ 0x9e3779b9) >>> 0;
+      const dir = seed & 1 ? 1 : -1;
+      const amt = ((seed >>> 4) & 255) / 255;
+      const x = cx + dir * R * amt * p * 1.1;
+      const y = cy - cell * 0.75 + k * bh;
+      ctx.fillStyle = k % 3 === 0 ? 'rgba(255,255,255,0.85)' : col(0.9);
+      ctx.fillRect(x - cell * 0.55, y, cell * 1.1, Math.max(1, bh - 1));
+    }
+  } else if (id === 6) {
+    // Пепел: искры медленно всплывают и гаснут.
+    for (let k = 0; k < 14; k++) {
+      const seed = ((k + 7) * 40503) >>> 0;
+      const u = (seed & 1023) / 1023;
+      const v = ((seed >>> 10) & 1023) / 1023;
+      const x = cx + (u - 0.5) * R * (0.6 + p * 0.9);
+      const y = cy - R * p * (0.4 + v * 0.9);
+      const sz = Math.max(1, cell * 0.11 * (1 - p * 0.6));
+      ctx.globalAlpha = fade * (0.35 + 0.65 * v);
+      ctx.fillStyle = k % 4 === 0 ? 'rgba(255,235,190,0.95)' : col(0.9);
+      ctx.beginPath();
+      ctx.arc(x, y, sz, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (id === 7) {
+    // Разряд: ломаные молнии во все стороны.
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let k = 0; k < 6; k++) {
+      const base = (k * Math.PI * 2) / 6 + p * 0.4;
+      ctx.strokeStyle = k % 2 ? 'rgba(255,255,255,0.9)' : col(0.95);
+      ctx.lineWidth = Math.max(1.2, cell * 0.11 * (1 - p * 0.5));
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      let ang = base;
+      let rr = 0;
+      for (let s = 0; s < 4; s++) {
+        rr += (R * 1.2 * p) / 4;
+        ang += ((((k * 7 + s * 13) % 11) / 11) - 0.5) * 1.1;
+        ctx.lineTo(cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr);
+      }
+      ctx.stroke();
+    }
+  } else {
+    // 0 — Вспышка: базовый бесплатный вариант.
+    const rr = R * (0.2 + 1.1 * p);
+    ctx.strokeStyle = col(0.95);
+    ctx.lineWidth = Math.max(1.5, cell * 0.18 * (1 - p * 0.6));
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = fade * Math.max(0, 1 - p * 1.6);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, cell * 0.4 * (1 - p), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+/* --- TITLE: заголовок перед ником ------------------------------------------
+   Титулы не продаются: сервер присылает `titleMask` (что открыто) и `titleId`
+   (что надето), экипировка уходит сообщением `titleEquip`. */
+
+// Идентификаторы и порядок совпадают с таблицей titleRules на сервере (12 шт.).
+// Сервер дополнительно шлёт свой список в `hello.titles` — он используется как
+// подстраховка, если серверный набор титулов вырастет раньше клиента.
+const COS_TITLE_MAX = 12;
+const cosTitleServerNames = new Map();
+
+function cosTitleName(id) {
+  const i = Math.max(0, Number(id) || 0);
+  if (i === 0) return '';
+  const en = lang === 'en';
+  const list = en
+    ? ['', 'Fighter', 'Crusher', 'Legend', 'Landlord', 'Cartographer', 'Avenger',
+       'Contractor', 'Executor', 'Bounty Hunter', 'Trendsetter', 'Regular', 'Devoted']
+    : ['', 'Боец', 'Нагибатор', 'Легенда', 'Землевладелец', 'Картограф', 'Мститель',
+       'Подрядчик', 'Исполнитель', 'Охотник за головами', 'Модник', 'Завсегдатай', 'Преданный'];
+  return list[i] || cosTitleServerNames.get(i) || '';
+}
+
+function cosTitleReq(id) {
+  const i = Math.max(0, Number(id) || 0);
+  const en = lang === 'en';
+  const list = en
+    ? ['', '10 kills', '100 kills', '1000 kills', '10 000 cells captured', '100 000 cells captured',
+       '15 revenge kills', '25 contracts completed', '100 contracts completed', '15 bounties claimed',
+       '10 000 Style earned', '7-day play streak', '30-day play streak']
+    : ['', '10 убийств', '100 убийств', '1000 убийств', '10 000 захваченных клеток',
+       '100 000 захваченных клеток', '15 убийств мести', '25 выполненных контрактов',
+       '100 выполненных контрактов', '15 собранных наград', '10 000 заработанного стиля',
+       'Серия из 7 дней', 'Серия из 30 дней'];
+  return list[i] || '';
+}
+
+// Титул перед ником: «⟨Охотник⟩ Вася». Возвращает готовую строку для плашки.
+function cosTitlePrefix(titleId) {
+  const nm = cosTitleName(titleId);
+  return nm ? `«${nm}» ` : '';
+}
+
 /* --- FRAME: рамка профиля --------------------------------------------------
    Единственная чисто CSS-категория: классы .frame0..frame7 навешиваются на
    строки таблицы лидеров и итогов матча. В канвасе рисуется только имитация
@@ -1908,6 +2443,40 @@ function drawMiniCosmeticPreview(canvasEl, cat, id) {
 
   if (cat === 'head') {
     drawHead(c, cx - 3, cy, 34, base, id, 1, 0, now);
+    return;
+  }
+
+  if (cat === 'terr') {
+    // 2×2 клетки территории — тот же узор, что и на поле.
+    const cell = 20;
+    const ox = (W - cell * 2) / 2;
+    const oy = (H - cell * 2) / 2;
+    for (let gy = 0; gy < 2; gy++) {
+      for (let gx = 0; gx < 2; gx++) {
+        drawTerrTile(c, ox + gx * cell, oy + gy * cell, cell, base, id, gx, gy, 0.72, now);
+      }
+    }
+    if (cosClampId(id) === 5) {
+      drawTerrSeam(c, ox, oy, cell * 2, base, 15, 0.9, true);
+    }
+    return;
+  }
+
+  if (cat === 'death') {
+    // Иконка статична (перерисовывается только при пересборке списка), поэтому
+    // берём фазу середины эффекта — на случайной фазе он был бы уже погасшим.
+    drawDeathFx(c, cx, cy, 11, base, id, 0.42);
+    return;
+  }
+
+  if (cat === 'title') {
+    c.save();
+    c.font = `700 11px ${COS_FONT}`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillStyle = 'rgba(255,255,255,0.9)';
+    c.fillText(id === 0 ? '—' : '«»', cx, cy);
+    c.restore();
     return;
   }
 }
@@ -2447,8 +3016,23 @@ let youCosEqSeg = 0;
 let youCosEqNameplate = 0;
 let youCosEqFrame = 0;
 
+// Новые категории приходят отдельным JSON-сообщением `cosExtra` (бинарный
+// ROI-снапшот остаётся 21-байтным и не меняется). Сообщения может не быть
+// вовсе — тогда всё по нулям и всё выглядит как базовый вариант.
+let youCosInvTerr = 0;
+let youCosInvDeath = 0;
+let youCosEqTerr = 0;
+let youCosEqDeath = 0;
+let youTitleId = 0;
+let youTitleMask = 0;
+
+// Экипировка новых категорий по номерам игроков (из cosExtra).
+const cosTerrByPlayer = new Map();
+const cosDeathByPlayer = new Map();
+const cosTitleByPlayer = new Map();
+
 let cosmeticsOpen = false;
-let cosmeticsCat = 'frame';
+let cosmeticsCat = 'terr';
 let cosmeticsSelId = 0;
 
 let cosmeticsFilter = 'all';
@@ -3419,7 +4003,11 @@ function botDisplayName(id) {
 
 function refreshBotNames() {
   if (!botIds || botIds.size === 0) return;
+  // G15: серверные ники ботов («Лютый Пельмень») не трогаем — локальный
+  // генератор нужен только там, где имени с сервера ещё нет.
   for (const id of botIds) {
+    const cur = nameById.get(id);
+    if (typeof cur === 'string' && cur.trim()) continue;
     nameById.set(id, botDisplayName(id));
   }
 }
@@ -4308,6 +4896,16 @@ net = createNetModule({
       if (d?.cosmeticsPrices && typeof d.cosmeticsPrices === 'object') {
         cosmeticsPrices = d.cosmeticsPrices;
       }
+      // Таблица титулов с сервера: страховка на случай, когда серверный набор
+      // шире клиентского — тогда имя берётся оттуда, а не рисуется пустым.
+      if (Array.isArray(d?.titles)) {
+        cosTitleServerNames.clear();
+        for (const it of d.titles) {
+          const id = Number(it?.id);
+          const nm = typeof it?.name === 'string' ? it.name.trim() : '';
+          if (Number.isFinite(id) && id > 0 && nm) cosTitleServerNames.set(id, nm);
+        }
+      }
       updateRoomInfo();
     } else if (t === 'rooms') {
       onRooms(d);
@@ -4315,6 +4913,8 @@ net = createNetModule({
       onInit(d);
     } else if (t === 'cosmetics') {
       onCosmetics(d);
+    } else if (t === 'cosExtra') {
+      onCosExtra(d);
     } else if (t === 'matchEnd') {
       onMatchEnd(d);
     } else if (t === 'matchStart') {
@@ -4588,7 +5188,7 @@ function renderMatchResults(results) {
       return `
         <tr class="${isMe ? 'matchRowMe' : ''} ${frClass}">
           <td class="num">${i + 1}</td>
-          <td>${escapeHtml(nm)}</td>
+          <td>${escapeHtml(`${cosTitlePrefix(cosTitleByPlayer.get(n) || 0)}${nm}`)}</td>
           <td class="num">${fmtInt(p)}</td>
           <td class="num">${fmtInt(peak)}</td>
           <td class="num">${fmtInt(k)}</td>
@@ -5504,9 +6104,9 @@ function renderDeathStats() {
       const isMe = p.n === you;
       const isTop1 = i === 0;
       return `
-        <tr class="${isMe ? 'me' : ''} ${isTop1 ? 'top1' : ''}" data-pid="${pid}">
+        <tr class="${isMe ? 'me' : ''} ${isTop1 ? 'top1' : ''} frame${Math.max(0, Math.min(7, Number(p.cosFrame) || 0))}" data-pid="${pid}">
           <td class="num">${i + 1}</td>
-          <td class="name">${escapeHtml(nm)}</td>
+          <td class="name">${escapeHtml(`${cosTitlePrefix(cosTitleByPlayer.get(p.n) || 0)}${nm}`)}</td>
           <td class="num">${Number(p.p) || 0}</td>
         </tr>
       `;
@@ -5688,13 +6288,21 @@ function updateLeaderboard() {
 
     if (p.n === you) tr.classList.add('me');
     else tr.classList.remove('me');
+    // Рамка — CSS-класс .frame0..7 на строке таблицы лидеров.
+    const frCls = `frame${cosClampId(p.cosFrame)}`;
+    if (tr._frCls !== frCls) {
+      if (tr._frCls) tr.classList.remove(tr._frCls);
+      tr.classList.add(frCls);
+      tr._frCls = frCls;
+    }
     if (p.n !== you && nearIds.has(pid)) tr.classList.add('lbNear');
     else tr.classList.remove('lbNear');
 
     const lb = tr._lb;
     if (lb) {
       if (lb.tdRank) lb.tdRank.textContent = String(it.rank);
-      lb.tdName.textContent = p.nm || String(p.n);
+      // Титул перед ником — как в плашке над головой и в итогах матча.
+      lb.tdName.textContent = `${cosTitlePrefix(cosTitleByPlayer.get(p.n) || 0)}${p.nm || String(p.n)}`;
       lb.tdCells.textContent = `${p.p || 0} • ${p.s || 0}`;
       const pct = mapCells ? ((p.s || 0) / mapCells) * 100 : 0;
       lb.tdPct.textContent = pct.toFixed(1);
@@ -6740,7 +7348,9 @@ function onCosmetics(msg) {
     head: Number(youCosInvHead) || 0,
     seg: Number(youCosInvSeg) || 0,
     nameplate: Number(youCosInvNameplate) || 0,
-    frame: Number(youCosInvFrame) || 0
+    frame: Number(youCosInvFrame) || 0,
+    terr: Number(youCosInvTerr) || 0,
+    death: Number(youCosInvDeath) || 0
   };
   const hadServerState = cosmeticsSource === 'server';
 
@@ -6762,6 +7372,19 @@ function onCosmetics(msg) {
   youCosEqNameplate = Number(msg?.eqNameplate) || 0;
   youCosEqFrame = Number(msg?.eqFrame) || 0;
 
+  // Новые категории и титулы: сервер может их ещё не присылать. В этом случае
+  // поля undefined -> нули, магазин показывает только базовый вариант, а
+  // «Титулы» честно сообщают, что список пока недоступен.
+  if (msg?.invTerr !== undefined) youCosInvTerr = Number(msg.invTerr) || 0;
+  if (msg?.invDeath !== undefined) youCosInvDeath = Number(msg.invDeath) || 0;
+  if (msg?.eqTerr !== undefined) youCosEqTerr = cosClampId(msg.eqTerr);
+  if (msg?.eqDeath !== undefined) youCosEqDeath = cosClampId(msg.eqDeath);
+  if (msg?.titleMask !== undefined) youTitleMask = Number(msg.titleMask) || 0;
+  if (msg?.titleId !== undefined) youTitleId = Math.max(0, Math.min(COS_TITLE_MAX, Number(msg.titleId) || 0));
+  // Базовый вариант всегда доступен — иначе магазин выглядит полностью пустым.
+  youCosInvTerr |= 1;
+  youCosInvDeath |= 1;
+
   cosmeticsCacheSave();
 
   // C4: report the purchase that just landed.
@@ -6774,7 +7397,9 @@ function onCosmetics(msg) {
       head: Number(youCosInvHead) || 0,
       seg: Number(youCosInvSeg) || 0,
       nameplate: Number(youCosInvNameplate) || 0,
-      frame: Number(youCosInvFrame) || 0
+      frame: Number(youCosInvFrame) || 0,
+      terr: Number(youCosInvTerr) || 0,
+      death: Number(youCosInvDeath) || 0
     };
     let boughtCat = '';
     let boughtId = -1;
@@ -6842,6 +7467,8 @@ function cosmeticsSetDesiredEq(cat, id) {
   else if (c === 'seg') d.eqSeg = itemId;
   else if (c === 'nameplate') d.eqNameplate = itemId;
   else if (c === 'frame') d.eqFrame = itemId;
+  else if (c === 'terr') d.eqTerr = itemId;
+  else if (c === 'death') d.eqDeath = itemId;
   cosmeticsDesiredSave(d);
 }
 
@@ -6871,6 +7498,8 @@ function cosmeticsApplyDesiredServer() {
   apply('seg', d.eqSeg, youCosInvSeg, youCosEqSeg, 'eqSeg');
   apply('nameplate', d.eqNameplate, youCosInvNameplate, youCosEqNameplate, 'eqNameplate');
   apply('frame', d.eqFrame, youCosInvFrame, youCosEqFrame, 'eqFrame');
+  apply('terr', d.eqTerr, youCosInvTerr, youCosEqTerr, 'eqTerr');
+  apply('death', d.eqDeath, youCosInvDeath, youCosEqDeath, 'eqDeath');
 
   if (failed.length) {
     setCosmeticsStatus(`${t('cosmetics.desired_not_applied')}: ${failed.join(', ')}`, 'error');
@@ -6996,7 +7625,10 @@ function scheduleCosmeticsPreviewAnim() {
 
 // Потолок id косметики: маска инвентаря — uint8, ровно 8 слотов (0..7).
 const COSMETICS_MAX_ID = 7;
-const COSMETICS_CATS = ['frame', 'nameplate', 'head', 'seg', 'capturefx'];
+// Покупаемые категории. `title` сюда НЕ входит: титулы не продаются.
+const COSMETICS_CATS = ['terr', 'seg', 'head', 'death', 'capturefx', 'nameplate', 'frame'];
+// Порядок вкладок магазина: сверху то, что занимает больше всего экрана.
+const COSMETICS_TABS = [...COSMETICS_CATS, 'title'];
 
 function bitHas(mask, id) {
   const bit = 1 << (Number(id) || 0);
@@ -7008,6 +7640,8 @@ function cosmeticsMaskForCat(cat) {
   if (cat === 'head') return youCosInvHead;
   if (cat === 'seg') return youCosInvSeg;
   if (cat === 'nameplate') return youCosInvNameplate;
+  if (cat === 'terr') return youCosInvTerr;
+  if (cat === 'death') return youCosInvDeath;
   return youCosInvFrame;
 }
 
@@ -7016,6 +7650,8 @@ function cosmeticsEqForCat(cat) {
   if (cat === 'head') return youCosEqHead;
   if (cat === 'seg') return youCosEqSeg;
   if (cat === 'nameplate') return youCosEqNameplate;
+  if (cat === 'terr') return youCosEqTerr;
+  if (cat === 'death') return youCosEqDeath;
   return youCosEqFrame;
 }
 
@@ -7025,7 +7661,9 @@ const COSMETICS_FALLBACK_PRICES = {
   nameplate: [0, 40, 60, 105, 140, 240, 390, 640],
   seg: [0, 160, 55, 210, 360, 90, 580, 950],
   head: [0, 50, 75, 135, 175, 300, 500, 800],
-  capturefx: [0, 65, 100, 180, 240, 410, 660, 1050]
+  capturefx: [0, 65, 100, 180, 240, 410, 660, 1050],
+  terr: [0, 60, 90, 150, 220, 360, 600, 980],
+  death: [0, 55, 85, 140, 210, 340, 560, 900]
 };
 
 // Сервер шлёт массив цен по id: {"frame":[0,30,45,...], ...}.
@@ -7089,6 +7727,9 @@ function cosmeticsLabel(cat) {
   if (cat === 'head') return t('cosmetics.cat_head');
   if (cat === 'seg') return t('cosmetics.cat_seg');
   if (cat === 'nameplate') return t('cosmetics.cat_nameplate');
+  if (cat === 'terr') return t('cosmetics.cat_terr');
+  if (cat === 'death') return t('cosmetics.cat_death');
+  if (cat === 'title') return t('cosmetics.cat_title');
   return t('cosmetics.cat_frame');
 }
 
@@ -7110,8 +7751,8 @@ function cosmeticsVariantName(cat, id) {
   if (cat === 'frame') {
     // Семейство «металлы и материалы» — совпадает с классами .frame0..7 в CSS.
     return (en
-      ? ['Steel', 'Copper', 'Chrome', 'Emerald', 'Obsidian', 'Platinum', 'Brass', 'Carbon']
-      : ['Сталь', 'Медь', 'Хром', 'Изумруд', 'Обсидиан', 'Платина', 'Латунь', 'Карбон'])[i];
+      ? ['Steel', 'Copper', 'Chrome', 'Emerald', 'Obsidian', 'Aurora', 'Golden Age', 'Prism']
+      : ['Сталь', 'Медь', 'Хром', 'Изумруд', 'Обсидиан', 'Северное сияние', 'Золотой век', 'Призма'])[i];
   }
   if (cat === 'nameplate') {
     // Семейство «формы плашки» — различие в геометрии, не в цвете.
@@ -7124,7 +7765,162 @@ function cosmeticsVariantName(cat, id) {
       ? ['Orb', 'Rhombus', 'Cube', 'Ring', 'Shield', 'Arrow', 'Eclipse', 'Star']
       : ['Орб', 'Ромб', 'Куб', 'Кольцо', 'Щит', 'Стрела', 'Затмение', 'Звезда'])[i];
   }
+  if (cat === 'terr') {
+    // Семейство «поверхности»: различие в структуре узора, цвет всегда ваш.
+    return (en
+      ? ['Solid', 'Hatch', 'Honeycomb', 'Tide', 'Circuit', 'Stained glass', 'Rift', 'Weave']
+      : ['Заливка', 'Штриховка', 'Соты', 'Прилив', 'Схема', 'Витраж', 'Разлом', 'Ткань'])[i];
+  }
+  if (cat === 'death') {
+    return (en
+      ? ['Flash', 'Pixels', 'Black hole', 'Glass', 'Supernova', 'Glitch', 'Ash', 'Discharge']
+      : ['Вспышка', 'Пиксели', 'Чёрная дыра', 'Стекло', 'Сверхновая', 'Глитч', 'Пепел', 'Разряд'])[i];
+  }
+  if (cat === 'title') return cosTitleName(id) || t('cosmetics.title_none');
   return String(i + 1);
+}
+
+/* --- Титулы в магазине -----------------------------------------------------
+   Отдельная вкладка: покупать нечего, поэтому вместо цены — условие открытия,
+   а вместо «Купить» — «Надеть». Отправка идёт сообщением `titleEquip`. */
+
+function cosTitleUnlocked(id) {
+  const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
+  if (i === 0) return true;
+  return (Number(youTitleMask) & (1 << i)) !== 0;
+}
+
+function cosTitlesUnlockedCount() {
+  let n = 0;
+  for (let i = 1; i <= COS_TITLE_MAX; i++) {
+    if (cosTitleUnlocked(i)) n++;
+  }
+  return n;
+}
+
+function cosTitleEquip(id) {
+  const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
+  if (!cosTitleUnlocked(i)) return;
+  youTitleId = i;
+  if (you) {
+    if (i) cosTitleByPlayer.set(you, i);
+    else cosTitleByPlayer.delete(you);
+  }
+  cosmeticsCacheSave();
+  if (!wsSend('titleEquip', { id: i })) {
+    setCosmeticsStatus(wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection'), 'info');
+  }
+  syncCosmeticsUi();
+}
+
+function renderCosmeticsTitles() {
+  if (!cosmeticsItemsEl) return;
+  const items = [];
+
+  const hint = document.createElement('div');
+  hint.className = 'cosmeticsTierSep tierBase';
+  hint.textContent = t('cosmetics.title_free_hint');
+  items.push(hint);
+
+  if (!youTitleMask && cosmeticsSource !== 'server') {
+    const note = document.createElement('div');
+    note.className = 'cosmeticsItemWhere';
+    note.textContent = t('cosmetics.titles_unavailable');
+    items.push(note);
+  }
+
+  for (let id = 0; id <= COS_TITLE_MAX; id++) {
+    const unlocked = cosTitleUnlocked(id);
+    const worn = Number(youTitleId) === id;
+    if (cosmeticsFilter === 'owned' && !unlocked) continue;
+    if (cosmeticsFilter === 'available' && unlocked) continue;
+
+    const card = document.createElement('div');
+    card.className = 'cosmeticsItem' + (cosmeticsSelId === id ? ' isSelected' : '');
+    card.classList.toggle('isOwned', unlocked);
+    card.classList.toggle('isEquipped', worn);
+    card.classList.toggle('isLocked', !unlocked);
+    card.tabIndex = 0;
+    card.addEventListener('click', () => {
+      cosmeticsSelId = id;
+      cosmeticsHoverId = null;
+      cosmeticsHoverCat = null;
+      syncCosmeticsUi();
+    });
+    card.addEventListener('mouseenter', () => cosmeticsSetHover('title', id));
+    card.addEventListener('focus', () => cosmeticsSetHover('title', id));
+    card.addEventListener('mouseleave', () => cosmeticsSetHover(null, null));
+    card.addEventListener('blur', () => cosmeticsSetHover(null, null));
+
+    const prev = document.createElement('div');
+    prev.className = 'cosmeticsItemPreview';
+    const cvs = document.createElement('canvas');
+    prev.appendChild(cvs);
+    drawMiniCosmeticPreview(cvs, 'title', id);
+
+    const left = document.createElement('div');
+    left.className = 'cosmeticsItemLeft';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'cosmeticsItemTitle';
+    titleEl.textContent = id === 0 ? t('cosmetics.title_none') : `«${cosTitleName(id)}»`;
+
+    const where = document.createElement('div');
+    where.className = 'cosmeticsItemWhere';
+    where.textContent = id === 0 ? t('cosmetics.where_title') : `${t('cosmetics.title_req_prefix')}: ${cosTitleReq(id)}`;
+
+    const sub = document.createElement('div');
+    sub.className = 'cosmeticsItemSub';
+    sub.textContent = worn ? t('cosmetics.title_equipped') : unlocked ? t('cosmetics.title_unlocked') : t('cosmetics.title_locked');
+    if (!unlocked) sub.classList.add('isBlocked');
+
+    left.appendChild(titleEl);
+    left.appendChild(where);
+    left.appendChild(sub);
+
+    const right = document.createElement('div');
+    right.className = 'cosmeticsItemRight';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    if (!unlocked) {
+      btn.className = 'btnSecondary';
+      btn.disabled = true;
+      btn.textContent = t('cosmetics.locked');
+    } else if (worn) {
+      btn.className = 'btnGhost';
+      btn.disabled = true;
+      btn.textContent = t('cosmetics.title_equipped');
+    } else {
+      btn.className = 'btnPrimary';
+      btn.textContent = t('cosmetics.wear');
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        cosTitleEquip(id);
+      });
+    }
+    right.appendChild(btn);
+
+    card.appendChild(prev);
+    card.appendChild(left);
+    card.appendChild(right);
+    items.push(card);
+  }
+
+  if (items.length <= 1) {
+    setSafeHtml(
+      cosmeticsItemsEl,
+      `
+      <div class="roomsEmpty">
+        <div class="roomsEmptyTitle">${escapeHtml(t('cosmetics.empty_title'))}</div>
+        <div class="roomsEmptyDesc">${escapeHtml(t('cosmetics.empty_desc'))}</div>
+      </div>
+      `
+    );
+    return;
+  }
+  // Контейнер несёт --title-accent для вкладки титулов (см. .cosmeticsItems.isTitles).
+  cosmeticsItemsEl.classList.toggle('isTitles', cosmeticsCat === 'title');
+  cosmeticsItemsEl.replaceChildren(...items);
 }
 
 function cosmeticsSetFilter(next) {
@@ -7169,7 +7965,13 @@ function cosmeticsGetStateObject() {
     eqHead: Number(youCosEqHead) || 0,
     eqSeg: Number(youCosEqSeg) || 0,
     eqNameplate: Number(youCosEqNameplate) || 0,
-    eqFrame: Number(youCosEqFrame) || 0
+    eqFrame: Number(youCosEqFrame) || 0,
+    invTerr: Number(youCosInvTerr) || 0,
+    invDeath: Number(youCosInvDeath) || 0,
+    eqTerr: Number(youCosEqTerr) || 0,
+    eqDeath: Number(youCosEqDeath) || 0,
+    titleId: Number(youTitleId) || 0,
+    titleMask: Number(youTitleMask) || 0
   };
 }
 
@@ -7188,6 +7990,12 @@ function cosmeticsApplyStateObject(s) {
   youCosEqSeg = Number(s.eqSeg) || 0;
   youCosEqNameplate = Number(s.eqNameplate) || 0;
   youCosEqFrame = Number(s.eqFrame) || 0;
+  youCosInvTerr = Number(s.invTerr) || 0;
+  youCosInvDeath = Number(s.invDeath) || 0;
+  youCosEqTerr = Number(s.eqTerr) || 0;
+  youCosEqDeath = Number(s.eqDeath) || 0;
+  youTitleId = Number(s.titleId) || 0;
+  youTitleMask = Number(s.titleMask) || 0;
 }
 
 function cosmeticsCacheLoad() {
@@ -7220,6 +8028,12 @@ function cosmeticsEnsureLocalReady() {
     youCosInvSeg = 1;
     youCosInvNameplate = 1;
     youCosInvFrame = 1;
+    youCosInvTerr = 1;
+    youCosInvDeath = 1;
+    youCosEqTerr = 0;
+    youCosEqDeath = 0;
+    youTitleId = 0;
+    youTitleMask = 0;
     youCosEqCaptureFx = 0;
     youCosEqHead = 0;
     youCosEqSeg = 0;
@@ -7251,7 +8065,13 @@ function cosmeticsEquipLocal(cat, id) {
   else if (c === 'head') youCosEqHead = itemId;
   else if (c === 'seg') youCosEqSeg = itemId;
   else if (c === 'nameplate') youCosEqNameplate = itemId;
+  else if (c === 'terr') youCosEqTerr = itemId;
+  else if (c === 'death') youCosEqDeath = itemId;
   else youCosEqFrame = itemId;
+  if (you) {
+    if (c === 'terr') cosTerrByPlayer.set(you, itemId);
+    if (c === 'death') cosDeathByPlayer.set(you, itemId);
+  }
   cosmeticsSetDesiredEq(c, itemId);
   cosmeticsCacheSave();
   syncCosmeticsUi();
@@ -7371,30 +8191,35 @@ function syncCosmeticsUi() {
   }
 
   if (cosmeticsTabsEl) {
-    const cats = [
-      { id: 'frame', title: t('cosmetics.cat_frame') },
-      { id: 'nameplate', title: t('cosmetics.cat_nameplate') },
-      { id: 'head', title: t('cosmetics.cat_head') },
-      { id: 'seg', title: t('cosmetics.cat_seg') },
-      { id: 'capturefx', title: t('cosmetics.cat_capturefx') }
-    ];
-    const btns = cats.map((c) => {
+    const btns = COSMETICS_TABS.map((cid) => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'cosmeticsTabBtn';
+      // .isTitles — вкладка титулов оформлена золотом: это награда за достижения,
+      // а не товар, и визуально не должна читаться как магазин.
+      b.className = cid === 'title' ? 'cosmeticsTabBtn isTitles' : 'cosmeticsTabBtn';
       // D11: счётчик владения прямо в табе — «Рамки 2/8».
-      b.textContent = `${c.title} ${cosmeticsOwnedCount(c.id)}/${COSMETICS_MAX_ID + 1}`;
+      const total = cid === 'title' ? COS_TITLE_MAX : COSMETICS_MAX_ID + 1;
+      const have = cid === 'title' ? cosTitlesUnlockedCount() : cosmeticsOwnedCount(cid);
+      b.textContent = `${cosmeticsLabel(cid)} ${have}/${total}`;
       b.setAttribute('role', 'tab');
-      b.setAttribute('aria-selected', c.id === cosmeticsCat ? 'true' : 'false');
+      b.setAttribute('aria-selected', cid === cosmeticsCat ? 'true' : 'false');
       b.addEventListener('click', () => {
-        cosmeticsCat = c.id;
-        const eq = cosmeticsEqForCat(cosmeticsCat);
-        cosmeticsSelId = Number.isFinite(eq) ? eq : 0;
+        cosmeticsCat = cid;
+        cosmeticsHoverId = null;
+        cosmeticsHoverCat = null;
+        cosmeticsSelId = cid === 'title' ? Math.max(0, Number(youTitleId) || 0) : (Number(cosmeticsEqForCat(cid)) || 0);
         syncCosmeticsUi();
       });
       return b;
     });
     cosmeticsTabsEl.replaceChildren(...btns);
+  }
+
+  if (cosmeticsItemsEl && cosmeticsCat === 'title') {
+    renderCosmeticsTitles();
+    renderCosmeticsPreview();
+    scheduleCosmeticsPreviewAnim();
+    return;
   }
 
   if (cosmeticsItemsEl) {
@@ -7637,13 +8462,19 @@ function syncCosmeticsUi() {
 // Какой id показывать: наведённая карточка важнее выбранной, при уходе курсора
 // превью возвращается к выбранному варианту.
 function cosmeticsPreviewId() {
-  if (cosmeticsHoverId != null && cosmeticsHoverCat === cosmeticsCat) return cosClampId(cosmeticsHoverId);
-  return cosClampId(cosmeticsSelId);
+  // У титулов свой потолок id (их 16, а не 8), поэтому клампим по категории.
+  const clamp = cosmeticsCat === 'title'
+    ? (v) => Math.max(0, Math.min(COS_TITLE_MAX, Number(v) || 0))
+    : cosClampId;
+  if (cosmeticsHoverId != null && cosmeticsHoverCat === cosmeticsCat) return clamp(cosmeticsHoverId);
+  return clamp(cosmeticsSelId);
 }
 
 function cosmeticsSetHover(cat, id) {
   const nextCat = id == null ? null : String(cat);
-  const nextId = id == null ? null : cosClampId(id);
+  const nextId = id == null
+    ? null
+    : (nextCat === 'title' ? Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0)) : cosClampId(id));
   if (cosmeticsHoverCat === nextCat && cosmeticsHoverId === nextId) return;
   cosmeticsHoverCat = nextCat;
   cosmeticsHoverId = nextId;
@@ -7693,7 +8524,11 @@ function renderCosmeticsPreview() {
   const segId = cosmeticsCat === 'seg' ? selId : youCosEqSeg;
   const nameId = cosmeticsCat === 'nameplate' ? selId : youCosEqNameplate;
   const capId = cosmeticsCat === 'capturefx' ? selId : youCosEqCaptureFx;
+  const terrId = cosmeticsCat === 'terr' ? selId : youCosEqTerr;
+  const deathId = cosmeticsCat === 'death' ? selId : youCosEqDeath;
+  const titleId = cosmeticsCat === 'title' ? selId : youTitleId;
   const plateFont = Math.max(11, Math.round(scell * 0.62));
+  const plateLabel = `${cosTitlePrefix(titleId)}${t('cosmetics.balance_you')}`;
 
   const zone = {
     x: Math.round(fx + fw * 0.58),
@@ -7701,6 +8536,58 @@ function renderCosmeticsPreview() {
     w: Math.round(cell * 3.2),
     h: Math.round(cell * 3.2)
   };
+
+  if (cosmeticsCat === 'terr') {
+    // Территория — самая большая вещь на экране, поэтому в превью она занимает
+    // почти всё поле: иначе разницу между узорами просто не видно.
+    const big = {
+      x: Math.round(fx + fw * 0.06),
+      y: Math.round(fy + fh * 0.10),
+      w: Math.round(fw * 0.62),
+      h: Math.round(fh * 0.80)
+    };
+    drawCosmeticsZone(ctx2, big, you, 0.62, terrId, scell);
+    const hx = big.x + big.w + scell * 1.6;
+    const hy = big.y + big.h * 0.55;
+    drawCosmeticsSnake(ctx2, hx, hy, scell, you, youCosEqSeg, youCosEqHead, baseC, 4);
+    drawNamePlate(ctx2, plateLabel, hx, hy - scell * 0.95, baseC, youCosEqNameplate, 0.95, plateFont, now);
+    setHint();
+    return;
+  }
+
+  if (cosmeticsCat === 'death') {
+    // Зацикленный сценарий гибели: змейка едет, потом взрывается.
+    const period = 2200;
+    const p = reduceMotion ? 0.35 : (now % period) / period;
+    const dieStart = 0.42;
+    const dieP = p < dieStart ? -1 : Math.min(1, (p - dieStart) / (COS_DEATH_MS / period));
+    drawCosmeticsZone(ctx2, zone, you, 0.58, youCosEqTerr, scell);
+    const hx = fx + fw * (0.18 + 0.22 * Math.min(1, p / dieStart));
+    const hy = cy;
+    if (dieP < 0) {
+      drawCosmeticsSnake(ctx2, hx, hy, scell, you, youCosEqSeg, youCosEqHead, baseC, 5);
+      drawNamePlate(ctx2, plateLabel, hx, hy - scell * 0.95, baseC, youCosEqNameplate, 0.95, plateFont, now);
+    } else if (dieP <= 1) {
+      drawDeathFx(ctx2, hx, hy, Math.max(16, Math.round(scell * 1.2)), baseC, deathId, dieP);
+    }
+    setHint();
+    return;
+  }
+
+  if (cosmeticsCat === 'title') {
+    drawCosmeticsZone(ctx2, zone, you, 0.58, youCosEqTerr, scell);
+    drawCosmeticsSnake(ctx2, cx, cy, scell, you, youCosEqSeg, youCosEqHead, baseC, 5);
+    drawNamePlate(ctx2, plateLabel, cx, cy - scell * 0.95, baseC, youCosEqNameplate, 0.95, plateFont, now);
+    ctx2.save();
+    ctx2.strokeStyle = 'rgba(96,165,250,0.55)';
+    ctx2.setLineDash([5, 4]);
+    ctx2.lineWidth = 2;
+    const ph = Math.round(plateFont * 1.5);
+    ctx2.strokeRect(cx - scell * 3.2, cy - scell * 0.95 - ph - 3.5, scell * 6.4, ph + 7);
+    ctx2.restore();
+    setHint();
+    return;
+  }
 
   if (cosmeticsCat === 'capturefx') {
     // Зацикленный сценарий захвата. Раньше здесь была рассинхронизация: фаза
@@ -7726,8 +8613,8 @@ function renderCosmeticsPreview() {
       h: Math.round(zone.h * 0.66)
     };
 
-    drawCosmeticsZone(ctx2, zone, you, 0.58);
-    if (filled) drawCosmeticsZone(ctx2, loopRect, you, 0.58);
+    drawCosmeticsZone(ctx2, zone, you, 0.58, terrId, scell);
+    if (filled) drawCosmeticsZone(ctx2, loopRect, you, 0.58, terrId, scell);
 
     const headX = cx + (loopRect.x - cx) * (0.15 + 0.85 * approach);
     const headY = cy + (reduceMotion ? 0 : Math.sin(now * 0.0032) * cell * 0.10);
@@ -7746,7 +8633,7 @@ function renderCosmeticsPreview() {
     }
 
     drawCosmeticsSnake(ctx2, headX, headY, scell, you, youCosEqSeg, youCosEqHead, baseC);
-    drawNamePlate(ctx2, t('cosmetics.balance_you'), headX, headY - scell * 0.85, baseC, youCosEqNameplate, 0.95, plateFont, now);
+    drawNamePlate(ctx2, plateLabel, headX, headY - scell * 0.85, baseC, youCosEqNameplate, 0.95, plateFont, now);
 
     if (showBurst) {
       const fxX = loopRect.x + loopRect.w / 2;
@@ -7763,10 +8650,10 @@ function renderCosmeticsPreview() {
   // Территория игрока всегда рисуется его сплошным цветом: стиль следа в игре
   // применяется ТОЛЬКО к временному следу вне территории, и превью обязано
   // показывать ровно это, а не заливать стилем всю зону.
-  drawCosmeticsZone(ctx2, zone, you, 0.58);
+  drawCosmeticsZone(ctx2, zone, you, 0.58, terrId, scell);
 
   drawCosmeticsSnake(ctx2, cx, cy, scell, you, segId, headId, baseC, cosmeticsCat === 'seg' ? 9 : 6);
-  drawNamePlate(ctx2, t('cosmetics.balance_you'), cx, cy - scell * 0.95, baseC, nameId, 0.95, plateFont, now);
+  drawNamePlate(ctx2, plateLabel, cx, cy - scell * 0.95, baseC, nameId, 0.95, plateFont, now);
 
   // Указатель на то место сцены, которое меняет выбранный предмет.
   ctx2.save();
@@ -7885,14 +8772,38 @@ function drawCosmeticsFieldBackdrop(ctx2, x, y, w, h) {
   ctx2.restore();
 }
 
-function drawCosmeticsZone(ctx2, rect, ownerId, alpha) {
+function drawCosmeticsZone(ctx2, rect, ownerId, alpha, terrId, cellHint) {
   const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
-  const rgb = hslToRgb(base);
+  const id = cosClampId(terrId);
+  const a = Math.max(0, Math.min(1, alpha));
+  const now = performance.now();
+  // Территория рисуется теми же плитками, что и в игре: узор выбранного
+  // стиля обязан выглядеть в магазине ровно так же, как на поле.
+  const cell = Math.max(8, Math.round(Number(cellHint) || 16));
+  const cols = Math.max(1, Math.ceil(rect.w / cell));
+  const rows = Math.max(1, Math.ceil(rect.h / cell));
   ctx2.save();
-  ctx2.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${Math.max(0, Math.min(1, alpha))})`;
-  ctx2.fillRect(rect.x, rect.y, rect.w, rect.h);
-  ctx2.strokeStyle = 'rgba(0,0,0,0.25)';
-  ctx2.lineWidth = 1;
+  ctx2.beginPath();
+  ctx2.rect(rect.x, rect.y, rect.w, rect.h);
+  ctx2.clip();
+  for (let gy = 0; gy < rows; gy++) {
+    for (let gx = 0; gx < cols; gx++) {
+      drawTerrTile(ctx2, rect.x + gx * cell, rect.y + gy * cell, cell, base, id, gx, gy, a, now);
+    }
+  }
+  ctx2.restore();
+  ctx2.save();
+  if (id === 5) {
+    // Витраж: светящийся шов ровно по границе владения.
+    const rgb = hslToRgb(base);
+    ctx2.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx2.shadowColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+    ctx2.shadowBlur = 14;
+    ctx2.lineWidth = 3;
+  } else {
+    ctx2.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx2.lineWidth = 1;
+  }
   ctx2.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
   ctx2.restore();
 }
@@ -8712,7 +9623,7 @@ function renderTeamHud() {
       return `
         <tr class="${isMe ? 'me' : ''} ${frClass}" data-pid="${pid}">
           <td class="num">${i + 1}</td>
-          <td class="name">${escapeHtml(nm)}</td>
+          <td class="name">${escapeHtml(`${cosTitlePrefix(cosTitleByPlayer.get(p.n) || 0)}${nm}`)}</td>
           <td class="num">${Number(p.p) || 0}</td>
           <td class="num">${pp.toFixed(1)}%</td>
         </tr>
@@ -9105,6 +10016,13 @@ function handleStateBinary(buf) {
                 : reason === 4
                   ? t('death.reason.wall')
                   : '';
+        // Эффект гибели жертвы — его видят все, а не только убийца.
+        // Стиль берём из cosExtra; без сообщения это базовая вспышка (0).
+        addFxBurst(ex, ey, `die${cosClampId(cosDeathByPlayer.get(victim) || 0)}`, {
+          pid: victim,
+          life: COS_DEATH_MS
+        });
+
         if (killer) pushEventFeed(`${kn} -> ${vn}${rs ? ` (${rs})` : ''}`, 'Kill');
         else pushEventFeed(`${vn} ${lang === 'en' ? 'died' : 'погиб'}${rs ? ` (${rs})` : ''}`, 'Death');
 
@@ -9169,6 +10087,26 @@ function handleStateBinary(buf) {
           celebrateFirstCapture(delta);
         }
         renderKillfeed();
+        continue;
+      }
+
+      // F5 «Реклейм»: игрок вернул свою остывающую территорию.
+      // A=игрок, B=клетки, X/Y=точка возврата. Без разбора этого kind весь
+      // остаток пакета событий терялся бы (парсер ломается на неизвестном kind).
+      if (kind === 20) {
+        if (!need(2 + 2 + 2 + 2)) return;
+        const pid = dv.getUint16(o, true);
+        o += 2;
+        const cells = dv.getUint16(o, true);
+        o += 2;
+        const ex = dv.getUint16(o, true);
+        o += 2;
+        const ey = dv.getUint16(o, true);
+        o += 2;
+        const pn = nameById.get(pid) || String(pid);
+        pushEventFeed(`${pn} ${lang === 'en' ? 'reclaimed' : 'вернул'} +${cells}`, 'Reclaim');
+        addFxBurst(ex, ey, `cap${cosClampId(cosCaptureFxByPlayer(pid))}`, { pid });
+        if (pid === you && cells > 0) addScorePopup(ex, ey, cells);
         continue;
       }
 
@@ -9597,14 +10535,50 @@ function onChat(m) {
   updateChatHeaderStatus();
 }
 
+/* Новые косметические категории приходят отдельным JSON-сообщением, потому что
+   бинарный ROI-снапшот остаётся 21-байтным и не расширяется:
+   {"players":[{"n":12,"terr":3,"death":1,"title":7}, ...]}
+   Сообщения может не быть (старый сервер) — тогда карты пусты и всё рисуется
+   базовыми вариантами. */
+function onCosExtra(m) {
+  const arr = Array.isArray(m?.players) ? m.players : null;
+  if (!arr) return;
+  cosTerrByPlayer.clear();
+  cosDeathByPlayer.clear();
+  cosTitleByPlayer.clear();
+  for (const it of arr) {
+    const n = Number(it?.n);
+    if (!Number.isFinite(n)) continue;
+    const terr = cosClampId(it?.terr);
+    const death = cosClampId(it?.death);
+    const title = Math.max(0, Math.min(COS_TITLE_MAX, Number(it?.title) || 0));
+    if (terr) cosTerrByPlayer.set(n, terr);
+    if (death) cosDeathByPlayer.set(n, death);
+    if (title) cosTitleByPlayer.set(n, title);
+    if (n === you) {
+      youCosEqTerr = terr;
+      youCosEqDeath = death;
+      youTitleId = title;
+    }
+  }
+  try {
+    if (cosmeticsOpen) syncCosmeticsUi();
+  } catch {}
+}
+
 function onNameUpdate(m) {
   const id = m?.n;
   const nm = m?.nm;
   if (typeof id !== 'number' || typeof nm !== 'string') return;
-  if (botIds && botIds.has(id)) {
+  // G15: сервер генерирует уникальные шуточные ники ботов — используем их.
+  // Свой запасной вариант нужен только когда сервер прислал пустую строку.
+  const clean = nm.trim();
+  if (clean) {
+    nameById.set(id, clean);
+  } else if (botIds && botIds.has(id)) {
     nameById.set(id, botDisplayName(id));
   } else {
-    nameById.set(id, nm);
+    return;
   }
   if (chat.classList.contains('collapsed')) {
     chatDirty = true;
@@ -9680,7 +10654,8 @@ function applyPackedDeltaGridWithAnim(buf, now) {
     const prev = gridOwner[i];
     if (prev !== o) {
       gridOwner[i] = o;
-      if (o !== 0) {
+      // Остывающие клетки (старший бит) не анимируем как свежий захват.
+      if (o !== 0 && !gridCellIsCooling(o)) {
         const delay = ((i * 37) % fillDelayMod);
         gridFillAt[i] = now + delay;
       }
@@ -9701,7 +10676,7 @@ function onState(s) {
     if (prev && prev.length === gridOwner.length) {
       for (let i = 0; i < gridOwner.length; i++) {
         const n = gridOwner[i];
-        if (n !== 0 && prev[i] !== n) {
+        if (n !== 0 && !gridCellIsCooling(n) && prev[i] !== n) {
           const delay = ((i * 37) % fillDelayMod);
           gridFillAt[i] = now + delay;
         }
@@ -10064,9 +11039,23 @@ function draw() {
   // Цвет владельца кэшируем до горячего цикла: drawSegTile зовётся для каждой
   // клетки следа каждый кадр, лишний boostHsl там не нужен.
   const hslByOwner = new Map();
+  // Стиль территории приходит отдельным JSON (`cosExtra`), а не в 21-байтной
+  // записи снапшота. Паттерн создаётся ОДИН раз на владельца за кадр, дальше в
+  // цикле по клеткам остаётся один fillRect.
+  const terrByOwner = new Map();
+  const terrStyleByOwner = new Map();
   for (const p of lastState.players) {
     segByOwner.set(p.n, Math.max(0, Math.min(7, Number(p.cosSeg) || 0)));
-    hslByOwner.set(p.n, boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)'));
+    const hsl = boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)');
+    hslByOwner.set(p.n, hsl);
+    const tid = cosClampId(cosTerrByPlayer.get(p.n) || 0);
+    if (tid) {
+      terrByOwner.set(p.n, tid);
+      if (cosTerrIsPattern(tid)) {
+        const st = cosTerrFillStyle(ctx, hsl, tid, offsetX, offsetY, cell);
+        if (st) terrStyleByOwner.set(p.n, st);
+      }
+    }
   }
 
   if (fxEnabled && speedActive) {
@@ -10128,8 +11117,31 @@ function draw() {
   for (let y = minY; y <= maxY; y++) {
     for (let x = minX; x <= maxX; x++) {
       const i = y * W + x;
-      const o = gridOwner[i];
+      const rawOwner = gridOwner[i];
+      // F5: старший бит = «клетка остывает, её ещё можно вернуть».
+      const cooling = gridCellIsCooling(rawOwner);
+      const o = cooling ? 0 : rawOwner;
+      const coolOwner = cooling ? gridCellOwner(rawOwner) : 0;
       const t = trailOwner[i];
+
+      if (cooling) {
+        // Остывающая территория: полупрозрачная заливка, пунктирная граница,
+        // ритм пульса подсказывает, что время уходит.
+        const px = offsetX + x * cell;
+        const py = offsetY + y * cell;
+        const pulse = 0.5 + 0.5 * Math.sin(nowFrame * 0.005 - (x + y) * 0.35);
+        ctx.fillStyle = getOwnerFillStyle(coolOwner, 0.14 + 0.10 * pulse);
+        ctx.fillRect(px, py, cell, cell);
+        if (cell >= 7) {
+          ctx.save();
+          ctx.setLineDash([Math.max(2, cell * 0.22), Math.max(2, cell * 0.22)]);
+          ctx.lineDashOffset = -nowFrame * 0.02;
+          ctx.strokeStyle = getOwnerFillStyle(coolOwner, 0.45 + 0.25 * pulse);
+          ctx.lineWidth = 1;
+          ctx.strokeRect(px + 0.5, py + 0.5, cell - 1, cell - 1);
+          ctx.restore();
+        }
+      }
 
       if (o === you && headCX >= 0) {
         const hdx = x - headCX;
@@ -10157,27 +11169,52 @@ function draw() {
           }
         }
 
+        const px = offsetX + x * cell;
+        const py = offsetY + y * cell;
+        const tid = terrByOwner.get(o) || 0;
+
+        // Одна альфа на все три фазы (появление / анимация заливки / покой),
+        // чтобы стиль территории подключался ровно в одном месте.
+        let a;
+        let shineA = 0;
         if (age < 0) {
-          ctx.fillStyle = getOwnerFillStyle(o, 0.12 + waveA * 0.35);
-          ctx.fillRect(offsetX + x * cell, offsetY + y * cell, cell, cell);
+          a = 0.12 + waveA * 0.35;
         } else if (age < fillAnimMs) {
           const p = Math.max(0, Math.min(1, age / fillAnimMs));
-          const px = offsetX + x * cell;
-          const py = offsetY + y * cell;
-
-          ctx.fillStyle = getOwnerFillStyle(o, Math.min(0.92, baseA * (0.25 + 0.75 * p) + waveA * 0.5));
-          ctx.fillRect(px, py, cell, cell);
-
-          const shine = 1 - Math.abs(p - 0.5) * 2;
-          const shineA = 0.18 * shine;
-          if (shineA > 0.01) {
-            ctx.fillStyle = getOwnerFillStyle(o, Math.min(0.92, 0.22 + shineA + waveA * 0.35));
-            const inset = Math.max(1, (cell * 0.18) | 0);
-            ctx.fillRect(px + inset, py + inset, cell - inset * 2, cell - inset * 2);
-          }
+          a = Math.min(0.92, baseA * (0.25 + 0.75 * p) + waveA * 0.5);
+          shineA = 0.18 * (1 - Math.abs(p - 0.5) * 2);
         } else {
-          ctx.fillStyle = getOwnerFillStyle(o, Math.min(0.92, baseA + waveA));
-          ctx.fillRect(offsetX + x * cell, offsetY + y * cell, cell, cell);
+          a = Math.min(0.92, baseA + waveA);
+        }
+        if (tid) a = Math.max(0, Math.min(1, a + cosTerrAlphaMod(tid, x, y, nowFrame)));
+
+        const pat = tid ? terrStyleByOwner.get(o) : null;
+        if (pat) {
+          if (cosTerrIsAdditive(tid)) ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = a;
+          ctx.fillStyle = pat;
+          ctx.fillRect(px, py, cell, cell);
+          ctx.globalAlpha = 1;
+          if (cosTerrIsAdditive(tid)) ctx.globalCompositeOperation = 'source-over';
+        } else {
+          ctx.fillStyle = getOwnerFillStyle(o, a);
+          ctx.fillRect(px, py, cell, cell);
+        }
+
+        if (shineA > 0.01) {
+          ctx.fillStyle = getOwnerFillStyle(o, Math.min(0.92, 0.22 + shineA + waveA * 0.35));
+          const inset = Math.max(1, (cell * 0.18) | 0);
+          ctx.fillRect(px + inset, py + inset, cell - inset * 2, cell - inset * 2);
+        }
+
+        // Витраж: светящийся шов только по внешней границе владения.
+        if (tid === 5 && cell >= 7) {
+          let e = 0;
+          if (y === 0 || gridOwner[i - W] !== o) e |= 1;
+          if (x === W - 1 || gridOwner[i + 1] !== o) e |= 2;
+          if (y === H - 1 || gridOwner[i + W] !== o) e |= 4;
+          if (x === 0 || gridOwner[i - 1] !== o) e |= 8;
+          if (e) drawTerrSeam(ctx, px, py, cell, hslByOwner.get(o) || 'hsl(210 20% 60%)', e, 0.75);
         }
       }
 
@@ -10560,7 +11597,8 @@ function draw() {
       ctx.restore();
     }
 
-    const label = ip.nm ? String(ip.nm) : String(ip.n);
+    // Титул идёт перед ником — он виден всем, кто видит плашку.
+    const label = `${cosTitlePrefix(cosTitleByPlayer.get(ip.n) || 0)}${ip.nm ? String(ip.nm) : String(ip.n)}`;
     // Плашка ника — единый drawNamePlate, тот же и в магазине.
     drawNamePlate(ctx, label, px, py - cell * 0.58, c, ip.cosNameplate, 0.95, 12, nowFrame);
   }
@@ -10672,7 +11710,9 @@ function draw() {
       const fx = fxBursts[i];
       const knd0 = String(fx.kind || '');
       const isScore = knd0 === 'score';
-      const life = isScore ? SCORE_POPUP_MS : 650;
+      // Длительность бурста — параметр: вспышка захвата живёт 650 мс,
+      // эффект гибели дольше, всплывающее число — своё время.
+      const life = Number(fx.life) > 0 ? Number(fx.life) : isScore ? SCORE_POPUP_MS : 650;
       const age = nowFrame - fx.t0;
       if (age > life) {
         fxBursts.splice(i, 1);
@@ -10711,10 +11751,20 @@ function draw() {
         continue;
       }
 
-      const p = Math.max(0, Math.min(1, age / 650));
+      const p = Math.max(0, Math.min(1, age / life));
       const cx = offsetX + (x + 0.5) * cell;
       const cy = offsetY + (y + 0.5) * cell;
       const knd = knd0;
+
+      // Гибель: тот же drawDeathFx, что и в превью магазина.
+      if (knd.startsWith('die')) {
+        const dieId = cosClampId(Number(knd.slice(3)) || 0);
+        const owner = Number(fx.pid);
+        const ownerHsl = boostHsl(colors.get(owner) || 'hsl(210 20% 60%)');
+        drawDeathFx(ctx, cx, cy, cell * (0.6 + fxIntensity * 0.7), ownerHsl, dieId, p);
+        continue;
+      }
+
       const isCap = knd.startsWith('cap');
       const base = cell * (knd === 'kill' ? 1.1 : isCap ? 1.05 : 0.85);
       const r = base * (0.35 + 1.25 * p) * (0.35 + fxIntensity * 0.95);

@@ -103,6 +103,23 @@ jobs:
           done
           exit $status
 
+      # Рукопожатие /ws: правильный Origin даёт 101, чужой — 403.
+      # Проверено локально этими же командами (curl отдаёт 101 как http_code).
+      - name: WebSocket handshake and Origin rejection
+        run: |
+          ws() {
+            curl -s -o /dev/null -m 5 -w '%{http_code}' \
+              -H "Connection: Upgrade" -H "Upgrade: websocket" \
+              -H "Sec-WebSocket-Version: 13" \
+              -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+              -H "Origin: $1" http://127.0.0.1:3000/ws
+          }
+          ok=$(ws http://127.0.0.1:3000)
+          bad=$(ws https://evil.example.com)
+          echo "allowed origin -> $ok ; foreign origin -> $bad"
+          [ "$ok" = "101" ] || { echo "::error::handshake with allowed origin did not upgrade"; exit 1; }
+          [ "$bad" = "403" ] || { echo "::error::foreign origin was not rejected"; exit 1; }
+
       - name: HEALTHCHECK reports healthy
         run: |
           for i in $(seq 1 30); do

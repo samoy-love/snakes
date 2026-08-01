@@ -177,6 +177,23 @@
             <div id="cosmeticsHint" class="overlayHint"></div>
           </div>
         </div>
+
+        <!-- Переключатель языка обязан быть в каждом оверлее: меню скрыто, пока
+             открыт магазин, поэтому одной кнопки в футере меню недостаточно. -->
+        <div class="menuFooterActions overlayFooterActions">
+          <button
+            id="langToggleCosmetics"
+            class="iconBtn langToggle"
+            type="button"
+            aria-label="Сменить язык"
+            title="Сменить язык"
+            data-lang-toggle
+            data-i18n-aria-label="lang.toggle"
+            data-i18n-title="lang.toggle"
+          >
+            🇷🇺
+          </button>
+        </div>
       </div>
     </div>
 
@@ -324,6 +341,18 @@
         <div class="menuActions settingsFooterActions">
           <button id="resetSettingsBtn" class="btnSecondary" type="button" data-i18n="settings.reset"></button>
           <button id="closeSettingsBtn" class="btnGhost" data-i18n="common.close">Закрыть</button>
+          <button
+            id="langToggleSettings"
+            class="iconBtn langToggle"
+            type="button"
+            aria-label="Сменить язык"
+            title="Сменить язык"
+            data-lang-toggle
+            data-i18n-aria-label="lang.toggle"
+            data-i18n-title="lang.toggle"
+          >
+            🇷🇺
+          </button>
         </div>
       </div>
     </div>

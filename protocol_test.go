@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
+
+	"nhooyr.io/websocket"
 )
 
 // ---------------------------------------------------------------------------
@@ -40,6 +45,7 @@ var eventPayloadLen = map[uint8]int{
 	EventDailyComplete:    3,  // A u16, D u8
 	EventAchievement:      3,  // A u16, D u8
 	EventCapture:          11, // A u16, X u16, Y u16, C u32, D u8
+	EventReclaim:          8,  // A u16, B u16, X u16, Y u16
 }
 
 // eventsHeaderBase — размер заголовка пакета событий без списка powerup'ов
@@ -64,6 +70,8 @@ func newTestRoom() *Room {
 		gridPos:      make([]int32, N),
 		gridStamp:    make([]uint32, N),
 		trailStamp:   make([]uint32, N),
+		coolOwner:    make([]uint16, N),
+		coolUntil:    make([]uint32, N),
 		changedGrid:  make([]uint32, 0, 64),
 		changedTrail: make([]uint32, 0, 64),
 		minimapGrid:  make([]uint32, 0, 64),
@@ -143,13 +151,14 @@ func TestEventPayloadLengths(t *testing.T) {
 		EventPowerupUse, EventContractAssign, EventContractProgress,
 		EventContractComplete, EventStyle, EventRevenge, EventDailyAssign,
 		EventDailyProgress, EventDailyComplete, EventAchievement, EventCapture,
+		EventReclaim,
 	}
 
-	if len(kinds) != 19 {
-		t.Fatalf("ожидалось 19 типов событий, получено %d", len(kinds))
+	if len(kinds) != 20 {
+		t.Fatalf("ожидалось 20 типов событий, получено %d", len(kinds))
 	}
-	if len(eventPayloadLen) != 19 {
-		t.Fatalf("таблица длин должна содержать 19 записей, содержит %d", len(eventPayloadLen))
+	if len(eventPayloadLen) != 20 {
+		t.Fatalf("таблица длин должна содержать 20 записей, содержит %d", len(eventPayloadLen))
 	}
 
 	for _, kind := range kinds {
@@ -279,6 +288,11 @@ func checkEventPayload(t *testing.T, rd *reader, want Event) {
 		eq("Y", rd.u16(), want.Y)
 		eq("C", rd.u32(), want.C)
 		eq("D", rd.u8(), want.D)
+	case EventReclaim:
+		eq("A", rd.u16(), want.A)
+		eq("B", rd.u16(), want.B)
+		eq("X", rd.u16(), want.X)
+		eq("Y", rd.u16(), want.Y)
 	default:
 		t.Fatalf("неизвестный kind=%d в эталонном парсере", want.Kind)
 	}
@@ -1005,10 +1019,319 @@ func TestEventConstants(t *testing.T) {
 		"DailyComplete":    {EventDailyComplete, 17},
 		"Achievement":      {EventAchievement, 18},
 		"Capture":          {EventCapture, 19},
+		"Reclaim":          {EventReclaim, 20},
 	}
 	for name, p := range pairs {
 		if p[0] != p[1] {
 			t.Fatalf("Event%s = %d, ожидалось %d", name, p[0], p[1])
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// F5 «Реклейм»: клетки погибшего остывают, возвращаются целой связной областью
+// и окончательно исчезают по таймеру.
+// ---------------------------------------------------------------------------
+
+func TestReclaimCooldownLifecycle(t *testing.T) {
+	r := newTestRoom()
+	r.tick = 10
+	p := &Player{num: 1, alive: true}
+	r.players[1] = p
+
+	patch := []int{100, 101, 102}
+	lone := 5000
+	for _, i := range append(append([]int{}, patch...), lone) {
+		r.setGrid(i, 1)
+	}
+
+	r.changedGrid = r.changedGrid[:0]
+	r.clearPlayerCells(1, p)
+
+	wantWire := coolOwnerFlag | uint16(1)
+	for _, i := range append(append([]int{}, patch...), lone) {
+		if r.gridOwner[i] != 0 {
+			t.Fatalf("клетка %d осталась во владении: %d", i, r.gridOwner[i])
+		}
+		if r.coolOwner[i] != 1 {
+			t.Fatalf("coolOwner[%d] = %d, ожидалось 1", i, r.coolOwner[i])
+		}
+		if r.coolUntil[i] != r.tick+ReclaimTicks {
+			t.Fatalf("coolUntil[%d] = %d, ожидалось %d", i, r.coolUntil[i], r.tick+ReclaimTicks)
+		}
+		if got := r.gridWireAt(i); got != wantWire {
+			t.Fatalf("gridWireAt(%d) = %#x, ожидалось %#x", i, got, wantWire)
+		}
+	}
+	// На смерти каждая клетка даёт РОВНО одну дельту — уже с меткой остывания.
+	if len(r.changedGrid) != 4 {
+		t.Fatalf("дельт после смерти = %d, ожидалось 4", len(r.changedGrid))
+	}
+	for _, ch := range r.changedGrid {
+		if uint16(ch&0xFFFF) != wantWire {
+			t.Fatalf("дельта %#x несёт владельца %#x, ожидалось %#x", ch, ch&0xFFFF, wantWire)
+		}
+	}
+
+	if n := r.reclaimCoolRegion(p, 101); n != len(patch) {
+		t.Fatalf("возвращено клеток = %d, ожидалось %d", n, len(patch))
+	}
+	for _, i := range patch {
+		if r.gridOwner[i] != 1 {
+			t.Fatalf("клетка %d не вернулась владельцу: %d", i, r.gridOwner[i])
+		}
+		if r.coolOwner[i] != 0 {
+			t.Fatalf("coolOwner[%d] не сброшен", i)
+		}
+	}
+	if r.coolOwner[lone] != 1 {
+		t.Fatalf("несвязная клетка %d не должна была вернуться", lone)
+	}
+
+	// Чужой номер не забирает остывающую клетку.
+	other := &Player{num: 2, alive: true}
+	r.players[2] = other
+	if n := r.reclaimCoolRegion(other, lone); n != 0 {
+		t.Fatalf("чужой игрок вернул %d клеток, ожидалось 0", n)
+	}
+
+	r.tick = 10 + ReclaimTicks + 1
+	r.changedGrid = r.changedGrid[:0]
+	r.stepCoolExpiry()
+	if r.coolOwner[lone] != 0 || r.gridWireAt(lone) != 0 {
+		t.Fatalf("клетка %d не протухла: coolOwner=%d wire=%#x", lone, r.coolOwner[lone], r.gridWireAt(lone))
+	}
+	if len(r.changedGrid) == 0 {
+		t.Fatal("протухание не отправило дельту клиенту")
+	}
+	if len(r.coolBatches) != 0 {
+		t.Fatalf("очередь остывания не опустела: %d", len(r.coolBatches))
+	}
+}
+
+func TestReclaimQueueBudgetIsAmortized(t *testing.T) {
+	r := newTestRoom()
+	r.tick = 1
+	p := &Player{num: 1, alive: true}
+	r.players[1] = p
+	total := ReclaimExpireBudget*2 + 5
+	for i := 0; i < total; i++ {
+		r.setGrid(i, 1)
+	}
+	r.clearPlayerCells(1, p)
+
+	r.tick = 1 + ReclaimTicks
+	r.stepCoolExpiry()
+	left := 0
+	for i := 0; i < total; i++ {
+		if r.coolOwner[i] != 0 {
+			left++
+		}
+	}
+	if left != total-ReclaimExpireBudget {
+		t.Fatalf("за тик протухло %d клеток, ожидалось %d", total-left, ReclaimExpireBudget)
+	}
+	r.stepCoolExpiry()
+	r.stepCoolExpiry()
+	for i := 0; i < total; i++ {
+		if r.coolOwner[i] != 0 {
+			t.Fatalf("клетка %d не протухла после трёх тиков", i)
+		}
+	}
+}
+
+func TestTitlesUnlockedOnlyByAchievements(t *testing.T) {
+	pr := &Profile{}
+	if m := titleMaskLocked(pr); m != 1 {
+		t.Fatalf("пустая маска титулов = %#x, ожидалось 1", m)
+	}
+	for _, tr := range titleRules {
+		if titleUnlockedLocked(pr, tr.id) {
+			t.Fatalf("титул %d разблокирован без ачивки", tr.id)
+		}
+	}
+	pr.AchvMask = uint32(1) << uint32(AchvKills100)
+	if !titleUnlockedLocked(pr, 2) {
+		t.Fatal("титул 2 должен открываться ачивкой AchvKills100")
+	}
+	if titleUnlockedLocked(pr, 3) {
+		t.Fatal("титул 3 не должен открываться ачивкой AchvKills100")
+	}
+	if titleUnlockedLocked(pr, TitleMaxID+1) {
+		t.Fatal("id за пределами таблицы не должен считаться разблокированным")
+	}
+	// Экипированный титул слетает, если ачивки нет.
+	pr.TitleID = 3
+	ensureProfileCosmeticsLocked(pr)
+	if pr.TitleID != 0 {
+		t.Fatalf("TitleID = %d, ожидалось 0", pr.TitleID)
+	}
+	pr.TitleID = 2
+	ensureProfileCosmeticsLocked(pr)
+	if pr.TitleID != 2 {
+		t.Fatalf("TitleID = %d, ожидалось 2", pr.TitleID)
+	}
+}
+
+func TestOldProfileLoadsNewCosmeticCategories(t *testing.T) {
+	// Файл профиля, записанный до появления terr/death/титулов.
+	raw := []byte(`{"styleBalance":123,"cosInvFrame":3,"cosEqFrame":1,"achvMask":0}`)
+	var pr Profile
+	if err := json.Unmarshal(raw, &pr); err != nil {
+		t.Fatalf("старый профиль не разобрался: %v", err)
+	}
+	ensureProfileCosmeticsLocked(&pr)
+	if pr.StyleBalance != 123 || pr.CosInvFrame != 3 || pr.CosEqFrame != 1 {
+		t.Fatalf("старые поля потерялись: %+v", pr)
+	}
+	if pr.CosInvTerr != 1 || pr.CosInvDeath != 1 {
+		t.Fatalf("новые категории не получили бесплатный вариант 0: terr=%d death=%d", pr.CosInvTerr, pr.CosInvDeath)
+	}
+	if pr.CosEqTerr != 0 || pr.CosEqDeath != 0 || pr.TitleID != 0 {
+		t.Fatalf("новые поля должны грузиться нулями: %+v", pr)
+	}
+}
+
+func TestCosmeticsPricesCoverNewCategories(t *testing.T) {
+	payload := cosmeticsPricesPayload()
+	for _, cat := range []string{"frame", "nameplate", "seg", "head", "capturefx", "terr", "death"} {
+		row, ok := payload[cat]
+		if !ok {
+			t.Fatalf("в hello.cosmeticsPrices нет категории %q", cat)
+		}
+		list, ok := row.([]uint16)
+		if !ok || len(list) != CosmeticsMaxID+1 {
+			t.Fatalf("категория %q: неверная таблица цен %v", cat, row)
+		}
+		if list[0] != 0 {
+			t.Fatalf("категория %q: вариант 0 должен быть бесплатным, цена %d", cat, list[0])
+		}
+		if !cosmeticsCatValid(cat) {
+			t.Fatalf("категория %q не принимается cosmeticsCatValid", cat)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Новые категории косметики, титулы и сообщение cosExtra — по живому сокету.
+// ---------------------------------------------------------------------------
+
+// wsWaitAny ждёт текстовое сообщение одного из перечисленных типов.
+func wsWaitAny(ctx context.Context, t *testing.T, c *websocket.Conn, want ...string) (string, json.RawMessage) {
+	t.Helper()
+	for {
+		env := wsSmokeReadJSON(ctx, t, c)
+		for _, w := range want {
+			if env.Type == w {
+				return env.Type, env.Data
+			}
+		}
+	}
+}
+
+func TestWSCosExtraAndTitleEquip(t *testing.T) {
+	_, wsURL := wsSmokeEnv(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	c.SetReadLimit(8 << 20)
+	defer c.Close(websocket.StatusNormalClosure, "test done")
+
+	helloRaw := wsSmokeWaitJSON(ctx, t, c, "hello")
+	var hello struct {
+		Prices map[string][]uint16 `json:"cosmeticsPrices"`
+	}
+	if err := json.Unmarshal(helloRaw, &hello); err != nil {
+		t.Fatalf("hello не разобрался: %v", err)
+	}
+	for _, cat := range []string{"terr", "death"} {
+		if len(hello.Prices[cat]) != CosmeticsMaxID+1 {
+			t.Fatalf("hello.cosmeticsPrices[%q] = %v", cat, hello.Prices[cat])
+		}
+	}
+
+	wsSmokeSend(ctx, t, c, "join", map[string]any{"mode": "auto"})
+	initRaw := wsSmokeWaitJSON(ctx, t, c, "init")
+	var initMsg struct {
+		You       uint16 `json:"you"`
+		Cosmetics struct {
+			InvTerr   *uint8  `json:"invTerr"`
+			InvDeath  *uint8  `json:"invDeath"`
+			EqTerr    *uint8  `json:"eqTerr"`
+			EqDeath   *uint8  `json:"eqDeath"`
+			TitleID   *uint8  `json:"titleId"`
+			TitleMask *uint32 `json:"titleMask"`
+		} `json:"cosmetics"`
+	}
+	if err := json.Unmarshal(initRaw, &initMsg); err != nil {
+		t.Fatalf("init не разобрался: %v", err)
+	}
+	cs := initMsg.Cosmetics
+	if cs.InvTerr == nil || *cs.InvTerr == 0 || cs.InvDeath == nil || *cs.InvDeath == 0 {
+		t.Fatalf("в init.cosmetics нет масок владения terr/death: %s", string(initRaw))
+	}
+	if cs.EqTerr == nil || cs.EqDeath == nil || cs.TitleID == nil || cs.TitleMask == nil {
+		t.Fatalf("в init.cosmetics нет eqTerr/eqDeath/titleId/titleMask: %s", string(initRaw))
+	}
+	if *cs.TitleMask&1 == 0 {
+		t.Fatalf("titleMask = %#x, бит 0 («без титула») обязан быть выставлен", *cs.TitleMask)
+	}
+
+	// cosExtra приходит при входе в комнату и содержит самого игрока.
+	extraRaw := wsSmokeWaitJSON(ctx, t, c, "cosExtra")
+	var extra struct {
+		Players []cosExtraEntry `json:"players"`
+	}
+	if err := json.Unmarshal(extraRaw, &extra); err != nil {
+		t.Fatalf("cosExtra не разобрался: %v (%s)", err, string(extraRaw))
+	}
+	found := false
+	for _, e := range extra.Players {
+		if e.N == initMsg.You {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("в cosExtra нет игрока %d: %s", initMsg.You, string(extraRaw))
+	}
+
+	// Категория terr доходит до транзакционной ветки: отказ по балансу,
+	// а не «неизвестная категория».
+	wsSmokeSend(ctx, t, c, "cosmeticsBuy", map[string]any{"cat": "terr", "id": 1})
+	_, errRaw := wsWaitAny(ctx, t, c, "error", "cosmetics")
+	var errMsg struct {
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(errRaw, &errMsg)
+	if errMsg.Message != "cosmetics_not_enough_style" {
+		t.Fatalf("покупка terr вернула %q, ожидалось cosmetics_not_enough_style", errMsg.Message)
+	}
+
+	// Титул без ачивки не выдаётся.
+	wsSmokeSend(ctx, t, c, "titleEquip", map[string]any{"id": 2})
+	_, errRaw = wsWaitAny(ctx, t, c, "error", "cosmetics")
+	_ = json.Unmarshal(errRaw, &errMsg)
+	if errMsg.Message != "title_not_unlocked" {
+		t.Fatalf("titleEquip вернул %q, ожидалось title_not_unlocked", errMsg.Message)
+	}
+
+	// id вне таблицы отсекается отдельным кодом.
+	wsSmokeSend(ctx, t, c, "titleEquip", map[string]any{"id": TitleMaxID + 1})
+	_, errRaw = wsWaitAny(ctx, t, c, "error", "cosmetics")
+	_ = json.Unmarshal(errRaw, &errMsg)
+	if errMsg.Message != "title_invalid_id" {
+		t.Fatalf("titleEquip(%d) вернул %q, ожидалось title_invalid_id", TitleMaxID+1, errMsg.Message)
+	}
+
+	// id 0 («без титула») разрешён всегда и отвечает состоянием косметики.
+	wsSmokeSend(ctx, t, c, "titleEquip", map[string]any{"id": 0})
+	typ, _ := wsWaitAny(ctx, t, c, "error", "cosmetics")
+	if typ != "cosmetics" {
+		t.Fatalf("titleEquip(0) вернул %q, ожидалось cosmetics", typ)
 	}
 }

@@ -11,15 +11,16 @@
 границу, тем больше куш и тем выше риск: длинный след — приглашение для соперника
 его пересечь.
 
-Игра разбита на **матчи по 5 минут** (3000 тиков по 100 мс) с перерывом 30 секунд
-между ними, в конце матча показывается таблица результатов. Комнаты создаются
+Игра разбита на **матчи по 5 минут** (3000 тиков по 100 мс) с перерывом 15 секунд
+между ними (150 тиков, `MatchIntermissionTicks` в `main.go`), в конце матча
+показывается таблица результатов. Комнаты создаются
 автоматически, живых игроков в комнате до 16, свободные места добиваются **ботами**
 (14 штук) с полноценным ИИ: они планируют заходы, оценивают свободное место,
 считают путь обратно и уклоняются от чужих следов. Поверх базовой механики есть
 слой прогрессии: на поле спавнятся **бонусы** (щит, рывок, мега-рывок, «нова»),
 периодически включаются **мутаторы** матча (двойной захват, всплеск бонусов),
 назначается **награда за голову** (bounty), считаются серии убийств и месть. Каждому
-игроку выдаются **контракты** (убийства / подборы бонусов / захват площади) и две
+игроку выдаются **контракты** (убийства / подборы бонусов / захват площади) и три
 **ежедневки**, а за всё это начисляется валюта **«Стиль»**, на которую в магазине
 покупается косметика пяти категорий: эффект захвата, голова, сегменты, шильдик с
 именем и рамка. Прогресс (баланс, инвентарь, экипировка, ежедневки, ачивки)
@@ -38,7 +39,7 @@
 
 | Файл / каталог | Назначение |
 | --- | --- |
-| `server.go` | `main()`, HTTP-роутинг (`/ws`, `/metrics`, `/favicon.ico`, статика), middleware кэширования и заголовков безопасности, graceful shutdown по SIGINT/SIGTERM |
+| `server.go` | `main()`, HTTP-роутинг (`/ws`, `/healthz`, `/readyz`, `/metrics`, `/favicon.ico`, статика), middleware кэширования и заголовков безопасности, graceful shutdown по SIGINT/SIGTERM |
 | `main.go` | Вся игровая логика: сетка, захват территории, матчи, боты, бонусы, мутаторы, контракты, ежедневки, ачивки, косметика, бинарные сериализаторы протокола |
 | `ws.go` | WebSocket-хендлер: allowlist origin'ов, per-IP token-bucket rate-limit, разбор клиентских команд, определение IP клиента с учётом доверенных прокси |
 | `profiles.go` | Персистентность профилей: HMAC-токены анонимной личности, атомарная запись `profiles.json`, TTL 90 дней, автосейв, потолок дохода «Стиля», парсинг `TRUSTED_PROXIES` |
@@ -53,10 +54,15 @@
 | `public/client_errors.js` | Глобальный перехват ошибок клиента |
 | `public/style.css` | Стили |
 | `public/emoji-64/` | Спрайты эмодзи (иммутабельны, кэшируются на год) |
-| `Dockerfile` | Multi-stage сборка образа |
-| `docker-compose.yml` | Игра + nginx, именованный volume под профили |
-| `deploy/nginx.conf` | Прод-конфиг nginx: WebSocket, статика, закрытый `/metrics` |
+| `Dockerfile` | Multi-stage сборка образа: `golang:1.22-alpine` → `alpine:3.20`, бинарь + `public/`, запуск от uid 10001, HEALTHCHECK через busybox `wget` |
+| `docker-compose.yml` | Локальный стенд: игра + nginx по HTTP на `HTTP_PORT`, именованный volume `snakes_data` под профили |
+| `docker-compose.prod.yml` | Оверлей для прода (TLS); подключается вторым `-f` |
+| `deploy/nginx.conf` | Конфиг nginx для локального compose (только HTTP) |
+| `deploy/nginx.prod.conf` | Конфиг nginx для прода (TLS) |
+| `deploy/nginx.common.conf` | Общие маршруты игры: `/ws`, health, статика, закрытый `/metrics` |
 | `deploy/security-headers.conf` | Сниппет заголовков безопасности для nginx |
+| `Makefile` | Повседневные команды: build / test / vet / fmt / docker-* |
+| `.github/workflows/` | CI (`ci.yml`) и публикация образа в GHCR (`docker.yml`) |
 | `.env.example` | Шаблон конфигурации |
 | `launcher.conf` | Исторический конфиг nginx с прода (содержит и посторонние сайты) |
 | `BACKLOG.md` | Список задач |
@@ -76,29 +82,100 @@ go run .
 Порт меняется переменной `PORT`. Статика раздаётся из каталога `./public`
 **относительно рабочей директории**, поэтому запускать надо из корня репозитория.
 
-### Docker
+Для запуска на `localhost` переменная `WS_ORIGINS` не нужна: origin с хостом
+`localhost`/`127.0.0.1` разрешён в коде отдельно. Профили при этом лягут в
+`./data/profiles.json` (каталог в `.gitignore`).
+
+---
+
+## Запуск через Docker
+
+Ниже — только те команды, которые реально прогонялись на этом проекте
+(Docker 29.4.2, Windows 11 + Git Bash).
+
+### Одиночный контейнер
 
 ```sh
-docker build -t snakes:local .
-docker run --rm -p 3000:3000 \
-  -e PROFILE_SECRET="$(openssl rand -base64 48)" \
-  -v snakes_data:/app/data \
-  snakes:local
+docker build -t snakes:test .
+
+docker run -d --name snakes-solo -p 18080:3000 \
+  -e PROFILE_SECRET=solo-test-secret \
+  -e WS_ORIGINS=http://127.0.0.1:18080 \
+  snakes:test
 ```
+
+Проверки:
+
+```sh
+for p in /healthz /readyz / /client.js /style.css /metrics; do
+  echo "$p -> $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080$p)"
+done
+# /healthz -> 200 /readyz -> 200 / -> 200 /client.js -> 200 /style.css -> 200 /metrics -> 200
+
+docker inspect --format='{{.State.Health.Status}}' snakes-solo   # healthy
+docker exec snakes-solo sh -c 'id && touch /app/data/probe && rm /app/data/probe'
+# uid=10001(snakes) gid=10001(snakes) — каталог профилей доступен на запись
+
+docker rm -f snakes-solo
+```
+
+Размер образа — **56.5 MB** (`docker images snakes`).
+
+Важно: без `-e WS_ORIGINS` сервер уходит в прод-дефолт `snakes.samoy.love`
+и отвечает 403 на `/ws`. Значение должно совпадать с тем `host:port`, по
+которому открывается страница (см. раздел «Безопасность»).
 
 ### docker compose (игра + nginx)
 
 ```sh
-cp .env.example .env
-# обязательно заполнить PROFILE_SECRET
+cp .env.example .env         # обязательно заполнить PROFILE_SECRET
 docker compose up -d --build
+docker compose ps
 docker compose logs -f game
-docker compose down
+docker compose down          # без -v: профили в volume остаются
 ```
 
-Порт игры наружу не публикуется — трафик идёт только через nginx (80/443).
-Профили лежат в именованном volume `snakes_data`, `docker compose down` их не
-удаляет (для удаления нужен `-v`).
+Фактический вывод `docker compose ps`:
+
+```
+NAME             IMAGE               SERVICE   STATUS
+snakes-game-1    snakes:local        game      Up (healthy)
+snakes-nginx-1   nginx:1.27-alpine   nginx     Up (healthy)   0.0.0.0:8080->80/tcp
+```
+
+Игра открывается на <http://localhost:8080> — это порт **nginx-контейнера**.
+Порт самой игры (3000) наружу не публикуется, обращение к `http://localhost:3000`
+не проходит.
+
+Что проверено на этом стенде:
+
+* `/healthz`, `/readyz`, `/`, `/client.js`, `/style.css` через nginx → `200`,
+  `/favicon.ico` → `204`;
+* `/metrics` снаружи → `404`, изнутри docker-сети (`http://nginx:8081/metrics`)
+  → `200` и JSON;
+* WebSocket через nginx живёт больше 75 секунд без разрывов (в
+  `deploy/nginx.common.conf` выставлен `proxy_read_timeout 3600s`);
+* `docker compose logs` — без ошибок nginx и без `error/panic/fatal` у игры.
+
+### Персистентность профилей
+
+Профили лежат в именованном volume `snakes_data`, смонтированном в `/app/data`.
+`docker compose down` (без `-v`) том не удаляет. Проверено сценарием:
+подключиться, сыграть, сохранить токен из `hello` → `docker compose down` →
+`docker compose up -d` → переподключиться с `ws://localhost:8080/ws?t=<токен>`.
+
+Результат: сервер пишет в лог
+`profiles_loaded path="/app/data/profiles.json" count=3 evicted=0`, в новом
+`hello` приходит переизданный токен с **тем же pid**, а в `init` — прежний
+баланс «Стиля» и прежний инвентарь косметики. Побайтовое сравнение записи
+профиля до и после рестарта: из 40 полей изменилось одно — `lastSeen`.
+
+Посмотреть файл в томе:
+
+```sh
+docker compose exec game ls -la /app/data
+docker compose exec game cat /app/data/profiles.json
+```
 
 ---
 
@@ -108,42 +185,67 @@ docker compose down
 | --- | --- | --- | --- |
 | `PORT` | `3000` | `server.go` | Порт HTTP/WebSocket-сервера |
 | `ROOM_LIMIT` | `16` | `server.go` | Максимум живых игроков в комнате. Некорректное или неположительное значение игнорируется |
-| `MATCH_DURATION_TICKS` | `3000` | `main.go` | Длительность матча в тиках (тик = 100 мс, 3000 ≈ 5 минут) |
-| `MATCH_INTERMISSION_TICKS` | `300` | `main.go` | Пауза между матчами в тиках (300 ≈ 30 секунд) |
+| `MATCH_DURATION_TICKS` | `3000` | `main.go` | Длительность матча в тиках (тик = 100 мс, 3000 = 5 минут) |
+| `MATCH_INTERMISSION_TICKS` | `150` | `main.go` | Пауза между матчами в тиках (150 = 15 секунд) |
+| `WS_ORIGINS` | `http(s)://snakes.samoy.love` | `main.go` (`loadAllowedWSOrigins`) | Список origin'ов через запятую, которым разрешено рукопожатие `/ws`. Для локального стенда обязателен, иначе 403 |
 | `PROFILE_SECRET` | *(пусто → случайный эфемерный)* | `profiles.go` | HMAC-ключ подписи токенов личности. **В проде задавать обязательно**, см. раздел «Безопасность» |
 | `PROFILES_PATH` | `./data/profiles.json` | `profiles.go` | Путь к файлу профилей. В Docker-образе выставлен в `/app/data/profiles.json` |
-| `TRUSTED_PROXIES` | `127.0.0.1/8,::1` | `profiles.go` | Список CIDR/IP через запятую, чьему `X-Forwarded-For` можно верить |
+| `TRUSTED_PROXIES` | `127.0.0.1/8,::1` | `profiles.go` | Список CIDR/IP через запятую, чьему `X-Forwarded-For` можно верить. Для compose — подсеть `snakes_net` (`172.28.0.0/16`) |
 | `BOT_DEATH_SNAP` | *(пусто)* | `main.go` | `1` включает отладочный «снап» бота при смерти. В проде не нужен |
 
-Дополнительно `Dockerfile` принимает build-args `VERSION`, `COMMIT`, `BUILD_TIME`
-(прокидываются в `-ldflags -X main.*`).
+Отдельно `HTTP_PORT` (дефолт `8080`) читает только `docker-compose.yml` — это
+порт, на который наружу публикуется nginx-контейнер. Сам сервер его не видит.
+
+Дополнительно `Dockerfile` принимает build-args `VERSION`, `COMMIT`, `BUILD_TIME`.
+Они уходят в `-ldflags -X main.Version=... -X main.Commit=... -X main.BuildTime=...`,
+но **переменных с такими именами в пакете `main` сейчас нет**. Проверено сборкой:
+линкер молча игнорирует `-X` для несуществующего символа, сборка проходит, версия
+в бинаре нигде не отображается. Это задел на будущее, а не рабочая функция.
 
 ---
 
 ## Тесты
 
 ```sh
+gofmt -l .                 # должно быть пусто
 go vet ./...
+go build ./...
 go test ./...
 go test ./... -race        # нужен CGO и C-компилятор (на Windows — MinGW/TDM-GCC)
-gofmt -l .                 # должно быть пусто
 ```
 
-Через Makefile:
+Через Makefile (проверено в Git Bash на Windows с GNU make из chocolatey):
 
 ```sh
-make test
-make test-race
+make fmt-check     # падает, если есть неотформатированные файлы
 make vet
-make fmt
+make build         # на Windows кладёт snakes.exe
+make test
+make test-race-docker   # -race в контейнере golang:1.22, gcc на хосте не нужен
+make docker-build
+make docker-up / make docker-down / make docker-logs
+make clean
 ```
+
+`make test-race` требует CGO и `gcc` в `PATH`. На типичной Windows-машине его
+нет — используйте `make test-race-docker`, он даёт ровно то же окружение, что и
+CI. Последний прогон `-race` (Linux, `golang:1.22`) прошёл чисто: `ok snakes 1.210s`.
+
+Внимание, Windows: нужен именно GNU make из chocolatey
+(`C:\ProgramData\chocolatey\bin\make.exe`). Make из чужой msys2-среды (например
+`C:\devkitPro\msys2\usr\bin\make.exe`) приходит в рецепты с вычищенным
+окружением и ломает `go build`; подробности — в шапке `Makefile`.
 
 Синтаксис клиентских скриптов проверяется в CI: `node --check public/client.js`
 и `node --check public/client_*.js` (нужен Node 22+, он сам определяет ES-модуль).
 
-CI: `.github/workflows/ci.yml` (gofmt / vet / build / test -race / node --check),
-`.github/workflows/docker.yml` (сборка и публикация образа в GHCR по push в
-`master`/`main` и по тегам `v*`).
+CI: `.github/workflows/ci.yml` — три job'а: **go** (gofmt / vet / build /
+`test -race`), **js** (`node --check` по `public/client*.js`) и **docker**
+(сборка образа, `docker run`, проверка `/healthz`, `/readyz`, `/`, `/client.js`,
+`/style.css`, `/metrics`, ожидание статуса `healthy` у HEALTHCHECK и проба записи
+в каталог профилей от непривилегированного пользователя).
+`.github/workflows/docker.yml` — сборка и публикация образа в GHCR по push в
+`master`/`main` и по тегам `v*`.
 
 ---
 
@@ -208,11 +310,22 @@ CI: `.github/workflows/ci.yml` (gofmt / vet / build / test -race / node --check)
 | 18 | `EventAchievement` | Разблокировано достижение |
 | 19 | `EventCapture` | Захват территории |
 
-### `/metrics`
+## HTTP-эндпоинты
 
-`GET /metrics` отдаёт JSON: `wsConnections`, `wsActive`, `wsWriteErrors`,
-`wsDropped`. Наружу эндпоинт закрыт конфигом nginx (доступ только из внутренней
-docker-сети).
+| Путь | Код | Описание |
+| --- | --- | --- |
+| `GET /` | 200 | `public/index.html`. В compose отдаётся nginx-ом напрямую с диска |
+| `GET /client.js`, `/style.css`, … | 200 | Статика из `./public` относительно рабочей директории (`mustCwd()` в `server.go`) |
+| `GET /emoji-64/*.png` | 200 | Спрайты эмодзи, кэш на год |
+| `GET /favicon.ico` | 204 | Пустой ответ, чтобы не ловить 404 в логах |
+| `GET /healthz` | 200 `ok` | Liveness. На нём же завязан HEALTHCHECK контейнера |
+| `GET /readyz` | 200 `ready` | Readiness |
+| `GET /metrics` | 200 | JSON: `wsConnections`, `wsActive`, `wsWriteErrors`, `wsDropped` |
+| `GET /ws` | 101 / 403 | WebSocket. 403 при неразрешённом `Origin` |
+
+`/metrics` наружу закрыт: публичный server-блок nginx отдаёт на него `404`
+безусловно, а сами метрики доступны на отдельном слушателе `nginx:8081`, который
+compose наружу не публикует.
 
 ---
 
@@ -253,6 +366,37 @@ HMAC-SHA256 на ключе `PROFILE_SECRET`. Клиент сохраняет т
 Секрет генерируется как `openssl rand -base64 48` и хранится в `.env` (файл в
 `.gitignore`) или в секретах CI. Смена секрета эквивалентна разлогину всех игроков.
 
+### Проверка `Origin` на `/ws`
+
+Рукопожатие проходит **две** независимые проверки, и это важно понимать при
+настройке:
+
+1. `wsOriginAllowed` (`ws.go`) — собственный allowlist из `WS_ORIGINS`
+   (`allowedWSOrigins` в `main.go`). Хосты `localhost`, `127.0.0.1` и `::1`
+   разрешены всегда, независимо от списка.
+2. `websocket.Accept` из `nhooyr.io/websocket` — библиотека по умолчанию требует,
+   чтобы хост из `Origin` совпадал с заголовком `Host` запроса, иначе сама
+   отдаёт 403.
+
+Проверено вживую на контейнере, поднятом с `WS_ORIGINS=http://example.test:18080`:
+
+```
+Origin: http://example.test:18080  (в списке WS_ORIGINS)  -> 403
+Origin: http://localhost:18080     (localhost)            -> 403
+Origin: http://127.0.0.1:18080     (== Host)              -> 101 OK
+Origin: https://evil.example.com                          -> 403
+без заголовка Origin                                      -> 101 OK
+```
+
+То есть вторая проверка строже первой и фактически определяет результат:
+**`WS_ORIGINS` может только сузить набор origin'ов, но не расширить его за
+пределы same-origin**. Практический вывод для эксплуатации: `WS_ORIGINS` обязан
+содержать ровно тот `host:port`, по которому клиент открывает страницу (и nginx
+обязан прокидывать `Host` вместе с портом — в `deploy/nginx.common.conf` для
+этого стоит `proxy_set_header Host $http_host`, а не `$host`). Кросс-доменное
+подключение к `/ws` сейчас невозможно в принципе, даже если добавить домен в
+`WS_ORIGINS`.
+
 ### Почему нельзя доверять `X-Forwarded-For`
 
 `X-Forwarded-For` — обычный заголовок, который клиент может выставить сам в любое
@@ -271,15 +415,19 @@ rate-limit, просто подставляя случайный адрес в �
    возвращается адрес пира.
 
 Практический вывод: при запуске за nginx/docker в `TRUSTED_PROXIES` нужно добавить
-подсеть, из которой приходит прокси (для compose это `172.16.0.0/12`). Если этого не
-сделать, все игроки будут считаться одним IP и упрутся в общий rate-limit. Если же,
-наоборот, указать там `0.0.0.0/0`, защита от подделки исчезнет.
+подсеть, из которой приходит прокси. Для штатного compose это `172.28.0.0/16` —
+subnet сети `snakes_net` закреплён в `docker-compose.yml` явно именно для того,
+чтобы список можно было держать узким. Если подсеть не добавить, все игроки
+будут считаться одним IP и упрутся в общий rate-limit. Если же, наоборот,
+указать `0.0.0.0/0` или все диапазоны RFC1918, защита от подделки исчезнет: IP
+игрока из локальной сети сам попадёт в «доверенные», цепочка исчерпается, и
+`requestClientIP` вернёт адрес nginx-контейнера — то есть снова одна корзина
+на всех.
 
 ### Прочее
 
-* WebSocket защищён allowlist'ом Origin (`allowedWSOrigins` в `main.go`; localhost
-  разрешён всегда), бинарные кадры от клиента запрещены, размер сообщения ограничен
-  16 КиБ, на каждый тип команды свой token-bucket по IP.
+* Бинарные кадры от клиента запрещены, размер сообщения ограничен 16 КиБ, на
+  каждый тип команды свой token-bucket по IP.
 * HTTP-ответы снабжаются `Content-Security-Policy`, `X-Content-Type-Options`,
   `X-Frame-Options: DENY`, `Referrer-Policy`, COOP/CORP и `Permissions-Policy`
   (`securityHeadersMiddleware` в `server.go`); nginx дублирует набор и добавляет HSTS.

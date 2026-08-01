@@ -223,6 +223,11 @@ func applyProfileCosmeticsToPlayerLocked(pl *Player, pr *Profile) {
 	pl.cosSeg = pr.CosEqSeg
 	pl.cosNameplate = pr.CosEqNameplate
 	pl.cosFrame = pr.CosEqFrame
+	pl.cosInvTerr = pr.CosInvTerr
+	pl.cosInvDeath = pr.CosInvDeath
+	pl.cosTerr = pr.CosEqTerr
+	pl.cosDeath = pr.CosEqDeath
+	pl.titleID = pr.TitleID
 }
 
 // profileCosInvLocked returns a pointer to the inventory mask of a category,
@@ -242,6 +247,10 @@ func profileCosInvLocked(pr *Profile, cat string) *uint8 {
 		return &pr.CosInvNameplate
 	case "frame":
 		return &pr.CosInvFrame
+	case "terr":
+		return &pr.CosInvTerr
+	case "death":
+		return &pr.CosInvDeath
 	}
 	return nil
 }
@@ -262,6 +271,10 @@ func profileSetEquippedLocked(pr *Profile, cat string, id uint8) {
 		pr.CosEqNameplate = id
 	case "frame":
 		pr.CosEqFrame = id
+	case "terr":
+		pr.CosEqTerr = id
+	case "death":
+		pr.CosEqDeath = id
 	}
 }
 

@@ -152,6 +152,8 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		"roomLimit":       hub.roomLimit,
 		"token":           token,
 		"cosmeticsPrices": cosmeticsPricesPayload(),
+		"titles":          titlesPayload(),
+		"reclaimTicks":    ReclaimTicks,
 	})
 	client.sendRooms(r.Context(), hub)
 
@@ -201,6 +203,8 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				rate, burst = 2, 4
 			case "cosmeticsEquip":
 				rate, burst = 3, 6
+			case "titleEquip":
+				rate, burst = 2, 4
 			default:
 				// Unknown types are limited too, so junk cannot be spammed.
 				// One shared bucket, otherwise random type names would each
@@ -427,6 +431,9 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 					shortPID(pid), cat, id, price, balBefore, balAfter)
 			}
 			client.sendJSON(r.Context(), "cosmetics", payload)
+			if bought && rm != nil {
+				rm.broadcastCosExtra(r.Context())
+			}
 		case "cosmeticsEquip":
 			var p struct {
 				Cat string `json:"cat"`
@@ -489,6 +496,62 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			log.Printf("cosmetics_txn pid=%q cat=%q id=%d price=%d balance_before=%d balance_after=%d",
 				shortPID(pid), "equip:"+cat, id, 0, balance, balance)
 			client.sendJSON(r.Context(), "cosmetics", payload)
+			if rm != nil {
+				rm.broadcastCosExtra(r.Context())
+			}
+		case "titleEquip":
+			var p struct {
+				ID uint8 `json:"id"`
+			}
+			if json.Unmarshal(msg.Data, &p) != nil {
+				continue
+			}
+			if p.ID > TitleMaxID {
+				client.sendJSON(r.Context(), "error", map[string]any{"message": "title_invalid_id"})
+				continue
+			}
+			client.mu.Lock()
+			rm := client.room
+			pl := client.player
+			client.mu.Unlock()
+			pid := client.profileKey()
+			pr := profileForKey(pid)
+			if pr == nil {
+				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_unavailable"})
+				continue
+			}
+
+			// Same lock order as the cosmetics branches: rm.mu -> profilesMu.
+			if rm != nil {
+				rm.mu.Lock()
+			}
+			profilesMu.Lock()
+			ensureProfileCosmeticsLocked(pr)
+			// id 0 clears the title and is always allowed.
+			unlocked := p.ID == 0 || titleUnlockedLocked(pr, p.ID)
+			var payload map[string]any
+			if unlocked {
+				pr.TitleID = p.ID
+				pr.LastSeen = time.Now().Unix()
+				if rm != nil {
+					applyProfileCosmeticsToPlayerLocked(pl, pr)
+				}
+				payload = cosmeticsStatePayloadFromProfile(pr)
+			}
+			profilesMu.Unlock()
+			if rm != nil {
+				rm.mu.Unlock()
+			}
+			if !unlocked {
+				client.sendJSON(r.Context(), "error", map[string]any{"message": "title_not_unlocked"})
+				continue
+			}
+			markProfilesDirty()
+			log.Printf("title_equip pid=%q id=%d", shortPID(pid), p.ID)
+			client.sendJSON(r.Context(), "cosmetics", payload)
+			if rm != nil {
+				rm.broadcastCosExtra(r.Context())
+			}
 		case "input":
 			var p struct {
 				Dir string `json:"dir"`

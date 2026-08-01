@@ -69,7 +69,13 @@ test-race:
 
 # Гонки прогоняются в linux-контейнере: это ровно то окружение, в котором
 # гоняет CI, и gcc на хосте не требуется.
+#
+# MSYS_NO_PATHCONV/MSYS2_ARG_CONV_EXCL обязательны в Git Bash: без них msys
+# переписывает аргумент `-w /src` в `C:/Program Files/Git/src`, и docker падает
+# с "the working directory ... is invalid". На Linux/macOS переменные просто
+# игнорируются.
 test-race-docker:
+	MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
 	docker run --rm -v "$(CURDIR):/src" -w /src $(GO_IMAGE) \
 		go test $(PKG) -race -count=1
 
