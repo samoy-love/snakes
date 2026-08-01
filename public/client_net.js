@@ -18,6 +18,20 @@ export function createNetModule(opts) {
   let wsReconnectTimer = 0;
 
   let pingTimer = 0;
+  /* C9: a socket that opens and dies immediately (connection cap, restart,
+     rate limit) must not reset the backoff. The attempt counter is cleared only
+     after the link has proven itself by staying up: SETTLE_MS of uptime, or
+     SETTLE_HELLO_MS once the application reports a "hello". "hello" alone is
+     not enough — the server sends it before any policy close, so resetting on
+     the message itself would pin the backoff at its floor and hammer the
+     server every ~500 ms. */
+  const SETTLE_MS = 5000;
+  const SETTLE_HELLO_MS = 2000;
+  let settleTimer = 0;
+  let sockOpenAt = 0;
+  // C9: onerror fires before onclose for the same socket. Both used to run the
+  // application onClose + scheduleReconnect, so every drop was handled twice.
+  let deadSock = null;
 
   const textEncoder = new TextEncoder();
 
@@ -71,10 +85,39 @@ export function createNetModule(opts) {
     }, delay);
   }
 
+  /* C9: called by the application on "hello". Shortens the proving window
+     instead of clearing the counter outright — see SETTLE_HELLO_MS above. */
+  function markHealthy() {
+    if (!wsConnected || !wsReconnectAttempt) return;
+    const up = Date.now() - sockOpenAt;
+    if (up >= SETTLE_HELLO_MS) {
+      wsReconnectAttempt = 0;
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+        settleTimer = 0;
+      }
+      return;
+    }
+    armSettle(SETTLE_HELLO_MS - up);
+  }
+
+  function armSettle(delay) {
+    const sock = ws;
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      settleTimer = 0;
+      if (ws === sock && wsConnected) wsReconnectAttempt = 0;
+    }, Math.max(0, delay));
+  }
+
   function connect() {
     if (wsReconnectTimer) {
       clearTimeout(wsReconnectTimer);
       wsReconnectTimer = 0;
+    }
+    if (settleTimer) {
+      clearTimeout(settleTimer);
+      settleTimer = 0;
     }
 
     try {
@@ -85,9 +128,14 @@ export function createNetModule(opts) {
 
     ws.binaryType = 'arraybuffer';
 
+    const sock = ws;
+
     ws.onopen = () => {
       wsConnected = true;
-      wsReconnectAttempt = 0;
+      sockOpenAt = Date.now();
+      // C9: not reset here — a socket that is accepted and closed one tick
+      // later would otherwise pin the backoff at its 500ms floor forever.
+      armSettle(SETTLE_MS);
 
       if (!pingTimer) {
         pingTimer = setInterval(() => {
@@ -109,12 +157,21 @@ export function createNetModule(opts) {
       }
     };
 
-    ws.onclose = (ev) => {
+    // C9: one drop == one application-level close, no matter how many of
+    // onerror/onclose the browser decides to fire for this socket.
+    function handleDrop(ev) {
+      if (deadSock === sock) return;
+      deadSock = sock;
+
       wsConnected = false;
 
       if (pingTimer) {
         clearInterval(pingTimer);
         pingTimer = 0;
+      }
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+        settleTimer = 0;
       }
 
       try {
@@ -126,24 +183,10 @@ export function createNetModule(opts) {
       } catch {}
 
       scheduleReconnect();
-    };
+    }
 
-    ws.onerror = (ev) => {
-      wsConnected = false;
-      if (pingTimer) {
-        clearInterval(pingTimer);
-        pingTimer = 0;
-      }
-      try {
-        if (typeof onStatusChange === 'function') onStatusChange();
-      } catch {}
-
-      scheduleReconnect();
-
-      try {
-        if (typeof onClose === 'function') onClose(ev);
-      } catch {}
-    };
+    ws.onclose = handleDrop;
+    ws.onerror = handleDrop;
 
     ws.onmessage = async (ev) => {
       if (typeof ev.data === 'string') {
@@ -206,6 +249,7 @@ export function createNetModule(opts) {
     send,
     isConnected,
     connect,
-    statusSuffix
+    statusSuffix,
+    markHealthy
   };
 }

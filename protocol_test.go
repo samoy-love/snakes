@@ -1092,16 +1092,29 @@ func TestReclaimCooldownLifecycle(t *testing.T) {
 		}
 	}
 
-	if n := r.reclaimCoolRegion(p, 101); n != len(patch) {
-		t.Fatalf("возвращено клеток = %d, ожидалось %d", n, len(patch))
+	// G3: реклейм возвращает не всю область, а ReclaimReturnPercent от неё,
+	// начиная с ближайших к точке входа клеток. Остальное теряется навсегда —
+	// именно это делает смерть дорогой теперь, когда респавн больше не убегает
+	// от собственного пятна.
+	wantBack := (len(patch)*ReclaimReturnPercent + 99) / 100
+	if n := r.reclaimCoolRegion(p, 101); n != wantBack {
+		t.Fatalf("возвращено клеток = %d, ожидалось %d", n, wantBack)
 	}
+	back := 0
 	for _, i := range patch {
-		if r.gridOwner[i] != 1 {
-			t.Fatalf("клетка %d не вернулась владельцу: %d", i, r.gridOwner[i])
+		if r.gridOwner[i] == 1 {
+			back++
 		}
 		if r.coolOwner[i] != 0 {
-			t.Fatalf("coolOwner[%d] не сброшен", i)
+			t.Fatalf("coolOwner[%d] не сброшен: остывание должно сниматься со всей области", i)
 		}
+	}
+	if back != wantBack {
+		t.Fatalf("во владении оказалось %d клеток, ожидалось %d", back, wantBack)
+	}
+	// Клетка входа возвращается всегда, иначе игрок стоит на «чужой» земле.
+	if r.gridOwner[101] != 1 {
+		t.Fatal("клетка входа не вернулась владельцу")
 	}
 	if r.coolOwner[lone] != 1 {
 		t.Fatalf("несвязная клетка %d не должна была вернуться", lone)
@@ -1372,7 +1385,15 @@ func TestWSOriginAllowlistIsTheOnlyArbiter(t *testing.T) {
 	allowedWSOrigins = map[string]struct{}{
 		"http://example.test:18080": {},
 	}
-	t.Cleanup(func() { allowedWSOrigins = prev })
+	// G9: localhost больше не разрешён по умолчанию, поэтому дев-режим здесь
+	// включается явно — иначе кейс origin_localhost_dev проверял бы дефолт,
+	// а не то, что allowlist остаётся единственным арбитром.
+	prevLocal := wsAllowLocalhost
+	wsAllowLocalhost = true
+	t.Cleanup(func() {
+		allowedWSOrigins = prev
+		wsAllowLocalhost = prevLocal
+	})
 
 	cases := []struct {
 		name       string
@@ -2340,17 +2361,20 @@ func TestWSOriginLocalhostIsGated(t *testing.T) {
 	}
 }
 
+// G9: дефолт — ВЫКЛЮЧЕНО. Локальная страница на машине игрока не должна
+// проходить allowlist только потому, что она локальная; на проде это
+// проверялось живьём (Origin: http://localhost -> 101).
 func TestLoadWSAllowLocalhostEnv(t *testing.T) {
-	for _, v := range []string{"0", "false", "no", "off", "OFF"} {
+	for _, v := range []string{"", "0", "false", "no", "off", "OFF", "мусор"} {
 		t.Setenv("WS_ALLOW_LOCALHOST", v)
 		if loadWSAllowLocalhost() {
-			t.Fatalf("WS_ALLOW_LOCALHOST=%q должен выключать localhost", v)
+			t.Fatalf("WS_ALLOW_LOCALHOST=%q должен оставлять localhost выключенным", v)
 		}
 	}
-	for _, v := range []string{"", "1", "true", "yes"} {
+	for _, v := range []string{"1", "true", "yes", "on", "ON"} {
 		t.Setenv("WS_ALLOW_LOCALHOST", v)
 		if !loadWSAllowLocalhost() {
-			t.Fatalf("WS_ALLOW_LOCALHOST=%q должен оставлять localhost включённым", v)
+			t.Fatalf("WS_ALLOW_LOCALHOST=%q должен включать localhost", v)
 		}
 	}
 }
@@ -2399,11 +2423,14 @@ func TestCapturePointsRewardBigLoops(t *testing.T) {
 	}
 }
 
-// TestSpawnAvoidsOwnCoolingPatch фиксирует G22: pickSpawnCell считал остывающие
-// клетки свободными и максимизировал расстояние до чужих голов, поэтому
-// погибший игрок систематически возрождался посреди собственного остывающего
-// пятна и забирал его назад даром.
-func TestSpawnAvoidsOwnCoolingPatch(t *testing.T) {
+// TestSpawnKeepsOwnCoolingPatchReachable фиксирует G3. Раньше здесь был
+// обратный тест (G22): pickSpawnCell штрафовал собственное остывающее пятно
+// весом 8 за клетку и уносил игрока прочь. Замер показал, что вместе с окном в
+// 120 тиков это убивало механику начисто — 0 реклеймов за 3 матча и у человека,
+// и у всех 14 ботов при средней дистанции 94 клетки. Спавн-кемп теперь
+// сдерживается не расстоянием, а ReclaimReturnPercent: назад приходит чуть
+// больше половины пятна, никогда не всё.
+func TestSpawnKeepsOwnCoolingPatchReachable(t *testing.T) {
 	r := newTestRoom()
 	r.rng = rand.New(rand.NewSource(7))
 	r.tick = 10
@@ -2419,28 +2446,468 @@ func TestSpawnAvoidsOwnCoolingPatch(t *testing.T) {
 		}
 	}
 
-	inside := 0
 	const tries = 40
+	near := 0
+	sum := 0
+	cx, cy := (x0+x1)/2, (y0+y1)/2
 	for k := 0; k < tries; k++ {
 		x, y := r.pickSpawnCell(num)
-		if x >= x0 && x <= x1 && y >= y0 && y <= y1 {
-			inside++
+		d := manhattan(x, y, cx, cy)
+		sum += d
+		// Дотянуться до пятна за окно реклейма — вот единственное требование.
+		if d <= ReclaimTicks/2 {
+			near++
 		}
 	}
-	if inside != 0 {
-		t.Fatalf("спавн попал внутрь своего остывающего пятна %d раз из %d", inside, tries)
+	if near < tries*3/4 {
+		t.Fatalf("до своего пятна дотягивается лишь %d спавнов из %d (средняя дистанция %d)",
+			near, tries, sum/tries)
 	}
 
-	// Контроль: без указания игрока (чужое пятно) штраф не действует, иначе
-	// тест доказывал бы просто «спавн не любит центр карты».
-	other := 0
+	// Контроль: притяжение адресное. Чужое пятно на выбор клетки не влияет,
+	// иначе тест доказывал бы просто «спавн любит центр карты».
+	sumOther := 0
 	for k := 0; k < tries; k++ {
 		x, y := r.pickSpawnCell(num + 1)
-		if x >= x0 && x <= x1 && y >= y0 && y <= y1 {
-			other++
+		sumOther += manhattan(x, y, cx, cy)
+	}
+	if sumOther/tries <= sum/tries {
+		t.Fatalf("чужое пятно притягивает так же, как своё: своё=%d чужое=%d",
+			sum/tries, sumOther/tries)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// G6: битый profiles.json не должен затираться пустым store
+// ---------------------------------------------------------------------------
+
+func resetProfilesReadOnly(t *testing.T) {
+	t.Helper()
+	prev := profilesReadOnly.Load()
+	prevReason := profilesReadOnlyReason
+	t.Cleanup(func() {
+		profilesReadOnly.Store(prev)
+		profilesReadOnlyReason = prevReason
+	})
+	profilesReadOnly.Store(false)
+	profilesReadOnlyReason = ""
+}
+
+// TestCorruptProfilesFileIsNotOverwritten: обрезанный файл раньше приводил к
+// старту с пустым store, а первый же flushProfiles(true) записывал поверх
+// {"profiles":{}} — тихая потеря прогресса всех игроков без падения и с зелёным
+// healthcheck. Теперь store переходит в read-only, битый файл уезжает в
+// .corrupt-<ts>, а сохранение запрещено.
+func TestCorruptProfilesFileIsNotOverwritten(t *testing.T) {
+	withEmptyProfileStore(t)
+	resetProfilesReadOnly(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "profiles.json")
+	t.Setenv("PROFILES_PATH", path)
+
+	const pid = "33333333333333333333333333333333"
+	raw := fmt.Sprintf(`{"version":1,"savedAt":%d,"profiles":{%q:{"styleBalance":4242`,
+		time.Now().Unix(), pid)
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("не удалось записать битый файл: %v", err)
+	}
+
+	loadProfiles()
+
+	if !profilesSavingDisabled() {
+		t.Fatal("после битого файла сохранение осталось разрешённым")
+	}
+
+	// Битый файл переименован, а не оставлен под ударом.
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("битый файл остался на месте (err=%v)", err)
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	quarantined := ""
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), "profiles.json.corrupt-") {
+			quarantined = filepath.Join(dir, e.Name())
 		}
 	}
-	if other == 0 {
-		t.Fatal("чужое остывающее пятно тоже стало запретным — штраф применяется не к тому игроку")
+	if quarantined == "" {
+		t.Fatalf("карантинная копия не создана, в каталоге: %v", ents)
+	}
+	got, err := os.ReadFile(quarantined)
+	if err != nil {
+		t.Fatalf("чтение карантина: %v", err)
+	}
+	if string(got) != raw {
+		t.Fatal("карантинная копия не совпадает с исходником")
+	}
+
+	// Ни явный flush, ни saveProfiles ничего не пишут.
+	profileForKeyCreate("44444444444444444444444444444444")
+	flushProfiles(true)
+	if err := saveProfiles(); err == nil {
+		t.Fatal("saveProfiles отработал в read-only режиме")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("в read-only режиме файл всё-таки создан (err=%v)", err)
+	}
+
+	// Контроль: отсутствие файла — не ошибка, режим не включается.
+	withEmptyProfileStore(t)
+	resetProfilesReadOnly(t)
+	t.Setenv("PROFILES_PATH", filepath.Join(t.TempDir(), "nope.json"))
+	loadProfiles()
+	if profilesSavingDisabled() {
+		t.Fatal("отсутствующий файл ошибочно принят за битый")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// G7: профиль живого игрока не вытесняется
+// ---------------------------------------------------------------------------
+
+func TestLiveProfileIsNotEvicted(t *testing.T) {
+	withEmptyProfileStore(t)
+	prevMax := maxProfiles
+	maxProfiles = 4
+	t.Cleanup(func() { maxProfiles = prevMax })
+
+	const livePID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	now := time.Now().Unix()
+	profilesMu.Lock()
+	// Самый несвежий профиль в хранилище — и при этом он держится живым
+	// подключением, поэтому вытеснять его нельзя.
+	profiles[livePID] = &Profile{StyleBalance: 500, LastSeen: now - 100000}
+	for i, pid := range []string{
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"cccccccccccccccccccccccccccccccc",
+		"dddddddddddddddddddddddddddddddd",
+	} {
+		profiles[pid] = &Profile{StyleBalance: 5, LastSeen: now - int64(i)*10}
+	}
+	profilesMu.Unlock()
+
+	retainProfilePID(livePID)
+	for i := 0; i < 5; i++ {
+		profileForKeyCreate(fmt.Sprintf("%032x", 900+i))
+	}
+
+	profilesMu.Lock()
+	pr, ok := profiles[livePID]
+	profilesMu.Unlock()
+	if !ok {
+		t.Fatal("профиль подключённого игрока вытеснен")
+	}
+	if pr.StyleBalance != 500 {
+		t.Fatalf("баланс живого профиля = %d, ожидалось 500", pr.StyleBalance)
+	}
+
+	// После отключения он снова обычный кандидат.
+	releaseProfilePID(livePID)
+	for i := 0; i < 8; i++ {
+		profileForKeyCreate(fmt.Sprintf("%032x", 950+i))
+	}
+	profilesMu.Lock()
+	_, still := profiles[livePID]
+	profilesMu.Unlock()
+	if still {
+		t.Fatal("отключённый профиль так и не стал кандидатом на вытеснение")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// G1: у наград больше нет пола, микро-захваты не платят
+// ---------------------------------------------------------------------------
+
+func TestCapturePointsHaveNoFloor(t *testing.T) {
+	for d := 1; d < CaptureMinCells; d++ {
+		if got := capturePoints(d, PhaseConflict, 0); got != 0 {
+			t.Fatalf("захват %d клеток оплачен %d очками, ожидался 0", d, got)
+		}
+		if got := capturePoints(d, PhaseFinal, MutatorDoubleCapture); got != 0 {
+			t.Fatalf("захват %d клеток в финале оплачен %d очками, ожидался 0", d, got)
+		}
+	}
+	if got := capturePoints(CaptureMinCells, PhaseConflict, 0); got == 0 {
+		t.Fatal("захват ровно в CaptureMinCells должен что-то платить")
+	}
+	// Темп «дёргалки» против осмысленной петли: 3-тактовый микро-цикл на 3
+	// клетки против петли 400 клеток за ~60 тиков.
+	nibble := float64(capturePoints(3, PhaseConflict, 0)) / 3.0
+	loop := float64(capturePoints(400, PhaseConflict, 0)) / 60.0
+	if nibble >= loop {
+		t.Fatalf("микро-захват платит %.3f очк/тик против %.3f у петли", nibble, loop)
+	}
+}
+
+// TestStyleCaptureHasNoFloor фиксирует вторую половину G1: Стиль за захват
+// начисляется строго пропорционально, остаток копится, а захват меньше
+// CaptureMinCells не даёт ничего.
+func TestStyleCaptureHasNoFloor(t *testing.T) {
+	withEmptyProfileStore(t)
+	r := newTestRoom()
+	r.rng = rand.New(rand.NewSource(1))
+	r.matchStyleEarned = make(map[uint16]uint32)
+	r.matchStyleBy = make(map[uint16][StyleReasonCount]uint16)
+	r.matchPointsBy = make(map[uint16][8]uint16)
+	p := &Player{num: 1, alive: true, bot: true}
+	r.players[1] = p
+
+	styleFor := func(deltas []int) uint16 {
+		p.styleCaptureAcc = 0
+		p.styleCaptureMatch = 0
+		p.style = 0
+		for _, d := range deltas {
+			if d >= CaptureMinCells {
+				p.styleCaptureAcc += uint32(d)
+			}
+			if gain := uint16(p.styleCaptureAcc / StyleCaptureCellsPer); gain > 0 {
+				p.styleCaptureAcc -= uint32(gain) * StyleCaptureCellsPer
+				r.addStyleCapped(p, gain, StyleCapture, &p.styleCaptureMatch, StyleCaptureMatchCap)
+			}
+		}
+		return p.styleCaptureMatch
+	}
+
+	// 200 микро-захватов по 3 клетки: раньше это было 200 Стиля (потолок 70 за
+	// 20-30 секунд), теперь ноль.
+	micro := make([]int, 200)
+	for i := range micro {
+		micro[i] = 3
+	}
+	if got := styleFor(micro); got != 0 {
+		t.Fatalf("200 микро-захватов дали %d Стиля, ожидался 0", got)
+	}
+
+	// Осмысленная игра не пострадала: остаток копится, потерь на округлении нет.
+	const n = 20
+	per := StyleCaptureCellsPer + StyleCaptureCellsPer/2 // 1.5 Стиля за захват
+	many := make([]int, n)
+	for i := range many {
+		many[i] = per
+	}
+	want := uint16(n * per / StyleCaptureCellsPer)
+	if got := styleFor(many); got != want {
+		t.Fatalf("%d захватов по 1.5 Стиля дали %d, ожидалось %d (остаток копится, а не теряется)", n, got, want)
+	}
+	// Старое правило (округление вниз на каждом захвате) заплатило бы меньше.
+	if want <= uint16(n*(per/StyleCaptureCellsPer)) {
+		t.Fatalf("накопитель остатка ничего не добавил: %d против %d", want, n*(per/StyleCaptureCellsPer))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// G2: удержание территории оплачивается
+// ---------------------------------------------------------------------------
+
+func TestHoldPointsPayForTerritory(t *testing.T) {
+	r := newTestRoom()
+	r.matchPointsBy = make(map[uint16][8]uint16)
+	p := &Player{num: 1, alive: true, bot: true}
+	r.players[1] = p
+	r.scores[1] = 2000
+
+	for i := 0; i < int(MatchDurationTicks)/HoldPayEveryTicks; i++ {
+		r.payHoldPoints()
+	}
+	got := r.points[1]
+	if got == 0 {
+		t.Fatal("удержание территории не принесло ни одного очка")
+	}
+	if got > HoldPointsMatchCap {
+		t.Fatalf("удержание принесло %d очков при потолке %d", got, HoldPointsMatchCap)
+	}
+	// Держать 2000 клеток весь матч должно упираться в потолок.
+	if got != HoldPointsMatchCap {
+		t.Fatalf("2000 клеток за матч дали %d очков, ожидался потолок %d", got, HoldPointsMatchCap)
+	}
+
+	// Мёртвый игрок не получает ничего.
+	r2 := newTestRoom()
+	r2.matchPointsBy = make(map[uint16][8]uint16)
+	dead := &Player{num: 1, alive: false, bot: true}
+	r2.players[1] = dead
+	r2.scores[1] = 5000
+	for i := 0; i < 100; i++ {
+		r2.payHoldPoints()
+	}
+	if r2.points[1] != 0 {
+		t.Fatalf("мёртвый игрок получил %d очков за удержание", r2.points[1])
+	}
+
+	// Небольшая территория платит меньше, чем большая, но не ноль.
+	r3 := newTestRoom()
+	r3.matchPointsBy = make(map[uint16][8]uint16)
+	small := &Player{num: 1, alive: true, bot: true}
+	r3.players[1] = small
+	r3.scores[1] = 500
+	for i := 0; i < int(MatchDurationTicks)/HoldPayEveryTicks; i++ {
+		r3.payHoldPoints()
+	}
+	if r3.points[1] == 0 || r3.points[1] >= HoldPointsMatchCap {
+		t.Fatalf("500 клеток за матч дали %d очков, ожидалось между 0 и потолком", r3.points[1])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// G4: резиновый бэнд не применяется к ботам
+// ---------------------------------------------------------------------------
+
+func TestRubberBandSkipsBots(t *testing.T) {
+	r := newTestRoom()
+	r.matchPointsBy = make(map[uint16][8]uint16)
+	leader := &Player{num: 1, alive: true, bot: true}
+	bot := &Player{num: 2, alive: true, bot: true}
+	human := &Player{num: 3, alive: true}
+	r.players[1] = leader
+	r.players[2] = bot
+	r.players[3] = human
+	r.points[1] = 600
+	r.points[2] = 0
+	r.points[3] = 0
+
+	r.awardPoints(2, 100, PointsCapture)
+	r.awardPoints(3, 100, PointsCapture)
+
+	if r.points[2] != 100 {
+		t.Fatalf("бот-аутсайдер получил %d очков за базу 100 — бэнд всё ещё действует на ботов", r.points[2])
+	}
+	if r.points[3] <= 100 {
+		t.Fatalf("человек-аутсайдер получил %d очков за базу 100 — догоняющий бонус потерян", r.points[3])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// G5: knownNames не растёт без ограничений
+// ---------------------------------------------------------------------------
+
+func TestKnownNamesDoNotLeakOnLeave(t *testing.T) {
+	r := newTestRoom()
+	r.tick = 1
+	base := len(r.knownNames)
+	for i := 0; i < 200; i++ {
+		num := r.allocPlayerNumLocked()
+		if num == 0 {
+			t.Fatalf("номера игроков кончились на итерации %d", i)
+		}
+		pl := &Player{num: num, name: fmt.Sprintf("P%d", i), alive: true}
+		r.players[num] = pl
+		r.scores[num] = 0
+		r.points[num] = 0
+		r.setKnownNameLocked(num, pl.name, true)
+
+		r.setKnownNameLocked(num, pl.name, false)
+		r.removePlayer(num)
+		if !r.hasCoolingCellsLocked(num) {
+			r.dropKnownNameLocked(num)
+		}
+	}
+	if got := len(r.knownNames); got != base {
+		t.Fatalf("после 200 циклов входа/выхода в knownNames %d записей, ожидалось %d", got, base)
+	}
+
+	// Даже если запись почему-то осталась офлайн (например, у игрока ещё есть
+	// остывающие клетки), их число ограничено потолком.
+	for i := 0; i < KnownNamesOfflineMax*3; i++ {
+		num := r.allocPlayerNumLocked()
+		r.setKnownNameLocked(num, fmt.Sprintf("Q%d", i), false)
+	}
+	offline := 0
+	for _, kn := range r.knownNames {
+		if !kn.Online {
+			offline++
+		}
+	}
+	if offline > KnownNamesOfflineMax {
+		t.Fatalf("офлайн-записей %d при потолке %d", offline, KnownNamesOfflineMax)
+	}
+}
+
+// TestKnownNamesBatchPayload проверяет формат nameUpdateBatch.
+func TestKnownNamesBatchPayload(t *testing.T) {
+	r := newTestRoom()
+	r.setKnownNameLocked(2, "Вася", true)
+	r.setKnownNameLocalizedLocked(3, "Бот", "Bot", true)
+	r.setKnownNameLocked(5, "Ушедший", false)
+
+	items := r.collectKnownNamesLocked()
+	if len(items) != 3 {
+		t.Fatalf("в батче %d записей, ожидалось 3", len(items))
+	}
+	for i := 1; i < len(items); i++ {
+		if items[i-1].N >= items[i].N {
+			t.Fatal("батч не отсортирован по номеру игрока")
+		}
+	}
+	if items[0].N != 2 || items[0].Nm != "Вася" || items[0].NmEn != "" {
+		t.Fatalf("запись человека: %+v", items[0])
+	}
+	if items[1].NmEn != "Bot" {
+		t.Fatalf("английский двойник бота потерян: %+v", items[1])
+	}
+	if !strings.Contains(items[2].Nm, "(отключен)") {
+		t.Fatalf("офлайн-пометка потеряна: %+v", items[2])
+	}
+
+	b, err := json.Marshal(map[string]any{"names": items})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back struct {
+		Names []struct {
+			N    uint16 `json:"n"`
+			Nm   string `json:"nm"`
+			NmEn string `json:"nmEn"`
+		} `json:"names"`
+	}
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(back.Names) != 3 || back.Names[1].NmEn != "Bot" {
+		t.Fatalf("формат батча не совпал: %s", b)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// G10: коды причин Стиля, которые сервер обещает клиенту
+// ---------------------------------------------------------------------------
+
+func TestStyleReasonCodesAreStable(t *testing.T) {
+	want := map[string]uint8{
+		"kill": StyleKill, "revenge": StyleRevenge, "bounty": StyleBounty,
+		"contract": StyleContract, "daily": StyleDaily, "win": StyleWin,
+		"top5": StyleTop5, "capture": StyleCapture, "achievement": StyleAchievement,
+		"survive": StyleSurvive,
+	}
+	for name, code := range want {
+		if code == 0 || int(code) >= StyleReasonCount {
+			t.Fatalf("причина %q имеет код %d вне 1..%d", name, code, StyleReasonCount-1)
+		}
+	}
+	if StyleCapture != 8 || StyleAchievement != 9 || StyleSurvive != 10 {
+		t.Fatalf("коды 8/9/10 сдвинулись: capture=%d achievement=%d survive=%d",
+			StyleCapture, StyleAchievement, StyleSurvive)
+	}
+
+	// Событие Стиля обязано нести именно этот код в поле D.
+	withEmptyProfileStore(t)
+	r := newTestRoom()
+	r.matchStyleEarned = make(map[uint16]uint32)
+	r.matchStyleBy = make(map[uint16][StyleReasonCount]uint16)
+	p := &Player{num: 1, alive: true, bot: true}
+	r.players[1] = p
+	for _, code := range []uint8{StyleCapture, StyleAchievement, StyleSurvive} {
+		r.events = r.events[:0]
+		r.addStyle(p, 3, code)
+		found := false
+		for _, e := range r.events {
+			if e.Kind == EventStyle && e.D == code && e.B == 3 {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("событие Стиля с причиной %d не отправлено: %+v", code, r.events)
+		}
 	}
 }

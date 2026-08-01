@@ -20,9 +20,10 @@ ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 
 # -s -w выкидывают таблицу символов и DWARF (образ меньше).
-# -X проставляет main.Version/main.Commit/main.BuildTime, если такие переменные
-# в пакете main существуют. Сейчас их в коде НЕТ; фактическая сборка показала,
-# что линкер молча игнорирует -X для несуществующего символа и не падает.
+# -X проставляет main.Version/main.Commit/main.BuildTime — эти переменные в
+# пакете main объявлены (см. main.go), их значения сервер печатает в лог при
+# старте и отдаёт клиенту в поле version пакета hello. Без build-args останутся
+# дефолты dev/unknown/unknown.
 # ARG-и объявлены ДО этого шага, иначе их изменение не инвалидирует кэш слоя.
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \

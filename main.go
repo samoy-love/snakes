@@ -170,7 +170,7 @@ func (r *Room) awardPoints(num uint16, base uint16, reason uint8) {
 	if p == nil || !p.alive {
 		return
 	}
-	if reason > PointsCapture {
+	if reason > PointsHold {
 		reason = PointsOther
 	}
 	// The leader is the best score in the room, dead or alive: using only living
@@ -187,7 +187,13 @@ func (r *Room) awardPoints(num uint16, base uint16, reason uint8) {
 	me := r.points[num]
 	mult := float32(1.0)
 	// Rubber-band only starts after the match has "some" points to avoid early randomness.
-	if best >= 20 {
+	//
+	// G4: bots are excluded. Applying it to them compressed all 14 into a
+	// 475-640 band, so the 8th place a beginner is supposed to be able to reach
+	// cost ~550 points and the measured result was place 14/14 in 20 matches out
+	// of 20. Without the band the bot field spreads out naturally and the tail
+	// places become reachable; humans keep the catch-up help.
+	if !p.bot && best >= 20 {
 		d := float32(int(best) - int(me))
 		// Smooth, capped curve: ~+70% at large deficit, -10% when far ahead.
 		// The leader penalty stays mild on purpose; the catch-up bonus is the
@@ -746,9 +752,22 @@ const (
 	// G20: at 40 cells per Style with a 25 cap the ceiling was reached after
 	// 1000 new cells, i.e. in the first 60-90 seconds, after which the core
 	// mechanic of the game paid literally nothing for the remaining 3.5-4
-	// minutes. 70/70 keeps roughly the same total for a good match but spreads
-	// it over the whole match.
-	StyleCaptureCellsPer = 70  // cells captured per 1 Style
+	// minutes.
+	//
+	// G1: the unit is the capture delta, i.e. the trail actually drawn outside
+	// your own land, not the enclosed area — a measured honest match produces
+	// ~1300 of those, not tens of thousands. At 70 per Style the floor
+	// (`gain = 1`) was carrying the entire payout: removing it took an honest
+	// match from ~37 Style down to 19, while a nibbler still reached the 70 cap
+	// in 25 seconds. 25 per Style restores the honest income (~50/match) on a
+	// rate that is now strictly proportional to the risk taken.
+
+	// CaptureMinCells is the smallest capture that is worth any match points at
+	// all (G1). Below it the loop is a nibble at your own border: no risk, no
+	// pay. A 12-cell loop is still a real detour outside your land.
+	CaptureMinCells = 12
+
+	StyleCaptureCellsPer = 25  // trail cells drawn outside per 1 Style
 	StyleCaptureMatchCap = 70  // E2: max Style from captures per match
 	StyleKillMatchCap    = 100 // E4: max Style from kills (incl. streaks) per match
 
@@ -763,6 +782,17 @@ const (
 	StyleFirstWinBonus  = 50 // E7
 	StyleBountySurvive  = 30 // E11
 	PointsBountySurvive = 20
+
+	// G11: revenge (20) and "survived the bounty" (30) were the only Style
+	// sources with no per-match budget at all, which made repeatedly trading
+	// deaths with one bot a farm inside the 900-tick revenge window. Both now
+	// have a budget, and revenge additionally needs a different victim (or the
+	// cooldown) to pay again.
+	StyleRevengeReward        = 20
+	StyleRevengeMatchCap      = 60
+	RevengeSameTargetCooldown = 900
+	StyleBountyKill           = 40
+	StyleBountyMatchCap       = 120
 
 	// E3: placement rewards use the absolute place among every participant.
 	// G23: a room holds ~15 participants and every one of the 14 bots really
@@ -821,7 +851,30 @@ const (
 	PointsContract = 4
 	PointsDaily    = 5
 	PointsCapture  = 6
+	// PointsHold: G2, periodic pay for territory actually held. matchPointsBy
+	// is [8]uint16, so 7 is the last free slot.
+	PointsHold = 7
 )
+
+// G2: holding territory is the core of the genre and used to pay exactly
+// nothing — points were only ever credited at the moment of a capture, so an
+// "empire" was worth defending only as a tiebreaker. These constants pay for
+// the integral of held cells over time.
+const (
+	// HoldPayEveryTicks: one payout per second at 100ms per tick.
+	HoldPayEveryTicks = 10
+	// HoldCellTicksPerPoint: 24000 cell-ticks == 1 point. Holding 2000 cells
+	// pays 0.83 pts/s, i.e. the match cap in ~5 minutes of perfect defence.
+	// Holding 500 cells over a whole match is worth ~62.
+	HoldCellTicksPerPoint = 24000
+	// HoldPointsMatchCap keeps defence comparable to, but never better than,
+	// active play: a good aggressive match is 700-900 points.
+	HoldPointsMatchCap = 250
+)
+
+// ProfileTouchEveryTicks is how often a live human's profile LastSeen is
+// refreshed from the tick loop (G7): 600 ticks == 60s.
+const ProfileTouchEveryTicks = 600
 
 const (
 	PowerupShield   = 1
@@ -1093,6 +1146,8 @@ type Room struct {
 	clients    map[*Client]struct{}
 	chat       []ChatMessage
 	knownNames map[uint16]KnownName
+	// knownNameSeq orders offline entries for the LRU cap (G5).
+	knownNameSeq uint64
 
 	scores map[uint16]uint16
 	points map[uint16]uint16
@@ -1136,6 +1191,12 @@ type Room struct {
 	bfsGen  uint32
 	bfsQ    []int
 
+	// G11: per-tick scratch for resolveHeadOnCollisions, reused instead of
+	// allocating a fresh map and slices on every tick of every room.
+	headOnCells   map[int][]uint16
+	headOnTouched []int
+	tmpSpeeders   []*Player
+
 	tmpAlive   []*Player
 	tmpPlayers []*Player
 	tmpClients []*Client
@@ -1176,6 +1237,8 @@ type KnownName struct {
 	// humans, whose name is whatever they typed and is never translated.
 	NameEn string
 	Online bool
+	// OfflineSeq orders offline entries for the LRU cap (G5). 0 while online.
+	OfflineSeq uint64
 }
 
 type Player struct {
@@ -1293,9 +1356,19 @@ type Player struct {
 	peakCells         uint16 // F3: best territory held
 	cellTicks         uint32 // F3: integral of territory over ticks
 	styleCaptureMatch uint16 // E2: Style already paid for captures
+	styleCaptureAcc   uint32 // G1: captured cells not yet worth a whole Style
 	styleKillMatch    uint16 // E4: Style already paid for kills
-	botKillsMatch     uint16 // E4: bot kills, drives the diminishing rate
-	contractsDone     uint16 // E5: contracts completed
+	// G2: territory held over time. holdAcc carries cell-ticks that are not yet
+	// worth a whole point, holdPointsMatch is the per-match budget spent.
+	holdAcc          uint32
+	holdPointsMatch  uint16
+	reclaimsMatch    uint16 // G3: successful reclaims this match
+	revengeStyleAcc  uint16 // G11: revenge Style spent this match
+	revengeLastTgt   uint16 // G11: last revenge victim, for the repeat cooldown
+	revengeLastTick  uint32
+	bountyStyleMatch uint16 // G11: bounty Style (kill + survive) spent this match
+	botKillsMatch    uint16 // E4: bot kills, drives the diminishing rate
+	contractsDone    uint16 // E5: contracts completed
 
 	// E12: re-entrancy guards for addStyle. styleDepth bounds recursion,
 	// dailyRewardDepth marks Style that is itself a daily payout.
@@ -1527,9 +1600,19 @@ func profileForKeyCreate(key string) *Profile {
 	if key == "" {
 		return nil
 	}
-	now := time.Now()
 	profilesMu.Lock()
 	defer profilesMu.Unlock()
+	return profileForKeyCreateLocked(key)
+}
+
+// profileForKeyCreateLocked is profileForKeyCreate for callers that already
+// hold profilesMu, which is the only way to take the pointer and write through
+// it in one critical section (G8).
+func profileForKeyCreateLocked(key string) *Profile {
+	if key == "" {
+		return nil
+	}
+	now := time.Now()
 	p := profiles[key]
 	if p == nil {
 		evictProfilesLocked(now)
@@ -2416,6 +2499,14 @@ func (c *Client) leaveRoomInternal(ctx context.Context, notify bool) {
 	rm.setKnownNameLocked(num, pl.name, false)
 	offlineUpdate = rm.displayNameLocked(num)
 	rm.removePlayer(num)
+	// G5: removePlayer drops the player's territory and trail outright (a
+	// leaver leaves nothing to reclaim), so there is nothing on the map left to
+	// label and the entry must not survive the session. Keeping it was an
+	// unbounded leak: 200 join/leave cycles measured 214 entries, and every one
+	// of them cost each new client one nameUpdate message.
+	if !rm.hasCoolingCellsLocked(num) {
+		rm.dropKnownNameLocked(num)
+	}
 	rm.humanCount = maxInt(0, rm.humanCount-1)
 	rm.forceFullSnapshot = true
 	shouldCleanup := rm.humanCount == 0
@@ -2535,22 +2626,8 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	rm.setKnownNameLocked(pnum, name, true)
 	rm.sendDailyStateToPlayer(pl)
 
-	type knownNameItem struct {
-		N    uint16
-		Nm   string
-		NmEn string
-	}
-	known := make([]knownNameItem, 0, len(rm.knownNames))
-	for num := range rm.knownNames {
-		nm := rm.displayNameLocked(num)
-		if nm == "" {
-			continue
-		}
-		known = append(known, knownNameItem{N: num, Nm: nm, NmEn: rm.displayNameEnLocked(num)})
-	}
+	known := rm.collectKnownNamesLocked()
 	rm.mu.Unlock()
-
-	sort.Slice(known, func(i, j int) bool { return known[i].N < known[j].N })
 
 	c.mu.Lock()
 	c.room = rm
@@ -2603,13 +2680,7 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	rm.minimapFullCursor = 0
 	rm.mu.Unlock()
 
-	for _, it := range known {
-		payload := map[string]any{"n": it.N, "nm": it.Nm}
-		if it.NmEn != "" {
-			payload["nmEn"] = it.NmEn
-		}
-		c.sendJSON(ctx, "nameUpdate", payload)
-	}
+	c.sendKnownNames(ctx, known)
 	if len(chatHistory) > 0 {
 		c.sendJSON(ctx, "chatInit", chatHistory)
 	}
@@ -3108,8 +3179,16 @@ func (r *Room) resetMatchLocked() {
 		p.peakCells = 0
 		p.cellTicks = 0
 		p.styleCaptureMatch = 0
+		p.styleCaptureAcc = 0
 		p.styleKillMatch = 0
 		p.botKillsMatch = 0
+		p.holdAcc = 0
+		p.holdPointsMatch = 0
+		p.reclaimsMatch = 0
+		p.revengeStyleAcc = 0
+		p.revengeLastTgt = 0
+		p.revengeLastTick = 0
+		p.bountyStyleMatch = 0
 		// G8: the respawn penalty is per match, not cumulative forever.
 		p.aiDeathI = 0
 		p.aiDeathN = 0
@@ -3194,6 +3273,14 @@ func capturePoints(delta int, phase uint8, mutator uint8) uint16 {
 	if delta <= 0 {
 		return 0
 	}
+	// G1: there is no floor any more. The old `if ptsF < 3 { ptsF = 3 }` paid a
+	// 2-cell nibble at the edge of your own land the same 3 points as a 60-cell
+	// loop, and a nibble is nearly risk free: the measured rate was 10 pts/s for
+	// a twitching script against 2.4 pts/s for a real loop, and the score curve
+	// became U-shaped. Anything below CaptureMinCells is now worth nothing.
+	if delta < CaptureMinCells {
+		return 0
+	}
 	ptsF := 0.35 * math.Pow(float64(delta), 0.75)
 	maxPts := 200.0
 	if phase == PhaseFinal {
@@ -3208,10 +3295,42 @@ func capturePoints(delta int, phase uint8, mutator uint8) uint16 {
 	if ptsF > maxPts {
 		ptsF = maxPts
 	}
-	if ptsF < 3 {
-		ptsF = 3
-	}
 	return uint16(ptsF)
+}
+
+// payHoldPoints credits the integral of held territory over time (G2). Called
+// once every HoldPayEveryTicks ticks with r.mu held. Only living players are
+// paid: a dead player holds nothing, his cells are cooling.
+func (r *Room) payHoldPoints() {
+	for _, p := range r.players {
+		if p == nil || !p.alive {
+			continue
+		}
+		cells := uint32(r.scores[p.num])
+		if cells == 0 {
+			continue
+		}
+		if p.holdPointsMatch >= HoldPointsMatchCap {
+			// Budget spent: stop integrating too, so the accumulator cannot
+			// bank a burst that pays out at the start of the next match.
+			p.holdAcc = 0
+			continue
+		}
+		p.holdAcc += cells * HoldPayEveryTicks
+		gain := p.holdAcc / HoldCellTicksPerPoint
+		if gain == 0 {
+			continue
+		}
+		p.holdAcc -= gain * HoldCellTicksPerPoint
+		if room := uint32(HoldPointsMatchCap - p.holdPointsMatch); gain > room {
+			gain = room
+		}
+		if gain == 0 {
+			continue
+		}
+		p.holdPointsMatch += uint16(gain)
+		r.awardPoints(p.num, uint16(gain), PointsHold)
+	}
 }
 
 // matchPhase derives the match arc phase from the elapsed match time (F4).
@@ -3648,7 +3767,8 @@ func (r *Room) maybeUpdateBounty() {
 		// No EventBountyClaim here: nobody claimed it. The client sees the
 		// window close via the header (bountyTarget = 0) and the Style event.
 		if t := r.players[r.bountyTarget]; t != nil && t.alive {
-			r.addStyle(t, StyleBountySurvive, StyleBounty)
+			// G11: shares the per-match bounty budget with the kill reward.
+			r.addStyleCapped(t, StyleBountySurvive, StyleBounty, &t.bountyStyleMatch, StyleBountyMatchCap)
 			r.awardPoints(t.num, PointsBountySurvive, PointsBounty)
 		}
 		r.clearBounty()
@@ -4291,8 +4411,100 @@ func pickUniqueBotName(rng *rand.Rand, pools botNamePools, used map[string]struc
 	return nm
 }
 
+// knownNameItem is one entry of the nameUpdateBatch payload (G5).
+type knownNameItem struct {
+	N    uint16 `json:"n"`
+	Nm   string `json:"nm"`
+	NmEn string `json:"nmEn,omitempty"`
+}
+
+// KnownNamesLegacyMax bounds how many single "nameUpdate" messages are still
+// sent alongside the batch for clients that do not understand it yet. The
+// bound is what makes the fan-out safe: sendCh holds 256 entries and a full
+// channel blocks the sender for up to 100ms per message, so an unbounded fan
+// turned joining into a tens-of-seconds stall ending in send_backpressure.
+// Once the client confirms nameUpdateBatch support this can go to 0.
+const KnownNamesLegacyMax = 32
+
+// collectKnownNamesLocked renders every known name of the room, sorted by
+// player number. Caller holds r.mu.
+func (r *Room) collectKnownNamesLocked() []knownNameItem {
+	out := make([]knownNameItem, 0, len(r.knownNames))
+	for num := range r.knownNames {
+		nm := r.displayNameLocked(num)
+		if nm == "" {
+			continue
+		}
+		out = append(out, knownNameItem{N: num, Nm: nm, NmEn: r.displayNameEnLocked(num)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].N < out[j].N })
+	return out
+}
+
+// sendKnownNames delivers the name table as one nameUpdateBatch message, plus
+// the legacy per-entry messages while the table is short enough for that to be
+// free (G5). Must be called without r.mu held.
+func (c *Client) sendKnownNames(ctx context.Context, items []knownNameItem) {
+	if len(items) == 0 {
+		return
+	}
+	c.sendJSON(ctx, "nameUpdateBatch", map[string]any{"names": items})
+	if len(items) > KnownNamesLegacyMax {
+		return
+	}
+	for _, it := range items {
+		payload := map[string]any{"n": it.N, "nm": it.Nm}
+		if it.NmEn != "" {
+			payload["nmEn"] = it.NmEn
+		}
+		c.sendJSON(ctx, "nameUpdate", payload)
+	}
+}
+
+// KnownNamesOfflineMax bounds how many offline entries a room remembers (G5).
+// The map used to grow for the whole life of the room — a measured 200
+// join/leave cycles left 214 entries — and every entry cost the joining client
+// one JSON message plus a pass in usedBotNamesLocked on every join and leave.
+const KnownNamesOfflineMax = 32
+
 func (r *Room) setKnownNameLocked(num uint16, name string, online bool) {
 	r.setKnownNameLocalizedLocked(num, name, "", online)
+}
+
+// dropKnownNameLocked forgets a player number entirely. Used when a client
+// leaves and nothing of his is left on the map to label.
+func (r *Room) dropKnownNameLocked(num uint16) {
+	delete(r.knownNames, num)
+}
+
+// pruneKnownNamesLocked enforces KnownNamesOfflineMax by dropping the oldest
+// offline entries. It is a safety net for any path that marks an entry offline
+// without removing it; the normal leave path removes the entry outright.
+func (r *Room) pruneKnownNamesLocked() {
+	offline := 0
+	for _, kn := range r.knownNames {
+		if !kn.Online {
+			offline++
+		}
+	}
+	for offline > KnownNamesOfflineMax {
+		oldestNum := uint16(0)
+		oldestSeq := ^uint64(0)
+		for num, kn := range r.knownNames {
+			if kn.Online {
+				continue
+			}
+			if kn.OfflineSeq < oldestSeq {
+				oldestSeq = kn.OfflineSeq
+				oldestNum = num
+			}
+		}
+		if oldestNum == 0 {
+			return
+		}
+		delete(r.knownNames, oldestNum)
+		offline--
+	}
 }
 
 // setKnownNameLocalizedLocked stores a name plus its optional English twin
@@ -4305,7 +4517,15 @@ func (r *Room) setKnownNameLocalizedLocked(num uint16, name, nameEn string, onli
 	if base == "" {
 		base = sanitizeName(fmt.Sprintf("Игрок %d", num))
 	}
-	r.knownNames[num] = KnownName{Name: base, NameEn: sanitizeName(nameEn), Online: online}
+	seq := uint64(0)
+	if !online {
+		r.knownNameSeq++
+		seq = r.knownNameSeq
+	}
+	r.knownNames[num] = KnownName{Name: base, NameEn: sanitizeName(nameEn), Online: online, OfflineSeq: seq}
+	if !online {
+		r.pruneKnownNamesLocked()
+	}
 }
 
 // displayNameEnLocked returns the English twin of a name, or "" when there is
@@ -4831,12 +5051,20 @@ func (r *Room) broadcastJSON(ctx context.Context, typ string, data any) {
 
 // F5 "Reclaim" tunables.
 const (
-	// ReclaimTicks: 120 ticks == 12s at 100ms per tick.
+	// ReclaimTicks: 150 ticks == 15s at 100ms per tick.
 	// G22: at 200 ticks (20s) death cost nothing — the whole estate was still
 	// waiting when the player got back, and the logs showed single reclaims of
-	// +1556 and +2745 cells. 12 seconds still rewards a deliberate run back to
-	// your own land but no longer refunds the entire match.
-	ReclaimTicks = 120
+	// +1556 and +2745 cells.
+	// G3: at 120 ticks combined with the spawn penalty the mechanic fired
+	// literally zero times in three measured matches (mean distance from the
+	// respawn cell to the patch was 94 cells). The window is back up to 15s and
+	// the anti-refund job moved to ReclaimReturnPercent, which is a much more
+	// honest brake: coming back is possible, but it is never a full undo.
+	ReclaimTicks = 150
+	// ReclaimReturnPercent: how much of the connected cooling patch a reclaim
+	// gives back, in percent, nearest cells first. The rest is lost for good,
+	// so dying always costs territory even when the run home succeeds.
+	ReclaimReturnPercent = 55
 	// ReclaimExpireBudget bounds how many cells the expiry queue retires per
 	// tick, so a huge estate can never stall a tick.
 	ReclaimExpireBudget = 1024
@@ -4851,13 +5079,22 @@ const (
 
 	// Bot reclaim (aiMode 5) tunables. The scan is a strided sweep of the
 	// bot's own ROI, so it stays far cheaper than the hunt scan.
-	BotReclaimScanEvery = 7  // ticks between scans
-	BotReclaimStride    = 2  // ROI sampling stride
-	BotReclaimMaxSteps  = 26 // BFS budget to the patch
+	BotReclaimScanEvery = 7 // ticks between scans
+	BotReclaimStride    = 2 // ROI sampling stride
+	// BotReclaimMaxSteps: BFS budget to the patch. G3 raised it from 26 — with
+	// the old respawn penalty the branch was dead code, no bot ever found a
+	// patch inside 26 steps after dying.
+	BotReclaimMaxSteps = 34
 	// A detour is only worth it if the patch still exists on arrival.
 	BotReclaimTimeMargin = 6
 	// Bots do not abandon a long trail for a reclaim; that trade is bad.
 	BotReclaimMaxTrail = 6
+
+	// spawnCoolBonusCap bounds the respawn attraction to a player's own cooling
+	// patch (G3). The disc scanned by pickSpawnCell holds ~317 cells, so an
+	// uncapped bonus would outweigh every other term and pin every respawn to
+	// the centre of the old estate.
+	spawnCoolBonusCap = 120
 )
 
 // botReclaimGate is the per-archetype appetite for a reclaim detour (G4):
@@ -4872,7 +5109,25 @@ var botReclaimGate = [ArchCount]float32{
 // coolBatch is one death's worth of cooling cells, retired together.
 type coolBatch struct {
 	until uint32
+	owner uint16
 	cells []int
+}
+
+// hasCoolingCellsLocked reports whether a player may still have reclaimable
+// cells on the map. It is deliberately conservative — a batch whose cells were
+// all overtaken still counts — because the only caller uses it to decide
+// whether the name label is still needed, and keeping a name one batch too
+// long is harmless while dropping it too early is visible.
+func (r *Room) hasCoolingCellsLocked(num uint16) bool {
+	if num == 0 {
+		return false
+	}
+	for _, b := range r.coolBatches {
+		if b.owner == num && b.until > r.tick {
+			return true
+		}
+	}
+	return false
 }
 
 // coolWireAt returns the grid value to put on the wire for an unowned cell:
@@ -4958,8 +5213,14 @@ func (r *Room) stepCoolExpiry() {
 	}
 }
 
-// reclaimCoolRegion gives the connected patch of cooling cells that touch
-// `start` back to its former owner. Returns the number of cells restored.
+// reclaimCoolRegion gives part of the connected patch of cooling cells that
+// touch `start` back to its former owner. Returns the number of cells restored.
+//
+// G3: only ReclaimReturnPercent of the patch comes back, and the walk is a
+// breadth-first one so the cells that are returned are the ones nearest to the
+// point of re-entry — a compact blob around the player, not a random spray.
+// The remainder is dropped: that is what keeps death expensive now that the
+// respawn no longer runs away from the patch.
 func (r *Room) reclaimCoolRegion(p *Player, start int) int {
 	if p == nil || r.coolOwner == nil {
 		return 0
@@ -4970,24 +5231,20 @@ func (r *Room) reclaimCoolRegion(p *Player, start int) int {
 	q := r.bfsQ[:0]
 	q = append(q, start)
 	r.clearCoolCell(start)
-	n := 0
-	for len(q) > 0 {
-		i := q[len(q)-1]
-		q = q[:len(q)-1]
-		r.setGrid(i, p.num)
-		n++
+	push := func(j int) {
+		if j < 0 || j >= N {
+			return
+		}
+		if r.coolOwner[j] != p.num || r.coolUntil[j] <= r.tick {
+			return
+		}
+		r.clearCoolCell(j)
+		q = append(q, j)
+	}
+	for head := 0; head < len(q); head++ {
+		i := q[head]
 		x := i % W
 		y := i / W
-		push := func(j int) {
-			if j < 0 || j >= N {
-				return
-			}
-			if r.coolOwner[j] != p.num || r.coolUntil[j] <= r.tick {
-				return
-			}
-			r.clearCoolCell(j)
-			q = append(q, j)
-		}
 		if x > 0 {
 			push(i - 1)
 		}
@@ -5001,8 +5258,21 @@ func (r *Room) reclaimCoolRegion(p *Player, start int) int {
 			push(i + W)
 		}
 	}
+	n := len(q)
+	keep := (n*ReclaimReturnPercent + 99) / 100
+	if keep < 1 {
+		keep = 1
+	}
+	if keep > n {
+		keep = n
+	}
+	// Restore after the walk: setGrid clears the cooling flag itself and would
+	// otherwise cut the patch in half mid-traversal.
+	for k := 0; k < keep; k++ {
+		r.setGrid(q[k], p.num)
+	}
 	r.bfsQ = q[:0]
-	return n
+	return keep
 }
 
 func (r *Room) setGrid(i int, owner uint16) {
@@ -5126,7 +5396,7 @@ func (r *Room) clearPlayerCellsCooling(num uint16, p *Player, cool bool) {
 		r.setGrid(i, 0)
 	}
 	if len(batch) > 0 {
-		r.coolBatches = append(r.coolBatches, coolBatch{until: until, cells: batch})
+		r.coolBatches = append(r.coolBatches, coolBatch{until: until, owner: num, cells: batch})
 		// F5: tell clients when this batch expires so they can fade the cells
 		// out instead of only knowing "cooling / not cooling".
 		cells := uint16(len(batch))
@@ -5277,10 +5547,19 @@ func (r *Room) pickSpawnCell(forNum uint16) (int, int) {
 			borderPenalty = 30
 		}
 
-		// Weights chosen to keep it fast and stable. The own-cooling penalty is
-		// deliberately steeper than the distance bonus can repay: landing on
-		// top of your own cooling patch must never be the best cell on the map.
-		return int32(minD*14) - int32(occ*3) - borderPenalty - int32(ownCool*8)
+		// G3: this used to be `- ownCool*8`, a penalty steep enough that the
+		// respawn deliberately ran away from the player's own cooling estate.
+		// Combined with a 12s window that made reclaim unreachable in practice
+		// (0 events in 3 measured matches, mean distance 94 cells) while the
+		// client kept advertising the mechanic. It is now a bounded bonus, so a
+		// player lands within reach of his patch and the run home is a real
+		// decision. Spawn camping is handled by ReclaimReturnPercent instead:
+		// a reclaim gives back a bit over half the patch, never all of it.
+		coolBonus := ownCool
+		if coolBonus > spawnCoolBonusCap {
+			coolBonus = spawnCoolBonusCap
+		}
+		return int32(minD*14) - int32(occ*3) - borderPenalty + int32(coolBonus*3)
 	}
 
 	bestX := -1
@@ -5659,7 +5938,16 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 			r.awardPoints(k.num, 18, PointsKill)
 			if k.lastKiller != 0 && k.lastKiller == num && k.lastKilledTick != 0 && r.tick-k.lastKilledTick <= 900 {
 				r.pushEvent(Event{Kind: EventRevenge, A: killer, B: num})
-				r.addStyle(k, 20, StyleRevenge)
+				// G11: revenge used to be one of only two Style sources that
+				// ignored every per-match budget. With a 900-tick window the
+				// trade "die to the same bot, kill it back" was a farm. It now
+				// has its own match budget and a per-target cooldown.
+				if k.revengeLastTgt != num || k.revengeLastTick == 0 ||
+					r.tick-k.revengeLastTick >= RevengeSameTargetCooldown {
+					r.addStyleCapped(k, StyleRevengeReward, StyleRevenge, &k.revengeStyleAcc, StyleRevengeMatchCap)
+					k.revengeLastTgt = num
+					k.revengeLastTick = r.tick
+				}
 				r.awardPoints(k.num, 10, PointsRevenge)
 				if !k.bot {
 					pr := profileForKeyCreate(k.profileKey)
@@ -5702,7 +5990,8 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 		k := r.players[killer]
 		if k != nil && k.alive {
 			r.bonusTerritory(k.num, k.x, k.y, 3)
-			r.addStyle(k, 40, StyleBounty)
+			// G11: bounty Style is budgeted per match like every other source.
+			r.addStyleCapped(k, StyleBountyKill, StyleBounty, &k.bountyStyleMatch, StyleBountyMatchCap)
 			r.awardPoints(k.num, 28, PointsBounty)
 			if !k.bot {
 				pr := profileForKeyCreate(k.profileKey)
@@ -8045,11 +8334,25 @@ func (r *Room) capture(playerNum uint16) {
 
 			// E2: territory finally feeds the meta. Without this the optimal
 			// strategy was to ignore the map and farm bot tails.
-			gain := uint16(delta / StyleCaptureCellsPer)
-			if gain == 0 {
-				gain = 1
+			//
+			// G1: the old `if gain == 0 { gain = 1 }` paid a full Style for a
+			// 2-cell nibble, i.e. 35x the honest rate, and let a twitching
+			// script hit the 70/70 match ceiling in 20-30 seconds. The rate is
+			// now exactly delta/StyleCaptureCellsPer with no floor; the
+			// remainder is carried in styleCaptureAcc so that a player who
+			// keeps making 60-cell loops is paid the same as one making 600s
+			// and nothing is silently rounded away.
+			//
+			// A capture below CaptureMinCells pays nothing at all — the same
+			// rule as the match points above, so a nibbler cannot dodge it by
+			// switching from points to the meta currency.
+			if delta >= CaptureMinCells {
+				p.styleCaptureAcc += uint32(delta)
 			}
-			r.addStyleCapped(p, gain, StyleCapture, &p.styleCaptureMatch, StyleCaptureMatchCap)
+			if gain := uint16(p.styleCaptureAcc / StyleCaptureCellsPer); gain > 0 {
+				p.styleCaptureAcc -= uint32(gain) * StyleCaptureCellsPer
+				r.addStyleCapped(p, gain, StyleCapture, &p.styleCaptureMatch, StyleCaptureMatchCap)
+			}
 		}
 		if r.mutatorType == MutatorDoubleCapture {
 			r.bonusTerritory(playerNum, p.x, p.y, 1)
@@ -8164,15 +8467,33 @@ func (r *Room) stepPlayer(p *Player) {
 }
 
 func (r *Room) resolveHeadOnCollisions(alive []*Player) {
-	cellToPlayers := make(map[int][]uint16)
+	// G11: the map and its slices used to be allocated from scratch on every
+	// tick of every room. They are reused now; the per-cell slices are trimmed
+	// to zero length rather than dropped, so their backing arrays survive.
+	if r.headOnCells == nil {
+		r.headOnCells = make(map[int][]uint16, len(alive))
+	}
+	cellToPlayers := r.headOnCells
+	for i, v := range cellToPlayers {
+		cellToPlayers[i] = v[:0]
+	}
+	touched := r.headOnTouched[:0]
 	for _, p := range alive {
+		if p == nil || !p.alive {
+			continue
+		}
 		i := p.nextI
 		if i == -1 {
 			continue
 		}
+		if len(cellToPlayers[i]) == 0 {
+			touched = append(touched, i)
+		}
 		cellToPlayers[i] = append(cellToPlayers[i], p.num)
 	}
-	for _, nums := range cellToPlayers {
+	r.headOnTouched = touched
+	for _, i := range touched {
+		nums := cellToPlayers[i]
 		if len(nums) > 1 {
 			i := -1
 			if len(nums) > 0 {
@@ -8398,6 +8719,11 @@ func (r *Room) applyMove(p *Player) {
 		// patch back at once.
 		if n := r.reclaimCoolRegion(p, i); n > 0 {
 			owns = true
+			// G3: the mechanic was measured firing zero times in three matches.
+			// Counting it is how we know it is alive after the fix.
+			if p.reclaimsMatch < ^uint16(0) {
+				p.reclaimsMatch++
+			}
 			cells := uint16(n)
 			if n > int(^uint16(0)) {
 				cells = ^uint16(0)
@@ -8434,6 +8760,16 @@ func (r *Room) step() {
 	var changedTrailN int
 	r.mu.Lock()
 
+	// G11: a room with nobody watching used to run a full tick — 14 bots at
+	// 0.42ms — for the whole 30s cleanup window, and any room kept alive
+	// without humans burned that forever. At MaxRooms=64 that is a real idle
+	// floor. The clock stops too, so a room that is woken up again resumes its
+	// match where it left off instead of finding it long expired.
+	if r.humanCount == 0 && len(r.clients) == 0 {
+		r.mu.Unlock()
+		return
+	}
+
 	r.tick++
 	tickNow := r.tick
 
@@ -8447,6 +8783,15 @@ func (r *Room) step() {
 		r.matchResetAt = tickNow + MatchIntermissionTicks
 		if r.matchEndSentSeq != r.matchSeq {
 			res := r.buildMatchResultsLocked()
+			// G3: one line per match makes it possible to tell from production
+			// logs whether reclaim is a mechanic or dead code.
+			reclaims := 0
+			for _, p := range r.players {
+				if p != nil {
+					reclaims += int(p.reclaimsMatch)
+				}
+			}
+			log.Printf("match_end room=%d seq=%d reclaims=%d", r.id, r.matchSeq, reclaims)
 			// E3: rewards follow the ABSOLUTE place among every participant,
 			// bots included. Ranking humans only made the single human in a
 			// room a guaranteed "winner" no matter how badly they played.
@@ -8587,6 +8932,25 @@ func (r *Room) step() {
 		p.cellTicks += uint32(r.scores[p.num])
 	}
 
+	// G2: pay for territory that is actually held. Without this the only way to
+	// score was the capture event itself, so nobody had a reason to defend an
+	// empire and the map stayed a patchwork of nibbles.
+	if tickNow%HoldPayEveryTicks == 0 {
+		r.payHoldPoints()
+	}
+
+	// G7: keep LastSeen fresh for people who are actually playing. It is
+	// otherwise only written at join, on a Style grant and on a purchase, and
+	// once the income ceilings bite those stop for minutes at a time.
+	if tickNow%ProfileTouchEveryTicks == 0 {
+		for _, p := range r.players {
+			if p == nil || p.bot || p.profileKey == "" {
+				continue
+			}
+			touchProfileLastSeen(p.profileKey)
+		}
+	}
+
 	for _, p := range alive {
 		if p == nil {
 			continue
@@ -8623,12 +8987,26 @@ func (r *Room) step() {
 	for _, p := range alive {
 		r.applyMove(p)
 	}
+	// G11: the accelerated half-step used to run stepPlayer+applyMove per player
+	// with no head-on pass in between, so two speeding players could walk
+	// through each other in the same cell. It is now the same three phases as
+	// the normal step.
+	speeders := r.tmpSpeeders[:0]
 	for _, p := range alive {
 		if p == nil || !p.alive {
 			continue
 		}
 		if p.speedUntil != 0 && r.tick < p.speedUntil {
+			speeders = append(speeders, p)
+		}
+	}
+	r.tmpSpeeders = speeders
+	if len(speeders) > 0 {
+		for _, p := range speeders {
 			r.stepPlayer(p)
+		}
+		r.resolveHeadOnCollisions(speeders)
+		for _, p := range speeders {
 			r.applyMove(p)
 		}
 	}

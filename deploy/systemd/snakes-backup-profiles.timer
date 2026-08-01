@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly snapshot of Snakes player profiles
+
+[Timer]
+OnCalendar=hourly
+# Spread the load a little and survive reboots that skipped a window.
+RandomizedDelaySec=120
+Persistent=true
+Unit=snakes-backup-profiles.service
+
+[Install]
+WantedBy=timers.target

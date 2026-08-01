@@ -1,0 +1,17 @@
+[Unit]
+Description=Snapshot /var/lib/snakes/profiles.json (hourly + daily rotation)
+Documentation=file:///opt/snakes/README.md
+After=snakes.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/snakes-backup-profiles.sh
+Nice=10
+IOSchedulingClass=idle
+
+# The unit only ever touches /var/lib/snakes.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/snakes
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes

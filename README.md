@@ -191,16 +191,44 @@ docker compose exec game cat /app/data/profiles.json
 | `PROFILE_SECRET` | *(пусто → случайный эфемерный)* | `profiles.go` | HMAC-ключ подписи токенов личности. **В проде задавать обязательно**, см. раздел «Безопасность» |
 | `PROFILES_PATH` | `./data/profiles.json` | `profiles.go` | Путь к файлу профилей. В Docker-образе выставлен в `/app/data/profiles.json` |
 | `TRUSTED_PROXIES` | `127.0.0.1/8,::1` | `profiles.go` | Список CIDR/IP через запятую, чьему `X-Forwarded-For` можно верить. Для compose — подсеть `snakes_net` (`172.28.0.0/16`) |
+| `MAX_ROOMS` | `64` | `main.go` (`loadMaxRooms`) | Потолок числа одновременно живых комнат (~500 КБ каждая). Значение `<= 0` и нечисловое игнорируются |
+| `MAX_PROFILES` | `50000` | `profiles.go` (`loadMaxProfiles`) | Потолок числа профилей в сторе: `saveProfiles` копирует и маршалит весь набор целиком. Значение `<= 0` и нечисловое игнорируются |
+| `PROFILE_EMPTY_TTL_HOURS` | `6` | `profiles.go` (`loadProfileEmptyTTL`) | Через сколько часов вычищается профиль, в котором нет прогресса (профили с прогрессом живут 90 дней) |
+| `WS_ALLOW_LOCALHOST` | `1` (включено) | `ws.go` (`loadWSAllowLocalhost`) | Пропускать ли loopback-origin (`http://localhost`, `http://127.0.0.1:*`) мимо allowlist `WS_ORIGINS`. Удобно в разработке; **в проде обязательно `0`** — иначе любая страница, запущенная у игрока локально, получает валидный Origin. Выключается значениями `0`/`false`/`no`/`off` |
 | `BOT_DEATH_SNAP` | *(пусто)* | `main.go` | `1` включает отладочный «снап» бота при смерти. В проде не нужен |
+
+Фактические значения всех лимитов сервер печатает в лог при старте:
+
+```
+snakes build version=... commit=... buildTime=...
+limits roomLimit=16 maxRooms=64 maxProfiles=50000 profileEmptyTTL=6h0m0s wsAllowLocalhost=false botDeathLog=false
+```
 
 Отдельно `HTTP_PORT` (дефолт `8080`) читает только `docker-compose.yml` — это
 порт, на который наружу публикуется nginx-контейнер. Сам сервер его не видит.
 
-Дополнительно `Dockerfile` принимает build-args `VERSION`, `COMMIT`, `BUILD_TIME`.
-Они уходят в `-ldflags -X main.Version=... -X main.Commit=... -X main.BuildTime=...`,
-но **переменных с такими именами в пакете `main` сейчас нет**. Проверено сборкой:
-линкер молча игнорирует `-X` для несуществующего символа, сборка проходит, версия
-в бинаре нигде не отображается. Это задел на будущее, а не рабочая функция.
+### Версия сборки
+
+В пакете `main` есть переменные `Version`, `Commit`, `BuildTime` (`main.go`,
+дефолты `dev`/`none`/`unknown`). Их проставляет линкер:
+
+```
+-ldflags "-X main.Version=... -X main.Commit=... -X main.BuildTime=..."
+```
+
+Значения печатаются в лог при старте (`snakes build version=... commit=...
+buildTime=...`) и уходят клиенту в поле `version` пакета `hello`.
+
+Проставляют их оба пути сборки:
+
+* `Dockerfile` — через build-args `VERSION`, `COMMIT`, `BUILD_TIME`
+  (пробрасываются из `docker-compose.yml`);
+* `scripts/deploy.sh` — сам: `Version` = имя релиза (`<UTC-таймштамп>-<short sha>`),
+  `Commit` = полный git sha (с суффиксом `-dirty`, если деплоят грязное дерево),
+  `BuildTime` = момент сборки в ISO-8601 UTC.
+
+Ручная `go build` без `-ldflags` даёт `version=dev` — это нормально для
+локального запуска, но в проде означает, что бинарь собран мимо `deploy.sh`.
 
 ---
 

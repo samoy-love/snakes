@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -464,13 +465,64 @@ func profileExpiredLocked(pr *Profile, now time.Time) bool {
 	return pr.LastSeen < now.Add(-ttl).Unix()
 }
 
+// ---------------------------------------------------------------------------
+// Live profile registry (G7)
+// ---------------------------------------------------------------------------
+
+// liveProfilePIDs counts the connected clients per profile id. A profile held
+// by a live connection is never evicted: LastSeen is only refreshed at join, on
+// a Style grant and on a purchase, so an active player with an income at its
+// ceiling can go minutes without a touch and used to be evictable — measured,
+// an active profile with a balance of 500 was dropped and the next grant
+// created an empty one in its place. Guarded by profilesMu.
+var liveProfilePIDs = make(map[string]int)
+
+// retainProfilePID marks a profile as held by a live connection.
+func retainProfilePID(pid string) {
+	if pid == "" {
+		return
+	}
+	profilesMu.Lock()
+	liveProfilePIDs[pid]++
+	profilesMu.Unlock()
+}
+
+// releaseProfilePID undoes retainProfilePID.
+func releaseProfilePID(pid string) {
+	if pid == "" {
+		return
+	}
+	profilesMu.Lock()
+	if n := liveProfilePIDs[pid]; n > 1 {
+		liveProfilePIDs[pid] = n - 1
+	} else {
+		delete(liveProfilePIDs, pid)
+	}
+	profilesMu.Unlock()
+}
+
+// evictSampleSize is how many entries one eviction pass looks at. A full sort
+// under profilesMu measured 0.60ms at 20k profiles (~1.5-2ms at 50k) and
+// profilesMu is taken from under rm.mu on hot paths, so every room in the
+// process stalls for that long. Sampling k entries and dropping the oldest of
+// them costs a fixed few microseconds and picks an almost-as-old victim.
+const evictSampleSize = 64
+
+// evictBatchSize is how many victims one pass retires, so the sampling cost is
+// amortised over many admissions instead of running on every single one.
+const evictBatchSize = 16
+
 // evictProfilesLocked keeps the store under maxProfiles: expired entries go
-// first, then the least recently seen ones. Caller holds profilesMu.
+// first, then the least recently seen of a bounded random sample. Profiles held
+// by a live connection are never candidates. Caller holds profilesMu.
 func evictProfilesLocked(now time.Time) {
 	if len(profiles) < maxProfiles {
 		return
 	}
 	for pid, pr := range profiles {
+		if liveProfilePIDs[pid] > 0 {
+			continue
+		}
 		if profileExpiredLocked(pr, now) {
 			delete(profiles, pid)
 		}
@@ -482,14 +534,43 @@ func evictProfilesLocked(now time.Time) {
 		pid  string
 		seen int64
 	}
-	list := make([]entry, 0, len(profiles))
+	// Go randomises map iteration order, so a truncated range is a random
+	// sample.
+	sample := make([]entry, 0, evictSampleSize)
 	for pid, pr := range profiles {
-		list = append(list, entry{pid, pr.LastSeen})
+		if liveProfilePIDs[pid] > 0 {
+			continue
+		}
+		sample = append(sample, entry{pid, pr.LastSeen})
+		if len(sample) >= evictSampleSize {
+			break
+		}
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].seen < list[j].seen })
-	drop := len(profiles) - maxProfiles + 1
-	for i := 0; i < drop && i < len(list); i++ {
-		delete(profiles, list[i].pid)
+	if len(sample) == 0 {
+		// Everything left is live. Refusing to evict is the right call: the
+		// alternative is deleting the progress of someone who is playing.
+		log.Printf("profiles_evict_all_live count=%d", len(profiles))
+		return
+	}
+	sort.Slice(sample, func(i, j int) bool { return sample[i].seen < sample[j].seen })
+	// Retire a small batch so the sampling cost is amortised, but never more
+	// than the store can spare: a tiny store (tests, tiny MAX_PROFILES) drops
+	// exactly one entry.
+	batch := maxProfiles / 64
+	if batch < 1 {
+		batch = 1
+	}
+	if batch > evictBatchSize {
+		batch = evictBatchSize
+	}
+	drop := len(profiles) - maxProfiles + batch
+	for i := 0; i < drop && i < len(sample); i++ {
+		if pr := profiles[sample[i].pid]; pr != nil && profileHasProgressLocked(pr) {
+			// Losing currency must never be silent.
+			log.Printf("profiles_evict_with_progress pid=%q style=%d total=%d last_seen=%d",
+				shortPID(sample[i].pid), pr.StyleBalance, pr.TotalStyleGained, pr.LastSeen)
+		}
+		delete(profiles, sample[i].pid)
 	}
 }
 
@@ -527,23 +608,58 @@ func touchProfileLastSeen(pid string) {
 	}
 }
 
-// loadProfiles reads the store from disk. A missing file is not an error.
+// profilesReadOnly latches when the store could not be loaded from an existing
+// file (G6). The old code simply returned, leaving an empty store that the
+// first autosave — or the flush on SIGTERM — wrote straight over the file:
+// a truncated profiles.json silently turned into {"profiles":{}} and every
+// player lost everything, with a green healthcheck and exit code 0. In
+// read-only mode saving is refused entirely until an operator intervenes.
+var profilesReadOnly atomic.Bool
+
+// profilesReadOnlyReason is only ever written before the flag is set.
+var profilesReadOnlyReason string
+
+// enterProfilesReadOnly latches the read-only mode and quarantines the file
+// that could not be read, so the operator still has the bytes.
+func enterProfilesReadOnly(path, reason string, err error) {
+	profilesReadOnlyReason = reason
+	profilesReadOnly.Store(true)
+	log.Printf("profiles_read_only reason=%s path=%q err=%v: saving is DISABLED, "+
+		"player progress will not be persisted until the file is repaired or removed",
+		reason, path, err)
+	quarantine := fmt.Sprintf("%s.corrupt-%d", path, time.Now().Unix())
+	if rerr := os.Rename(path, quarantine); rerr != nil {
+		log.Printf("profiles_quarantine_error path=%q dst=%q err=%v", path, quarantine, rerr)
+		return
+	}
+	log.Printf("profiles_quarantined path=%q dst=%q", path, quarantine)
+}
+
+// profilesSavingDisabled reports whether persistence is currently refused.
+func profilesSavingDisabled() bool { return profilesReadOnly.Load() }
+
+// loadProfiles reads the store from disk. A missing file is not an error;
+// anything else latches read-only mode (G6).
 func loadProfiles() {
 	path := profilesPath()
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			log.Printf("profiles_load_error path=%q err=%v", path, err)
+			enterProfilesReadOnly(path, "read_error", err)
 		}
 		return
 	}
 	var f profilesFileFormat
 	if err := json.Unmarshal(b, &f); err != nil {
 		log.Printf("profiles_load_parse_error path=%q err=%v", path, err)
+		enterProfilesReadOnly(path, "parse_error", err)
 		return
 	}
 	if f.Version != profilesFileVersion {
 		log.Printf("profiles_load_version_mismatch path=%q version=%d", path, f.Version)
+		enterProfilesReadOnly(path, "version_mismatch",
+			fmt.Errorf("version %d, want %d", f.Version, profilesFileVersion))
 		return
 	}
 	savedAt := f.SavedAt
@@ -575,8 +691,15 @@ func loadProfiles() {
 	log.Printf("profiles_loaded path=%q count=%d evicted=%d", path, loaded, evicted)
 }
 
+// errProfilesReadOnly is returned by saveProfiles while the store is degraded.
+var errProfilesReadOnly = errors.New("profiles store is read-only after a failed load")
+
 // saveProfiles snapshots the store and writes it atomically (temp + rename).
+// It refuses to run at all in read-only mode (G6).
 func saveProfiles() error {
+	if profilesSavingDisabled() {
+		return errProfilesReadOnly
+	}
 	path := profilesPath()
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -635,6 +758,10 @@ func saveProfiles() error {
 
 // flushProfiles persists only when something changed since the last write.
 func flushProfiles(force bool) {
+	if profilesSavingDisabled() {
+		// Never overwrite a file we failed to read (G6).
+		return
+	}
 	if !force && !profilesDirty.Load() {
 		return
 	}

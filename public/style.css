@@ -331,7 +331,7 @@ html, body {
 
  .menuOnlineCount {
    font-size: var(--fs-16);
-   font-weight: 900;
+   font-weight: 800;
    font-variant-numeric: tabular-nums;
    color: rgba(255, 255, 255, 0.96);
  }
@@ -374,7 +374,7 @@ html, body {
    align-items: center;
    justify-content: center;
    font-size: var(--fs-11);
-   font-weight: 900;
+   font-weight: 800;
    font-variant-numeric: tabular-nums;
    color: rgba(255, 255, 255, 0.96);
    border: 1px solid color-mix(in srgb, var(--accent2) 45%, var(--border2));
@@ -587,7 +587,7 @@ html, body {
  }
 
  .menuOnboardingTitle {
-   font-weight: 900;
+   font-weight: 800;
    font-size: var(--fs-12);
  }
 
@@ -797,7 +797,7 @@ html, body {
  .cosmeticsStyleTitle .iconBtn {
    width: 32px;
    height: 32px;
-   font-size: 14px;
+   font-size: var(--fs-body);
  }
 
  .cosmeticsGrid {
@@ -1037,7 +1037,7 @@ html, body {
 
  .cosmeticsPrice .num {
    font-variant-numeric: tabular-nums;
-   font-weight: 900;
+   font-weight: 800;
    color: rgba(255, 255, 255, 0.88);
  }
 
@@ -1087,7 +1087,7 @@ html, body {
    padding: 1px 7px;
    border-radius: 999px;
    font-size: var(--fs-11);
-   font-weight: 900;
+   font-weight: 800;
    letter-spacing: 0.4px;
    text-transform: uppercase;
    line-height: 1.6;
@@ -1104,7 +1104,7 @@ html, body {
    gap: 10px;
    margin: 8px 2px 0;
    font-size: var(--fs-11);
-   font-weight: 900;
+   font-weight: 800;
    letter-spacing: 0.4px;
    text-transform: uppercase;
    color: var(--tier-color, var(--muted2));
@@ -1140,7 +1140,7 @@ html, body {
  .cosmeticsCatSummary b,
  .cosmeticsCatSummary .num {
    color: rgba(255, 255, 255, 0.92);
-   font-weight: 900;
+   font-weight: 800;
  }
 
  /* --- Полоса тира и цвет цены ---------------------------------------------- */
@@ -1212,7 +1212,7 @@ html, body {
    bottom: 0;
    padding: 1px 3px;
    border-radius: 6px;
-   font-size: 10px;
+   font-size: var(--fs-meta);
    line-height: 1.2;
    background: rgba(0, 0, 0, 0.66);
    color: rgba(255, 255, 255, 0.94);
@@ -1229,7 +1229,7 @@ html, body {
  .cosmeticsItem.isOwned .cosmeticsItemTitle::before {
    content: '✓ ';
    color: #34d399;
-   font-weight: 900;
+   font-weight: 800;
  }
 
  .cosmeticsItem.isEquipped {
@@ -1243,7 +1243,7 @@ html, body {
  .cosmeticsItem.isEquipped .cosmeticsItemTitle::before {
    content: '★ ';
    color: var(--accent2);
-   font-weight: 900;
+   font-weight: 800;
  }
 
  /* --- Прогресс до покупки на заблокированном товаре ------------------------- */
@@ -1322,7 +1322,7 @@ html, body {
  }
 
  .titleName {
-   font-weight: 900;
+   font-weight: 800;
    font-size: var(--fs-13);
    letter-spacing: 0.2px;
    min-width: 0;
@@ -1353,7 +1353,7 @@ html, body {
 
  .titleReq::before {
    content: '🎯';
-   font-size: 11px;
+   font-size: var(--fs-meta);
  }
 
  .titleItemRight {
@@ -1423,7 +1423,7 @@ html, body {
    padding: 0 5px;
    border-radius: 6px;
    font-size: var(--fs-11);
-   font-weight: 900;
+   font-weight: 800;
    letter-spacing: 0.2px;
    text-transform: uppercase;
    line-height: 1.5;
@@ -1495,7 +1495,7 @@ html, body {
  .btnPlay {
    min-height: 56px;
    font-size: var(--fs-18);
-   font-weight: 900;
+   font-weight: 800;
    letter-spacing: 0.3px;
    border-radius: var(--r-lg);
    border-color: rgba(255, 45, 85, 0.55);
@@ -1753,7 +1753,7 @@ html, body {
      width: var(--control-h);
      height: var(--control-h);
      min-height: var(--control-h);
-     font-size: 14px;
+     font-size: var(--fs-body);
    }
 
    .roomsControls input,
@@ -1829,7 +1829,7 @@ html, body {
 
  /* H7: заголовок оверлея — верхний уровень иерархии */
  .overlayTitle {
-   font-weight: 900;
+   font-weight: 800;
    font-size: clamp(32px, 7vw, 56px);
    line-height: 1.05;
    letter-spacing: -0.5px;
@@ -1888,8 +1888,8 @@ html, body {
 
  .settingsGroupTitle {
   margin-top: 8px;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: var(--fs-meta);
+  font-weight: 800;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--muted);
@@ -2067,7 +2067,7 @@ html, body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: var(--fs-title);
   flex: 0 0 auto;
  }
 
@@ -2095,14 +2095,14 @@ html, body {
  }
 
  .matchTitle {
-   font-size: 18px;
-   font-weight: 900;
+   font-size: var(--fs-title);
+   font-weight: 800;
    letter-spacing: 0.2px;
    margin-bottom: 6px;
  }
 
  .matchSub {
-   font-size: 13px;
+   font-size: var(--fs-meta);
    color: rgba(229, 231, 235, 0.80);
  }
 
@@ -2137,8 +2137,8 @@ html, body {
   justify-content: center;
   padding: 2px 10px;
   border-radius: 999px;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: var(--fs-meta);
+  font-weight: 800;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -2171,8 +2171,8 @@ html, body {
  }
 
  .matchKpiLabel {
-  font-size: 11px;
-  font-weight: 900;
+  font-size: var(--fs-meta);
+  font-weight: 800;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--muted);
@@ -2180,15 +2180,15 @@ html, body {
  }
 
  .matchKpiValue {
-  font-size: 22px;
-  font-weight: 900;
+  font-size: var(--fs-lead);
+  font-weight: 800;
   letter-spacing: 0.2px;
   line-height: var(--lh-tight);
   font-variant-numeric: tabular-nums;
  }
 
  .matchKpiOf {
-  font-size: 12px;
+  font-size: var(--fs-meta);
   font-weight: 800;
   color: var(--muted2);
  }
@@ -2208,8 +2208,8 @@ html, body {
  }
 
  .matchMiniLabel {
-  font-size: 11px;
-  font-weight: 900;
+  font-size: var(--fs-meta);
+  font-weight: 800;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--muted);
@@ -2217,7 +2217,7 @@ html, body {
  }
 
  .matchMiniValue {
-  font-size: 14px;
+  font-size: var(--fs-body);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -2231,7 +2231,7 @@ html, body {
 
  .matchNextGap {
   margin-top: 10px;
-  font-size: 12px;
+  font-size: var(--fs-meta);
   color: rgba(229, 231, 235, 0.86);
  }
 
@@ -2291,20 +2291,20 @@ html, body {
  }
 
  .toastSub {
-  font-size: 12px;
+  font-size: var(--fs-meta);
   color: var(--muted);
   margin-bottom: 10px;
  }
 
  .deathReason {
-   font-size: 12px;
+   font-size: var(--fs-meta);
    color: rgba(255, 255, 255, 0.86);
    margin-bottom: 6px;
    font-weight: 700;
  }
 
  .deathOverlay .toastTitle {
-   font-size: 18px;
+   font-size: var(--fs-title);
    letter-spacing: 0.2px;
  }
 
@@ -2332,15 +2332,15 @@ html, body {
  }
 
  .deathStatLabel {
-   font-size: 11px;
+   font-size: var(--fs-meta);
    font-weight: 800;
    color: var(--muted);
    margin-bottom: 2px;
  }
 
  .deathStatValue {
-   font-size: 14px;
-   font-weight: 900;
+   font-size: var(--fs-body);
+   font-weight: 800;
    color: var(--text);
    font-variant-numeric: tabular-nums;
  }
@@ -2351,7 +2351,7 @@ html, body {
  }
 
  .deathStatPrimary .deathStatValue {
-   font-size: 20px;
+   font-size: var(--fs-title);
    letter-spacing: 0.2px;
  }
 
@@ -2363,8 +2363,8 @@ html, body {
  }
 
  .deathYouTitle {
-   font-size: 11px;
-   font-weight: 900;
+   font-size: var(--fs-meta);
+   font-weight: 800;
    letter-spacing: 0.3px;
    text-transform: uppercase;
    color: var(--muted);
@@ -2380,7 +2380,7 @@ html, body {
 
  .deathYouRow .num {
    font-variant-numeric: tabular-nums;
-   font-weight: 900;
+   font-weight: 800;
  }
 
  .deathTop {
@@ -2393,8 +2393,8 @@ html, body {
  .deathTopTitle {
    padding: 8px 10px;
    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-   font-size: 11px;
-   font-weight: 900;
+   font-size: var(--fs-meta);
+   font-weight: 800;
    letter-spacing: 0.3px;
    text-transform: uppercase;
    color: var(--muted);
@@ -2409,7 +2409,7 @@ html, body {
  .deathTop td {
    padding: 7px 10px;
    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-   font-size: 12px;
+   font-size: var(--fs-meta);
    white-space: nowrap;
  }
 
@@ -2569,7 +2569,7 @@ html, body {
   box-shadow: var(--shadow-float);
   backdrop-filter: blur(10px);
   font-size: var(--fs-13);
-  font-weight: 900;
+  font-weight: 800;
   line-height: 1.2;
   white-space: nowrap;
   pointer-events: none;
@@ -2659,7 +2659,7 @@ html, body {
 
  .bigBannerTitle {
   font-size: clamp(26px, 6vw, 52px);
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: 3px;
   text-transform: uppercase;
   line-height: var(--lh-tight);
@@ -2831,7 +2831,7 @@ html, body {
  #stats {
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 13px;
+  font-size: var(--fs-meta);
   line-height: 1.35;
   color: var(--text);
  }
@@ -2895,12 +2895,12 @@ html, body {
  #help {
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 12px;
+  font-size: var(--fs-meta);
   color: var(--muted);
  }
 
  #title {
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: 0.2px;
   margin-bottom: 2px;
   overflow: hidden;
@@ -2909,7 +2909,7 @@ html, body {
  }
 
  #roomInfo {
-  font-size: 13px;
+  font-size: var(--fs-meta);
   opacity: 0.75;
   margin-bottom: 0;
   overflow: hidden;
@@ -2960,20 +2960,20 @@ html, body {
  }
 
  .topHudLabel {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   font-weight: 800;
   color: var(--muted2);
  }
 
  .topHudValue {
-  font-size: 20px;
-  font-weight: 900;
+  font-size: var(--fs-title);
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: var(--lh-tight);
  }
 
  .topHudSub {
-  font-size: 12px;
+  font-size: var(--fs-meta);
   font-weight: 800;
   color: var(--muted2);
   font-variant-numeric: tabular-nums;
@@ -2990,8 +2990,8 @@ html, body {
 
  .topHudTime {
   grid-column: 1 / -1;
-  font-size: 13px;
-  font-weight: 900;
+  font-size: var(--fs-meta);
+  font-weight: 800;
   color: rgba(255, 255, 255, 0.90);
   text-align: right;
   line-height: 1.25;
@@ -3005,8 +3005,8 @@ html, body {
   border-radius: 999px;
   border: 1px solid var(--border2);
   background: rgba(255, 255, 255, 0.06);
-  font-size: 12px;
-  font-weight: 900;
+  font-size: var(--fs-meta);
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: rgba(255, 255, 255, 0.92);
  }
@@ -3019,7 +3019,7 @@ html, body {
   text-overflow: ellipsis;
   max-width: 100%;
   text-align: right;
-  font-size: 12px;
+  font-size: var(--fs-meta);
   font-weight: 800;
  }
 
@@ -3046,7 +3046,7 @@ html, body {
   border-radius: var(--r-md);
   background: color-mix(in srgb, var(--panel) calc(var(--hud-panel-alpha) * 100%), transparent);
   backdrop-filter: blur(10px);
-  font-size: 13px;
+  font-size: var(--fs-meta);
   line-height: 1.35;
   text-align: left;
   pointer-events: none;
@@ -3076,8 +3076,8 @@ html, body {
  }
 
  .metaSectionTitle {
-   font-size: 12px;
-   font-weight: 900;
+   font-size: var(--fs-meta);
+   font-weight: 800;
    letter-spacing: 0.3px;
    text-transform: uppercase;
    color: var(--muted);
@@ -3138,8 +3138,8 @@ html, body {
   border: 1px solid rgba(255, 255, 255, 0.10);
   background: rgba(0, 0, 0, 0.14);
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 900;
+  font-size: var(--fs-meta);
+  font-weight: 800;
   letter-spacing: 0.2px;
   text-transform: uppercase;
  }
@@ -3172,7 +3172,7 @@ html, body {
    border: 1px solid var(--border2);
    background: color-mix(in srgb, var(--panel) 85%, rgba(0,0,0,0.15));
    backdrop-filter: blur(10px);
-   font-size: 13px;
+   font-size: var(--fs-meta);
    line-height: 1.35;
  }
 
@@ -3216,7 +3216,7 @@ html, body {
   .eventToastIcon {
    width: 26px;
    height: 26px;
-   font-size: 14px;
+   font-size: var(--fs-body);
    flex: 0 0 auto;
   }
 
@@ -3282,8 +3282,8 @@ html, body {
    border-radius: 999px;
    background: rgba(255, 45, 85, 0.9);
    color: #fff;
-   font-size: 12px;
-   font-weight: 900;
+   font-size: var(--fs-meta);
+   font-weight: 800;
    display: inline-flex;
    align-items: center;
    justify-content: center;
@@ -3308,17 +3308,17 @@ html, body {
    display: inline-flex;
    align-items: center;
    justify-content: center;
-   font-size: 18px;
+   font-size: var(--fs-title);
  }
 
  .eventToastText {
-   font-size: 13px;
+   font-size: var(--fs-meta);
    font-weight: 800;
    color: var(--text);
  }
 
  .eventToastSub {
-   font-size: 12px;
+   font-size: var(--fs-meta);
    font-weight: 700;
    color: var(--muted);
  }
@@ -3344,7 +3344,7 @@ html, body {
 
  #chatHeader {
    padding: var(--pad-md);
-   font-size: 13px;
+   font-size: var(--fs-meta);
    color: var(--muted);
    user-select: none;
    cursor: pointer;
@@ -3364,11 +3364,11 @@ html, body {
 
  #chatHeaderTitle {
   color: rgba(255, 255, 255, 0.90);
-  font-weight: 900;
+  font-weight: 800;
  }
 
  .chatHeaderStatus {
-  font-size: 12px;
+  font-size: var(--fs-meta);
   font-weight: 700;
   color: var(--muted);
   white-space: nowrap;
@@ -3386,7 +3386,7 @@ html, body {
  .chatCollapseBtn {
   width: var(--control-h);
   height: var(--control-h);
-  font-size: 14px;
+  font-size: var(--fs-body);
  }
 
  #chatLog {
@@ -3396,7 +3396,7 @@ html, body {
   max-height: var(--chat-log-max, 320px);
   overflow-y: auto;
   padding: var(--pad-md);
-  font-size: 13px;
+  font-size: var(--fs-meta);
   line-height: 1.45;
   white-space: normal;
   -webkit-overflow-scrolling: touch;
@@ -3427,7 +3427,7 @@ html, body {
  }
 
  .chatName {
-  font-weight: 900;
+  font-weight: 800;
   color: rgba(255, 255, 255, 0.92);
   min-width: 0;
   overflow: hidden;
@@ -3436,7 +3436,7 @@ html, body {
 
  .chatTime {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   font-variant-numeric: tabular-nums;
   color: rgba(229, 231, 235, 0.62);
  }
@@ -3513,8 +3513,8 @@ html, body {
   border-radius: 999px;
   background: rgba(255, 45, 85, 0.9);
   color: #fff;
-  font-size: 12px;
-  font-weight: 900;
+  font-size: var(--fs-meta);
+  font-weight: 800;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3543,13 +3543,13 @@ html, body {
  }
 
  .rightEmptyTitle {
-  font-size: 12px;
-  font-weight: 900;
+  font-size: var(--fs-meta);
+  font-weight: 800;
   color: rgba(255, 255, 255, 0.86);
  }
 
  .rightEmptyDesc {
-  font-size: 12px;
+  font-size: var(--fs-meta);
   font-weight: 700;
   color: var(--muted);
  }
@@ -3614,7 +3614,7 @@ html, body {
   border: 1px solid rgba(255, 255, 255, 0.10);
   background: color-mix(in srgb, var(--panel) 82%, transparent);
   backdrop-filter: blur(10px);
-  font-size: 12px;
+  font-size: var(--fs-meta);
   color: var(--muted);
   pointer-events: none;
 }
@@ -3674,7 +3674,7 @@ html, body {
 }
 
 .minimapOverlayTitle {
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: 0.2px;
 }
 
@@ -3756,8 +3756,8 @@ html, body {
   padding: 7px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.86);
-  font-size: 12px;
-  font-weight: 900;
+  font-size: var(--fs-meta);
+  font-weight: 800;
   letter-spacing: 0.3px;
   text-transform: uppercase;
  }
@@ -3798,7 +3798,7 @@ html, body {
   background: color-mix(in srgb, var(--panel) 78%, transparent);
   box-shadow: var(--shadow-float);
   backdrop-filter: blur(10px);
-  font-size: 12px;
+  font-size: var(--fs-meta);
   line-height: 1.35;
   color: var(--muted);
  }
@@ -3857,7 +3857,7 @@ html, body {
    background: color-mix(in srgb, var(--panel) calc(var(--hud-panel-alpha) * 100%), transparent);
    backdrop-filter: blur(10px);
    box-shadow: var(--shadow-float);
-   font-size: 12px;
+   font-size: var(--fs-meta);
    line-height: 1.35;
    white-space: normal;
    min-width: 160px;
@@ -3875,7 +3875,7 @@ html, body {
 
  #perf.perfCompact {
   min-width: 132px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   opacity: 0.76;
  }
 
@@ -3954,7 +3954,7 @@ html, body {
    background: color-mix(in srgb, var(--btn) 70%, transparent);
    color: var(--text);
    cursor: pointer;
-   font-size: 18px;
+   font-size: var(--fs-title);
    transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
  }
 
@@ -4177,7 +4177,7 @@ img.emoji {
 
    #chatBtn::before {
      content: '➤';
-     font-size: 18px;
+     font-size: var(--fs-title);
      line-height: 1;
      color: var(--text);
    }
@@ -4351,7 +4351,7 @@ img.emoji {
    }
 
    .deathOverlay .fieldLabel {
-     font-size: 13px;
+     font-size: var(--fs-meta);
    }
 
    .deathOverlay input,
@@ -4645,7 +4645,7 @@ img.emoji {
 .menuActions .btnPlay {
   min-height: 56px;
   font-size: var(--fs-18);
-  font-weight: 900;
+  font-weight: 800;
 }
 
 /* ==========================================================================
@@ -4796,7 +4796,7 @@ img.emoji {
 .reclaimHintTimer {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
-  font-weight: 900;
+  font-weight: 800;
   color: var(--tier-legendary);
 }
 
@@ -4898,7 +4898,7 @@ body.overlayActive .reclaimHint {
 
 .onboardStepToastTitle {
   font-size: var(--fs-13);
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: 0.2px;
 }
 
@@ -5060,7 +5060,7 @@ body.overlayActive .reclaimHint {
 
 .deathExplainTitle {
   font-size: var(--fs-14);
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: 0.2px;
 }
 
@@ -5074,7 +5074,7 @@ body.overlayActive .reclaimHint {
 /* client.js уже собирает две строки причины смерти — правил для них не было */
 .deathReasonMain {
   font-size: var(--fs-13);
-  font-weight: 900;
+  font-weight: 800;
   color: rgba(255, 255, 255, 0.94);
 }
 
@@ -5134,7 +5134,7 @@ body.overlayActive .reclaimHint {
 .matchTable tbody tr.matchRowMe {
   background-color: color-mix(in srgb, var(--accent2) 16%, transparent);
   color: #fff;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .matchTable tbody tr.matchRowMe td {
@@ -5151,23 +5151,23 @@ body.overlayActive .reclaimHint {
 /* Пьедестал: первые три места читаются без счёта в уме */
 .matchTable tbody tr:nth-child(1) td:first-child {
   color: var(--gold);
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .matchTable tbody tr:nth-child(2) td:first-child {
   color: #cbd5e1;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .matchTable tbody tr:nth-child(3) td:first-child {
   color: #d09a6a;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 /* Шапка таблицы: подписи колонок — служебные, они не должны спорить с числами */
 .matchTable thead th {
   font-size: var(--fs-11);
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--muted2);
@@ -5218,7 +5218,7 @@ body.overlayActive .reclaimHint {
 .matchFirstSkinLabel,
 .firstSkinProgressLabel {
   font-size: var(--fs-11);
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--muted);
@@ -5229,7 +5229,7 @@ body.overlayActive .reclaimHint {
 .firstSkinProgressValue {
   flex: 0 0 auto;
   font-size: var(--fs-14);
-  font-weight: 900;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--gold);
@@ -5277,7 +5277,7 @@ body.overlayActive .reclaimHint {
   margin-top: 10px;
   padding: 4px 2px;
   font-size: var(--fs-11);
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: 0.4px;
   text-transform: uppercase;
   color: var(--muted2);
@@ -5323,7 +5323,7 @@ body.overlayActive .reclaimHint {
   background: color-mix(in srgb, var(--accent2) 12%, rgba(0, 0, 0, 0.24));
   color: rgba(255, 255, 255, 0.92);
   font-size: var(--fs-11);
-  font-weight: 900;
+  font-weight: 800;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5338,7 +5338,7 @@ body.overlayActive .reclaimHint {
   background: color-mix(in srgb, var(--tier-legendary) 14%, rgba(0, 0, 0, 0.24));
   color: #fff3d6;
   font-size: var(--fs-11);
-  font-weight: 900;
+  font-weight: 800;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5399,7 +5399,7 @@ body.overlayActive .reclaimHint {
 /* Счётчик киллов в боевом чипе */
 .hudComboKills {
   font-variant-numeric: tabular-nums;
-  font-weight: 900;
+  font-weight: 800;
   color: rgba(255, 255, 255, 0.92);
 }
 
@@ -5590,7 +5590,7 @@ body.overlayActive .reclaimHint {
 
   /* Итоги матча: место крупнее, но не в ущерб ширине */
   .matchKpiGrid .matchKpi:first-child .matchKpiValue {
-    font-size: 34px;
+    font-size: var(--fs-lead);
   }
 
   .matchTable td,
@@ -6091,5 +6091,414 @@ body.overlayActive .reclaimHint {
      экрана смерти не получает плавных переходов. */
   .deathOverlay .toastRow {
     transition: none;
+  }
+}
+
+/* ==========================================================================
+   ВОЛНА 7. Приёмочное UX-ревью: закрытие регрессий прошлой волны.
+   Блок идёт последним в файле и перекрывает ранние правила порядком.
+   ========================================================================== */
+
+/* --- U7. Типографика: пять ступеней на весь продукт, включая игровой HUD ----
+   Раньше шкала (--fs-display/lead/title/body/meta) действовала только внутри
+   .overlay .card, а HUD жил на 47 хардкодах и восьми старых переменных
+   --fs-11…--fs-22 — суммарно ~17 различимых кеглей. Хардкоды заменены на
+   переменные по всему файлу, а старые переменные схлопнуты сюда, на пять
+   ступеней: meta 12 / body 15 / title 18 / lead / display.
+   Вес 900 снят везде (54 объявления → 800); 900 возвращён ниже только тем
+   элементам, чей кегль заведомо >= 18px. */
+:root,
+html[data-theme],
+html[data-theme="light"] {
+  --fs-meta: 12px;
+  --fs-body: 15px;
+  --fs-title: 18px;
+  --fs-11: var(--fs-meta);
+  --fs-12: var(--fs-meta);
+  --fs-13: var(--fs-meta);
+  --fs-14: var(--fs-body);
+  --fs-16: var(--fs-body);
+  --fs-18: var(--fs-title);
+  --fs-20: var(--fs-title);
+  --fs-22: var(--fs-lead);
+
+  /* U10. Контраст вторичного текста на blur-панелях над яркой территорией:
+     было ~1.9:1 (0.60 поверх rgba(0,0,0,0.376)). Поднимаем и текст, и подложку.
+     --hud-panel-alpha остаётся пользовательской настройкой (ползунок в
+     «Настройках» пишет её инлайном), поэтому усиливаем базовый --panel. */
+  --muted2: rgba(229, 231, 235, 0.78);
+  --panel: rgba(0, 0, 0, 0.68);
+  --panel2: rgba(0, 0, 0, 0.52);
+}
+
+/* Тяжёлое начертание — только крупному кеглю. */
+.overlayTitle,
+.bigBannerTitle,
+.matchTitle,
+.deathOverlay .toastTitle,
+.overlay .card .btnPlay,
+.matchKpiValue,
+.topHudValue,
+#title {
+  font-weight: 900;
+}
+
+/* --- U1. Килфид виден всегда ----------------------------------------------
+   Регрессия: живая таблица игроков наполнила #rightInfo на ~1050px при окне
+   500px, и килфид (последний ребёнок скролл-контейнера) уезжал за нижнюю
+   границу — видимая высота 0px на всех разрешениях.
+   Решение: #rightInfo больше не скроллится целиком. Это флекс-колонка, в
+   которой «Матч» и «Команда» ужимаются и скроллятся ВНУТРИ себя, а блок
+   событий (client.js оборачивает #killfeed в #rightEventsDetails) закреплён
+   последним и не ужимается никогда.
+   NB: killfeed в разметке лежит в #rightInfo, но client.js переносит его в
+   сгенерированный details#rightEventsDetails — стилизуем оба случая. */
+#rightInfo {
+  overflow: hidden;
+  overscroll-behavior-y: contain;
+}
+
+#rightInfo > #rightMatchDetails { order: 1; }
+#rightInfo > #rightTeamDetails { order: 2; }
+#rightInfo > #perf { order: 3; }
+#rightInfo > #rightEventsDetails,
+#rightInfo > #killfeed { order: 4; }
+
+/* Ужимаемые панели: сама details — колонка, её тело скроллится. */
+#rightInfo > #rightMatchDetails,
+#rightInfo > #rightTeamDetails {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  /* Ниже шапки + двух строк панель перестаёт что-либо сообщать. */
+  min-height: min(92px, 100%);
+}
+
+#rightInfo > .rightDetails > .rightDetailsSummary {
+  flex: 0 0 auto;
+}
+
+#rightInfo > #rightMatchDetails > #metaHud,
+#rightInfo > #rightTeamDetails > #teamHud {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  /* pointer-events у #metaHud был none — без этого внутренний скролл недоступен */
+  pointer-events: auto;
+}
+
+/* Потолок «Команды»: 12 строк на 448px и были причиной вытеснения килфида. */
+#rightInfo > #rightTeamDetails > #teamHud {
+  max-height: min(34dvh, 240px);
+}
+
+#rightInfo > #rightMatchDetails > #metaHud {
+  max-height: min(30dvh, 260px);
+}
+
+/* Блок событий закреплён: flex-shrink 0 — он не отдаёт высоту таблицам. */
+#rightInfo > #rightEventsDetails,
+#rightInfo > #killfeed {
+  flex: 0 0 auto;
+}
+
+/* Килфид рисует максимум 6 строк (client.js), новые — сверху. Ограничиваем
+   высоту четырьмя строками: переполнение срезает самые старые. */
+#rightInfo #killfeed {
+  max-height: var(--killfeed-max, 152px);
+  overflow: hidden;
+}
+
+/* При развёрнутом чате сайдбару оставалось ~260px — килфид ужимается до трёх
+   строк, но не исчезает, а таблицы дожимаются своим внутренним скроллом. */
+@media (min-width: 721px) {
+  body:has(#chat:not(.collapsed)) {
+    --killfeed-max: 110px;
+    /* 356px под развёрнутый чат не оставляли места ни таблице, ни килфиду */
+    --right-bottom-reserve: 264px;
+  }
+
+  body:has(#chat:not(.collapsed)) #rightInfo > #rightTeamDetails > #teamHud {
+    max-height: min(22dvh, 150px);
+  }
+
+  body:has(#chat:not(.collapsed)) #rightInfo > #rightMatchDetails > #metaHud {
+    max-height: min(22dvh, 150px);
+  }
+}
+
+/* Низкие экраны ноутбуков (768px): таблицы отдают высоту первыми. */
+@media (max-height: 800px) {
+  #rightInfo > #rightTeamDetails > #teamHud {
+    max-height: min(26dvh, 190px);
+  }
+
+  #rightInfo > #rightMatchDetails > #metaHud {
+    max-height: min(24dvh, 180px);
+  }
+}
+
+/* --- U5. Рейтинг перестал дублироваться трижды ----------------------------
+   Было: #topHudPlace + #stats (по 🏆) + #teamHud — одни и те же цифры.
+   Теперь 🏆 (.lbPinned) переключает: развёрнутый левый лидерборд ИЛИ правая
+   панель «Команда», но не оба сразу. Без 🏆 #stats скрыт на любом экране —
+   раньше медиазапрос в начале файла показывал его при высоте >= 821px. */
+#hud:not(.lbPinned) #stats {
+  display: none;
+}
+
+body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
+  display: none;
+}
+
+/* --- U6. Иерархия верхнего HUD --------------------------------------------
+   Место — первым и крупным, доля карты заметнее абсолютного числа клеток. */
+.topHudRow {
+  grid-template-columns: auto auto 1fr;
+}
+
+.topHudPlace {
+  font-size: var(--fs-title);
+  font-weight: 900;
+  line-height: var(--lh-tight);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  color: #fff;
+}
+
+.topHudPlace.isLeader {
+  color: var(--gold);
+}
+
+.topHudPlace:empty {
+  display: none;
+}
+
+.topHudZonePct {
+  font-size: var(--fs-body);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh-tight);
+}
+
+/* На телефоне строка одна и узкая: ранг и таймер делят первый ряд,
+   доля карты уходит во второй — иначе .topHudRight ужимается до 40px и
+   переносится в три строки (87px высоты вместо 40). */
+@media (max-width: 720px) {
+  .topHudRow {
+    grid-template-columns: auto 1fr;
+    row-gap: 2px;
+  }
+
+  .topHudPlace {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: var(--fs-body);
+  }
+
+  .topHudRight {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .topHudZone {
+    grid-column: 1;
+    grid-row: 2;
+  }
+}
+
+.topHudZoneCells {
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--muted2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- U2. Кнопки выхода и языка снова кликабельны на телефоне ---------------
+   #rightSidebar (z-index 12) перекрывал #hud (10): elementFromPoint в центре
+   🇷🇺 и ⟵ возвращал SUMMARY.rightDetailsSummary, и «выйти в меню» на телефоне
+   схлопывало панель «Матч» вместо выхода. Esc на телефоне нет. */
+#hud {
+  z-index: 15;
+}
+
+/* --- U3. На телефоне поле важнее правой панели ----------------------------
+   Регрессия: правила `#rightInfo { display: none }` (<=720px) и
+   `#rightSidebar { display: none }` (<=520px) были перебиты более поздним
+   безусловным `display: flex` из волны 6. Возвращаем, уже после него. */
+@media (max-width: 720px) {
+  #rightInfo,
+  #rightInfo > #rightEventsDetails,
+  #rightSidebar #perf,
+  #rightSidebar #killfeed {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  #rightSidebar {
+    display: none;
+  }
+}
+
+/* --- U8. Мобильный HUD без надежды на hover -------------------------------
+   opacity 0.42 поднималась только по :hover/:focus-within — на тач-экране
+   это состояние не наступает никогда. */
+@media (hover: none) {
+  body.inGame #hud:not(.lbPinned) {
+    opacity: 1;
+  }
+
+  body.inGame #hud:not(.lbPinned) .hudActions .iconBtn {
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
+    backdrop-filter: blur(10px);
+    box-shadow: var(--shadow-float);
+  }
+}
+
+/* --- U9. Тач-цели под входной анимацией карточек --------------------------
+   .overlay .card / .toastCard анимируются из scale(0.985); измерение попадает
+   в кадр анимации и 44px превращаются в 43.34px. Компенсируем запасом. */
+.deathOverlay .toastRow > button,
+.matchActions > button,
+.matchNextActions > button,
+#restartBtn,
+#deathMenuBtn,
+#matchContinueBtn,
+#matchMenuBtn {
+  min-height: 48px;
+}
+
+/* --- U10. Мелочи ---------------------------------------------------------- */
+
+/* Заголовок «Топ-5» стоял над таблицей из 12 строк. */
+.deathStats .deathTop tbody tr:nth-child(n + 6) {
+  display: none;
+}
+
+/* menu.controls_desc и menu.hint дублируются дословно: пока показан
+   онбординг, второй экземпляр совета прячем. */
+#menuOverlay #menuOnboarding:not(.hidden) ~ .overlayHint {
+  display: none;
+}
+
+/* Подсказка по управлению обязана быть видна именно в матче. */
+body.inGame #hud:not(.lbPinned) #help {
+  display: block !important;
+  padding-top: 6px;
+  max-width: 320px;
+  font-size: var(--fs-meta);
+  color: var(--muted2);
+}
+
+/* Свайп нигде не был назван: на тач-устройстве показываем свою строку вместо
+   «WASD / Enter / Esc / M», которых на телефоне нет. */
+#helpTouch {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  #help {
+    display: none !important;
+  }
+
+  body.inGame #helpTouch {
+    display: block;
+    position: fixed;
+    left: calc(8px + var(--sa-left));
+    bottom: calc(8px + var(--sa-bottom));
+    z-index: var(--z-hud);
+    max-width: min(46vw, 260px);
+    padding: 6px 10px;
+    border: 1px solid var(--border2);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
+    backdrop-filter: blur(10px);
+    font-size: var(--fs-meta);
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--muted);
+    pointer-events: none;
+  }
+
+  /* Развёрнутый чат занимает низ экрана целиком. */
+  body:has(#chat:not(.collapsed)) #helpTouch,
+  body.overlayActive #helpTouch {
+    display: none;
+  }
+}
+
+/* --- U4. Пустой #menuSkinPreview не должен выглядеть дырой -----------------
+   Канвас наполняет client.js; пока он пуст, рамка получает подложку и
+   приглушённый силуэт, а не 342×212 пустоты. Силуэт лежит ПОД канвасом
+   (z-index 0 против 1), поэтому не мешает будущей отрисовке. */
+.menuSkinPreviewWrap {
+  position: relative;
+  min-height: 132px;
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.10), rgba(0, 0, 0, 0.34));
+}
+
+.menuSkinPreviewWrap::after {
+  content: '🐍';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 56px;
+  opacity: 0.16;
+  filter: grayscale(1);
+  pointer-events: none;
+}
+
+#menuSkinPreview {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Волна 7 новых анимаций не вводит; фиксируем, что заглушка превью и
+     подсказка управления статичны. */
+  .menuSkinPreviewWrap::after,
+  #helpTouch {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* --- C2. Индикатор фазы матча ---------------------------------------------
+   Слот #topHudPhase создаётся из client.js рядом с таймером и несёт классы
+   topHudPhase topHudChip. В финале (модификатор .isFinal) фаза подсвечивается
+   золотом — это единственный момент матча, когда очки за захват удваиваются,
+   и игрок должен его заметить. */
+.topHudPhase {
+  white-space: nowrap;
+}
+
+.topHudPhase.isFinal {
+  border-color: color-mix(in srgb, var(--gold) 62%, var(--border2));
+  background: color-mix(in srgb, var(--gold) 18%, rgba(0, 0, 0, 0.28));
+  color: var(--gold);
+  animation: topHudPhasePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes topHudPhasePulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.28);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topHudPhase.isFinal {
+    animation: none;
   }
 }

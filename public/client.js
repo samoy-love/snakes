@@ -154,6 +154,8 @@ const I18N = {
     'hud.nick_placeholder': 'Ваш ник',
     'hud.save_nick': 'Сохранить ник',
     'hud.help': 'Управление: стрелки / WASD • Чат: Enter • Карта: M',
+    // Запрошен вёрсточным агентом для #helpTouch (data-i18n-pending в index.html).
+    'hud.help_touch': 'Свайп по экрану — движение',
     'hud.minimap': 'Открыть карту',
     'menu.your_look': 'Ваш облик',
     'menu.your_look_hint': 'Экипированное видят все игроки в матче',
@@ -192,6 +194,17 @@ const I18N = {
     'net.offline': 'Нет соединения',
     'net.rejoin_hint': 'Не выходи — вернём в матч сами.',
     'net.rejoined': 'Снова в матче',
+    'net.rejoin_failed': 'Не удалось вернуться в комнату',
+
+    'phase.expansion': 'Расширение',
+    'phase.conflict': 'Столкновения',
+    'phase.final': 'Финал',
+    'phase.expansion_desc': 'Больше бонусов на карте, охоты за головой пока нет',
+    'phase.conflict_desc': 'Обычные правила: захват, киллы, баунти',
+    'phase.final_desc': 'Захват территории приносит вдвое больше очков',
+    'phase.final_banner': 'ФИНАЛ ×2',
+    'phase.final_in': 'Финал через',
+    'phase.label': 'Фаза матча',
 
     'death.reason_prefix': 'Причина',
     'death.killed_by': 'Вас убил',
@@ -271,6 +284,8 @@ const I18N = {
     'cosmetics.err_not_enough_style': 'Недостаточно стиля',
     'cosmetics.err_unavailable': 'Магазин временно недоступен',
     'cosmetics.not_enough_short': 'Не хватает',
+    'cosmetics.need_more': 'Нужно ещё',
+    'cosmetics.need_more_hint': 'Стиль дают киллы, контракты, задания и захваты',
     'cosmetics.item_owned_unconfirmed': 'Куплено (не подтверждено)',
     'cosmetics.unconfirmed_hint': 'Данные не подтверждены сервером. Покупка будет доступна после подключения.',
     'cosmetics.no_connection': 'Нет связи с сервером — покупки недоступны',
@@ -464,6 +479,8 @@ const I18N = {
     'cosmetics.item_owned': 'Owned',
     'cosmetics.item_not_owned': 'Not owned',
     'cosmetics.not_enough_short': 'Need',
+    'cosmetics.need_more': 'Need',
+    'cosmetics.need_more_hint': 'Style comes from kills, contracts, dailies and captures',
     'cosmetics.item_owned_unconfirmed': 'Owned (unconfirmed)',
     'cosmetics.unconfirmed_hint': 'Not confirmed by the server yet. Purchases unlock once connected.',
     'cosmetics.no_connection': 'No server connection — purchases unavailable',
@@ -554,6 +571,7 @@ const I18N = {
     'hud.nick_placeholder': 'Your name',
     'hud.save_nick': 'Save name',
     'hud.help': 'Move: arrows / WASD • Chat: Enter • Map: M',
+    'hud.help_touch': 'Swipe anywhere to steer',
     'hud.minimap': 'Open map',
     'menu.your_look': 'Your look',
     'menu.your_look_hint': 'Everyone in the match sees what you equip',
@@ -592,6 +610,17 @@ const I18N = {
     'net.offline': 'Offline',
     'net.rejoin_hint': 'Stay put — we will put you back in the match.',
     'net.rejoined': 'Back in the match',
+    'net.rejoin_failed': 'Could not rejoin the room',
+
+    'phase.expansion': 'Expansion',
+    'phase.conflict': 'Conflict',
+    'phase.final': 'Final',
+    'phase.expansion_desc': 'More pickups on the map, bounty is off',
+    'phase.conflict_desc': 'Baseline rules: capture, kills, bounty',
+    'phase.final_desc': 'Territory capture pays double points',
+    'phase.final_banner': 'FINAL ×2',
+    'phase.final_in': 'Final in',
+    'phase.label': 'Match phase',
 
     'death.reason_prefix': 'Reason',
     'death.killed_by': 'Killed by',
@@ -1124,6 +1153,16 @@ function setLang(next) {
   try {
     renderDeathStats();
   } catch {}
+  // C3: подпись под облик (титул + ник) зависит от языка.
+  try {
+    renderMenuSkinPreview();
+  } catch {}
+  /* C4: магазин собирается в JS и на смену языка не пересобирался — вкладки,
+     «где это видно» и названия предметов оставались на прежнем языке прямо
+     посреди переведённого интерфейса. */
+  try {
+    if (cosmeticsOpen) syncCosmeticsUi();
+  } catch {}
   // K4: обе строки собираются в JS и раньше оставались на прежнем языке.
   try {
     renderDeathReason();
@@ -1337,8 +1376,17 @@ function cosSegTile(hsl, segId, cell) {
   const id = cosClampId(segId);
   if (id !== 1 && id !== 2) return null;
   const c = Math.max(1, Math.round(cell));
-  const key = `${id}|${hsl}|${c}`;
-  const hit = cosSegTileCache.get(key);
+  /* C10: раньше ключ склеивался строкой на КАЖДУЮ клетку следа каждый кадр.
+     Теперь два уровня: по цвету (готовая строка, без склейки) и по числовому
+     ключу id/размера. */
+  let byColor = cosSegTileCache.get(hsl);
+  if (!byColor) {
+    if (cosSegTileCache.size > 32) cosSegTileCache.clear();
+    byColor = new Map();
+    cosSegTileCache.set(hsl, byColor);
+  }
+  const key = id * 4096 + c;
+  const hit = byColor.get(key);
   if (hit) return hit;
 
   const blur = Math.max(6, c * 0.55);
@@ -1387,8 +1435,8 @@ function cosSegTile(hsl, segId, cell) {
   }
 
   const rec = { cv, pad };
-  if (cosSegTileCache.size > 64) cosSegTileCache.clear();
-  cosSegTileCache.set(key, rec);
+  if (byColor.size > 16) byColor.clear();
+  byColor.set(key, rec);
   return rec;
 }
 
@@ -1401,19 +1449,15 @@ function drawSegTile(ctx, px, py, cell, hsl, segId, seed, alpha, timeMs) {
   const a = Math.max(0, Math.min(1, Number(alpha)));
   if (!(a > 0.02)) return;
   const id = cosClampId(segId);
-  const rgb = hslToRgb(hsl);
-  const now = Number(timeMs) || 0;
-  const s = Number(seed) || 0;
 
   const x = px + 1;
   const y = py + 1;
   const w = Math.max(1, cell - 2);
   const h = Math.max(1, cell - 2);
-  const r = rgb[0];
-  const g = rgb[1];
-  const b = rgb[2];
 
   // K6: Неон и Полосы — из готовой оффскрин-плитки, один drawImage на клетку.
+  // C10: hslToRgb считался ДО этой ветки, и её результат в ней не нужен —
+  // на самом горячем пути игры это была лишняя работа на каждую клетку следа.
   if (id === 1 || id === 2) {
     const tile = cosSegTile(hsl, id, cell);
     if (tile) {
@@ -1452,6 +1496,13 @@ function drawSegTile(ctx, px, py, cell, hsl, segId, seed, alpha, timeMs) {
     ctx.restore();
     return;
   }
+
+  const rgb = hslToRgb(hsl);
+  const r = rgb[0];
+  const g = rgb[1];
+  const b = rgb[2];
+  const now = Number(timeMs) || 0;
+  const s = Number(seed) || 0;
 
   if (id === 3) {
     // Плазма: диагональный градиент + бегущая волна яркости.
@@ -2926,6 +2977,9 @@ const cosmeticsTabsEl = document.getElementById('cosmeticsTabs');
 const cosmeticsItemsEl = document.getElementById('cosmeticsItems');
 const cosmeticsPreview = document.getElementById('cosmeticsPreview');
 const cosmeticsHintEl = document.getElementById('cosmeticsHint');
+const cosmeticsWhereEl = document.getElementById('cosmeticsWhere');
+// C3: канвас панели «Ваш облик» в меню.
+const menuSkinPreviewEl = document.getElementById('menuSkinPreview');
 
 const cosmeticsStyleInfoBtn = document.getElementById('cosmeticsStyleInfoBtn');
 const cosmeticsFilterAllBtn = document.getElementById('cosmeticsFilterAll');
@@ -3044,10 +3098,125 @@ let roomId = null;
 let rejoinRoomId = null;
 let rejoinPending = false;
 let userLeftRoom = false;
+/* C9: у ожидания возврата не было таймаута, а разбирались только ответы
+   room_not_found / room_full. При любом другом ответе (или проглоченном join)
+   игрок навсегда оставался на замороженном игровом экране. */
+let rejoinTimeoutTimer = 0;
+const REJOIN_TIMEOUT_MS = 6000;
+
+function rejoinFinish() {
+  rejoinPending = false;
+  if (rejoinTimeoutTimer) {
+    clearTimeout(rejoinTimeoutTimer);
+    rejoinTimeoutTimer = 0;
+  }
+}
+
+// Возврат не состоялся: уводим в меню вместо замороженного игрового экрана.
+function rejoinGiveUp(msg) {
+  rejoinFinish();
+  rejoinRoomId = null;
+  roomId = null;
+  roomLimit = null;
+  started = false;
+  try {
+    document.body.classList.remove('inGame');
+  } catch {}
+  try {
+    updateRoomInfo();
+  } catch {}
+  try {
+    showMenuOverlay();
+  } catch {}
+  try {
+    addToast('⚠', msg || t('net.rejoin_failed'), null, null, { key: 'net_reconnect' });
+  } catch {}
+}
+
+function rejoinBegin() {
+  rejoinPending = true;
+  if (rejoinTimeoutTimer) clearTimeout(rejoinTimeoutTimer);
+  rejoinTimeoutTimer = setTimeout(() => {
+    rejoinTimeoutTimer = 0;
+    if (!rejoinPending) return;
+    rejoinGiveUp(null);
+  }, REJOIN_TIMEOUT_MS);
+}
 let roomLimit = null;
 
 let matchSeq = 0;
 let matchEndTick = 0;
+
+/* C2: арка матча (сервер, F4/G24). Фаза приезжает в init/matchStart и
+   отдельным JSON-сообщением matchPhase на каждой границе. До этого клиент
+   её не читал вовсе, и удвоение очков за захват в финале было невидимым. */
+const PHASE_EXPANSION = 0;
+const PHASE_CONFLICT = 1;
+const PHASE_FINAL = 2;
+let matchPhase = PHASE_EXPANSION;
+let matchPhaseUntil = 0;
+// Множитель очков за захват в финале. Сервер сообщает его в hello (finalMult).
+let matchFinalMult = 2;
+// Чтобы баннер «ФИНАЛ ×2» не повторялся при повторной доставке того же события.
+let matchPhaseBannerSeq = -1;
+
+function phaseKey(ph) {
+  return ph === PHASE_FINAL ? 'final' : ph === PHASE_CONFLICT ? 'conflict' : 'expansion';
+}
+
+function phaseLabel(ph) {
+  return t(`phase.${phaseKey(ph)}`);
+}
+
+function phaseDesc(ph) {
+  return t(`phase.${phaseKey(ph)}_desc`);
+}
+
+function phaseIcon(ph) {
+  return ph === PHASE_FINAL ? '🔥' : ph === PHASE_CONFLICT ? '⚔' : '🌱';
+}
+
+/* Применяет фазу. announce=true только для реальной смены фазы по ходу матча —
+   при входе в комнату посреди финала баннер не нужен. */
+function applyMatchPhase(ph, until, announce, seq) {
+  const next = Math.max(0, Math.min(2, Number(ph) || 0));
+  const prev = matchPhase;
+  matchPhase = next;
+  matchPhaseUntil = Math.max(0, Number(until) || 0);
+
+  if (announce && next === PHASE_FINAL && prev !== PHASE_FINAL && started) {
+    const s = Number.isFinite(Number(seq)) ? Number(seq) : matchSeq;
+    if (matchPhaseBannerSeq !== s) {
+      matchPhaseBannerSeq = s;
+      const title = t('phase.final_banner').replace('×2', `×${matchFinalMult}`);
+      if (!showBigBanner('🔥', title, phaseDesc(PHASE_FINAL), 'jackpot')) {
+        addToast('🔥', title, 'big', phaseDesc(PHASE_FINAL), {
+          tab: 'match',
+          key: 'match_phase_final',
+          prio: 'jackpot'
+        });
+      }
+      try {
+        sfx.jackpot?.();
+      } catch {}
+    }
+  } else if (announce && next !== prev && started) {
+    addToast(phaseIcon(next), `${t('phase.label')}: ${phaseLabel(next)}`, null, phaseDesc(next), {
+      tab: 'match',
+      key: 'match_phase',
+      prio: 'important'
+    });
+  }
+
+  try {
+    renderTopHud();
+  } catch {}
+}
+
+function onMatchPhase(d) {
+  if (!d || typeof d !== 'object') return;
+  applyMatchPhase(d.phase, d.until, true, d.seq);
+}
 let matchEnded = false;
 let matchResetAt = 0;
 
@@ -3068,6 +3237,8 @@ let youKills = 0;
 let youStreak = 0;
 
 const eventFeed = [];
+// C10: дедуп предупреждений о неизвестных типах событий.
+const unknownEventKindSeen = new Set();
 
 const toastByKey = new Map();
 const toastQueue = [];
@@ -3293,12 +3464,32 @@ let youContractGoal = 0;
 let youContractProgress = 0;
 let youContractUntil = 0;
 
-let youDaily1Type = 0;
-let youDaily1Goal = 0;
-let youDaily1Prog = 0;
-let youDaily2Type = 0;
-let youDaily2Goal = 0;
-let youDaily2Prog = 0;
+/* C7: слотов ежедневок у сервера три (sendDailyStateToPlayer шлёт 1, 2, 3), а
+   клиент знал только про два: `if (slot === 1) ... else ...` затирал второй
+   слот третьим, прогресс двух разных квестов писался в одни переменные и
+   скакал. Теперь хранилище по номеру слота — число слотов задаёт сервер. */
+const youDailies = new Map();
+
+function dailySlots() {
+  return Array.from(youDailies.keys()).sort((a, b) => a - b);
+}
+
+function dailySetAssign(slot, type, goal, prog) {
+  const s = Number(slot) || 0;
+  if (s <= 0) return;
+  youDailies.set(s, { type: Number(type) || 0, goal: Number(goal) || 0, prog: Number(prog) || 0 });
+}
+
+function dailySetProgress(slot, prog) {
+  const s = Number(slot) || 0;
+  const it = youDailies.get(s);
+  if (!it) {
+    // Прогресс раньше назначения (перезаход в комнату) — не теряем его.
+    youDailies.set(s, { type: 0, goal: 0, prog: Number(prog) || 0 });
+    return;
+  }
+  it.prog = Number(prog) || 0;
+}
 
 let fxEnabled = true;
 let fxIntensity = 0.85;
@@ -4132,6 +4323,25 @@ let camY = null;
 
 const VIEW_CELLS_X = 40;
 const VIEW_CELLS_Y = 28;
+/* C1: окно ROI сервера сдвинуто вперёд по ходу движения (main.go ROILookahead)
+   и снапится по ROIStep, поэтому «хвост» экрана вылезал за него и закрашивался
+   туманом даже при правильном масштабе. Ведём камеру к центру ROI, но не
+   дальше CAM_LEAD_MAX от полуэкрана — иначе игрок уезжает от центра. */
+const CAM_LEAD_MAX = 0.22;
+let camLeadX = 0;
+let camLeadY = 0;
+/* C1: запас, который вычитается из фактического ROI при подборе масштаба.
+   Сервер снапит окно по 8 клеток (main.go ROIStep) и сдвигает его на 12 клеток
+   вперёд по направлению движения (ROILookahead), то есть относительно игрока
+   окно гуляет на ~20 клеток. Полный запас (20) зажал бы телефон до 16 клеток
+   по ширине; 14 — компромисс между «поле видно» и «туман не лезет». */
+const ROI_MARGIN_CELLS = 14;
+// C10: переиспользуемая карта Path2D под пунктир остывающей территории.
+const coolEdgePaths = new Map();
+// C10: градиенты фона кадра зависят только от размеров вьюпорта.
+let bgGradCacheKey = '';
+let bgGradLinear = null;
+let bgGradVignette = null;
 
 let chatOpenUntil = 0;
 
@@ -4203,6 +4413,33 @@ const wavePeriodMs = (Math.PI * 2) / waveSpeed;
 
 const chatMessages = [];
 const nameById = new Map();
+/* C5: сервер шлёт английский вариант имени (nmEn) в nameUpdate и matchResult —
+   клиент его никогда не читал, и в EN топ-5 выглядел кириллицей. Единая точка
+   выбора имени: displayNameOf(). */
+const nameEnById = new Map();
+
+function displayNameOf(id, fallback) {
+  const n = Number(id);
+  if (lang === 'en') {
+    const en = nameEnById.get(n);
+    if (en) return en;
+  }
+  const ru = nameById.get(n);
+  if (ru) return ru;
+  return fallback != null ? fallback : String(id);
+}
+
+// Имя из произвольной записи сервера ({nm, nmEn}) — итоги матча, снапшот.
+function displayNameFrom(rec, id, fallback) {
+  if (rec) {
+    const en = typeof rec.nmEn === 'string' ? rec.nmEn.trim() : '';
+    const ru = typeof rec.nm === 'string' ? rec.nm.trim() : '';
+    if (lang === 'en' && en) return en;
+    if (ru) return ru;
+    if (en) return en;
+  }
+  return displayNameOf(id, fallback);
+}
 
 let botIds = new Set();
 
@@ -4818,13 +5055,10 @@ function onError(d) {
 
   // K7: если не удалось вернуться в свою комнату после обрыва — комнаты уже
   // нет или она заполнилась. Тогда честно отправляем в меню.
-  if (rejoinPending && (code === 'room_not_found' || code === 'room_full')) {
-    rejoinPending = false;
-    rejoinRoomId = null;
-    roomId = null;
-    updateRoomInfo();
-    showMenuOverlay();
-    addToast('⚠', msg, null);
+  // C9: любая ошибка во время ожидания возврата — повод честно уйти в меню,
+  // а не только room_not_found / room_full.
+  if (rejoinPending) {
+    rejoinGiveUp(msg);
     return;
   }
 
@@ -5071,9 +5305,14 @@ function ensureTopHudBountyEl() {
    ранжирует, и её в HUD не было вовсе (показывалась «Зона %», по которой не
    ранжируют). Слот #topHudPlace ждём от вёрсточного агента; пока его нет —
    создаём сами, слева в правой группе верхнего HUD. */
+// C10: getElementById зваться каждый кадр не должен — держим ссылку.
+let topHudPlaceElCache = null;
+let topHudPhaseElCache = null;
+
 function ensureTopHudPlaceEl() {
+  if (topHudPlaceElCache && topHudPlaceElCache.isConnected) return topHudPlaceElCache;
   let el = document.getElementById('topHudPlace');
-  if (el) return el;
+  if (el) return (topHudPlaceElCache = el);
   const host = topHudTimeEl?.parentElement || topHudKillsEl?.parentElement || null;
   if (!host) return null;
   try {
@@ -5086,7 +5325,30 @@ function ensureTopHudPlaceEl() {
   } catch {
     return null;
   }
-  return el;
+  return (topHudPlaceElCache = el);
+}
+
+/* C2: индикатор фазы матча — рядом с таймером. Слот #topHudPhase ждём от
+   вёрсточного агента; пока его нет — создаём сами и переиспользуем .topHudChip. */
+function ensureTopHudPhaseEl() {
+  if (topHudPhaseElCache && topHudPhaseElCache.isConnected) return topHudPhaseElCache;
+  let el = document.getElementById('topHudPhase');
+  if (el) return (topHudPhaseElCache = el);
+  const host = topHudTimeEl?.parentElement || topHudKillsEl?.parentElement || null;
+  if (!host) return null;
+  try {
+    el = document.createElement('span');
+    el.id = 'topHudPhase';
+    el.className = 'topHudPhase topHudChip';
+    if (topHudTimeEl && topHudTimeEl.parentElement === host) {
+      host.insertBefore(el, topHudTimeEl.nextSibling);
+    } else {
+      host.appendChild(el);
+    }
+  } catch {
+    return null;
+  }
+  return (topHudPhaseElCache = el);
 }
 
 function renderTopHud() {
@@ -5119,31 +5381,79 @@ function renderTopHud() {
     }
     topHudCellsEl.dataset.value = String(cells);
   }
-  if (topHudPctEl) topHudPctEl.textContent = `${pct.toFixed(1)}%`;
+  if (topHudPctEl) {
+    // C10: запись в DOM только при изменении строки. Сверяемся с самим узлом,
+    // а не с внешним кэшем: тот протух бы, если разметку пересоберут.
+    const pctTxt = `${pct.toFixed(1)}%`;
+    if (topHudPctEl.textContent !== pctTxt) topHudPctEl.textContent = pctTxt;
+  }
 
-  // K3: место и очки — прямо в верхнем HUD, на каждом кадре HUD-а.
+  // K3: место и очки — прямо в верхнем HUD.
+  // C10: computeTopSorted() копировала и сортировала массив каждый кадр, а
+  // textContent писался безусловно. Пересчёт — только когда меняется вход.
   {
     const placeEl = ensureTopHudPlaceEl();
     if (placeEl) {
-      const ordered = computeTopSorted(lastState.players);
-      const idx = ordered.findIndex((p) => p.n === you);
       const points = Number(me?.p) || 0;
-      const txt =
-        idx >= 0
-          ? `${t('hud.place_short')} ${idx + 1}/${ordered.length} · ${t('hud.points_short')} ${fmtInt(points)}`
-          : '';
-      placeEl.textContent = txt;
-      placeEl.classList.toggle('hidden', !txt);
-      placeEl.classList.toggle('isLeader', idx === 0);
-      try {
-        placeEl.title = `${t('death.place')} / ${t('death.points')}`;
-      } catch {}
+      const sig = `${lastPacketAt}|${points}|${lang}`;
+      if (renderTopHud._placeSig !== sig) {
+        renderTopHud._placeSig = sig;
+        const ordered = computeTopSorted(lastState.players);
+        const idx = ordered.findIndex((p) => p.n === you);
+        const txt =
+          idx >= 0
+            ? `${t('hud.place_short')} ${idx + 1}/${ordered.length} · ${t('hud.points_short')} ${fmtInt(points)}`
+            : '';
+        if (placeEl.textContent !== txt) {
+          placeEl.textContent = txt;
+          placeEl.classList.toggle('hidden', !txt);
+          try {
+            placeEl.title = `${t('death.place')} / ${t('death.points')}`;
+          } catch {}
+        }
+        placeEl.classList.toggle('isLeader', idx === 0);
+      }
+    }
+  }
+
+  /* C2: фаза матча рядом с таймером. Раньше игрок не видел арку вовсе —
+     включая удвоение очков за захват в последней фазе. */
+  {
+    const phaseEl = ensureTopHudPhaseEl();
+    if (phaseEl) {
+      const isFinal = matchPhase === PHASE_FINAL;
+      let txt = matchEnded
+        ? ''
+        : `${phaseIcon(matchPhase)} ${phaseLabel(matchPhase)}${isFinal ? ` ×${matchFinalMult}` : ''}`;
+      // Последние 20 секунд перед финалом — обратный отсчёт до ×N, чтобы игрок
+      // успел придержать крупный захват.
+      if (txt && !isFinal && matchPhase === PHASE_CONFLICT && matchPhaseUntil) {
+        // tickRemainSeconds отдаёт дробное число: без округления в чипе
+        // висело бы «Final in 12.698999999999979», да ещё и с записью в DOM
+        // на каждом кадре.
+        const raw = tickRemainSeconds(matchPhaseUntil);
+        const sec = raw == null ? null : Math.max(0, Math.ceil(raw));
+        if (sec != null && sec <= 20) {
+          txt = `🔥 ${t('phase.final_in')} ${sec}`;
+        }
+      }
+      if (phaseEl.textContent !== txt) {
+        phaseEl.textContent = txt;
+        phaseEl.classList.toggle('hidden', !txt);
+        phaseEl.classList.toggle('isFinal', isFinal);
+        try {
+          phaseEl.title = `${t('phase.label')}: ${phaseDesc(matchPhase)}`;
+        } catch {}
+      }
     }
   }
 
   if (topHudKillsEl) {
-    topHudKillsEl.textContent = obKills ? `⚔ ${youKills}` : '';
-    topHudKillsEl.classList.toggle('hidden', !obKills);
+    const killsTxt = obKills ? `⚔ ${youKills}` : '';
+    if (topHudKillsEl.textContent !== killsTxt) {
+      topHudKillsEl.textContent = killsTxt;
+      topHudKillsEl.classList.toggle('hidden', !obKills);
+    }
   }
   if (obKills) renderComboHud();
 
@@ -5151,20 +5461,22 @@ function renderTopHud() {
   // иначе самое важное («сколько до конца») обрезается по ellipsis.
   if (topHudTimeEl) {
     const rem = matchEndTick ? formatTickRemain(matchEndTick) : '';
-    topHudTimeEl.textContent = rem || '';
-    const sec = matchEndTick ? tickRemainSeconds(matchEndTick) : null;
-    topHudTimeEl.classList.toggle('isUrgent', sec != null && sec <= 30);
-    topHudTimeEl.classList.toggle('hidden', !rem);
-    try {
-      topHudTimeEl.title = t('hud.time_left');
-    } catch {}
+    if (topHudTimeEl.textContent !== rem) {
+      topHudTimeEl.textContent = rem || '';
+      const sec = matchEndTick ? tickRemainSeconds(matchEndTick) : null;
+      topHudTimeEl.classList.toggle('isUrgent', sec != null && sec <= 30);
+      topHudTimeEl.classList.toggle('hidden', !rem);
+      try {
+        topHudTimeEl.title = t('hud.time_left');
+      } catch {}
+    }
   }
 
   // I5: баунти — отдельный элемент, а не часть таймерной строки.
   const bountyEl = ensureTopHudBountyEl();
   if (bountyEl) {
     if (bountyTarget && obKills) {
-      const bn = nameById.get(bountyTarget) || String(bountyTarget);
+      const bn = displayNameOf(bountyTarget);
       const rem = formatTickRemain(bountyUntil);
       bountyEl.textContent = rem ? `🎯 ${bn} (${rem})` : `🎯 ${bn}`;
       bountyEl.classList.remove('hidden');
@@ -5240,7 +5552,7 @@ net = createNetModule({
     // комнату, а не заставляем искать её руками.
     if (rejoinRoomId != null) {
       const rid = rejoinRoomId;
-      rejoinPending = true;
+      rejoinBegin();
       send('join', { roomId: rid, mode: 'id' });
     }
   },
@@ -5275,6 +5587,14 @@ net = createNetModule({
       // A1: the server re-issues the profile token on every connect.
       if (typeof d?.token === 'string') setProfileToken(d.token);
       if (typeof d?.roomLimit === 'number') roomLimit = d.roomLimit;
+      // C9: соединение доказано на прикладном уровне — можно сбрасывать backoff.
+      try {
+        net.markHealthy?.();
+      } catch {}
+      // C2: параметры арки матча.
+      if (Number.isFinite(Number(d?.finalMult)) && Number(d.finalMult) > 0) {
+        matchFinalMult = Number(d.finalMult);
+      }
       if (d?.cosmeticsPrices && typeof d.cosmeticsPrices === 'object') {
         cosmeticsPrices = d.cosmeticsPrices;
       }
@@ -5301,6 +5621,9 @@ net = createNetModule({
       onMatchEnd(d);
     } else if (t === 'matchStart') {
       onMatchStart(d);
+    } else if (t === 'matchPhase') {
+      // C2: арка матча. Раньше сообщение молча проваливалось в конец цепочки.
+      onMatchPhase(d);
     } else if (t === 'error') {
       onError(d);
     } else if (t === 'chatInit') {
@@ -5309,6 +5632,8 @@ net = createNetModule({
       onChat(d);
     } else if (t === 'nameUpdate') {
       onNameUpdate(d);
+    } else if (t === 'nameUpdateBatch') {
+      onNameUpdateBatch(d);
     } else if (t === 'left') {
       onLeft(d);
     } else if (t === 'rttPong') {
@@ -5576,16 +5901,25 @@ function obMatchElapsed() {
    в режиме «первый матч» навсегда, поэтому у него свой, по входам. */
 const OB_ENTERED_KEY = 'snakes_ob_matches_v1';
 
+/* C10: значение читалось из localStorage по 3-4 раза за кадр (obTick +
+   obUnlocked + obSecondMatchPlus в renderTopHud) — ~180 синхронных чтений в
+   секунду. Кэшируем в памяти: писать в ключ может только этот же модуль. */
+let obEnteredCache = null;
+
 function obMatchesEntered() {
+  if (obEnteredCache != null) return obEnteredCache;
   try {
-    return Math.max(0, Number(localStorage.getItem(OB_ENTERED_KEY)) || 0);
+    obEnteredCache = Math.max(0, Number(localStorage.getItem(OB_ENTERED_KEY)) || 0);
+    return obEnteredCache;
   } catch {}
   return 99;
 }
 
 function obBumpMatchesEntered() {
+  const next = obMatchesEntered() + 1;
+  obEnteredCache = next;
   try {
-    localStorage.setItem(OB_ENTERED_KEY, String(obMatchesEntered() + 1));
+    localStorage.setItem(OB_ENTERED_KEY, String(next));
   } catch {}
 }
 
@@ -5624,9 +5958,11 @@ function obGuideActive() {
   return !hasFirstCapture() && obMatchesEntered() <= 2;
 }
 
-function obResetMatch() {
+/* C9: возврат после обрыва связи — не «новый матч». Раньше два разрыва Wi-Fi
+   у новичка досрочно выключали весь онбординг. */
+function obResetMatch(countEntry = true) {
   obMatchStartAt = performance.now();
-  obBumpMatchesEntered();
+  if (countEntry) obBumpMatchesEntered();
 }
 
 // Вызывается из renderTopHud (каждый кадр), поэтому дешёвая: сравнение чисел.
@@ -5746,7 +6082,8 @@ function renderMatchResults(results) {
     .slice(0, 32)
     .map((r, i) => {
       const n = Number(r?.n) || 0;
-      const nm = String(r?.nm || n || '—');
+      // C5: итоги матча приходят с nmEn — в EN показываем его.
+      const nm = String(displayNameFrom(r, n, n || '—'));
       const p = Number(r?.p) || 0;
       const peak = resultPeak(r);
       const k = Number(r?.k) || 0;
@@ -5995,6 +6332,8 @@ function resetClientForNewMatch() {
     if (killfeedEl) killfeedEl.replaceChildren();
     if (eventToastsEl) eventToastsEl.replaceChildren();
   } catch {}
+  // C8: DOM киллфида очищен вручную — подпись обязана протухнуть.
+  renderKillfeed._sig = null;
 
   lastState = null;
   prevPlayers = new Map();
@@ -6003,6 +6342,8 @@ function resetClientForNewMatch() {
   lastPacketAt = performance.now();
   camX = null;
   camY = null;
+  camLeadX = 0;
+  camLeadY = 0;
 
   shakeX = 0;
   shakeY = 0;
@@ -6066,6 +6407,10 @@ function onMatchStart(d) {
   matchEndTick = Number(d?.endTick) || 0;
   matchResetAt = 0;
   matchEnded = false;
+  // C2: новый матч всегда начинается с фазы расширения; сервер дублирует её в
+  // payload matchStart.
+  matchPhaseBannerSeq = -1;
+  applyMatchPhase(d?.phase ?? PHASE_EXPANSION, d?.phaseUntil, false, matchSeq);
 
   matchContinuePending = false;
   if (matchContinueTimeout) {
@@ -6155,10 +6500,13 @@ function showMenuOverlay() {
   if (topHudEl) topHudEl.setAttribute('aria-hidden', 'true');
   youStreak = 0;
   syncOverlayUiState();
+  // C3: панель «Ваш облик» — рисуем сразу, как только меню показано.
+  scheduleMenuSkinPreview();
 }
 
 function hideMenuOverlay() {
   if (menuOverlay) menuOverlay.classList.add('hidden');
+  stopMenuSkinPreview();
   overlayManager.close('menu');
   syncOverlayUiState();
 }
@@ -6167,7 +6515,7 @@ leaveBtn?.addEventListener('click', () => {
   // K7: явный выход — реконнект в эту комнату больше не нужен.
   userLeftRoom = true;
   rejoinRoomId = null;
-  rejoinPending = false;
+  rejoinFinish();
   wsSend('leave', {});
   roomId = null;
   roomLimit = null;
@@ -7457,7 +7805,7 @@ function buildChatLineElement(m) {
 
   const nameEl = document.createElement('div');
   nameEl.className = 'chatName';
-  nameEl.textContent = nameById.get(m?.n) || String(m?.n);
+  nameEl.textContent = displayNameOf(m?.n);
 
   const timeEl = document.createElement('div');
   timeEl.className = 'chatTime';
@@ -7623,6 +7971,10 @@ function scheduleResize() {
   resizeRaf = requestAnimationFrame(() => {
     resizeRaf = 0;
     resize();
+    // C3: панель «Ваш облик» тянется по ширине колонки меню.
+    try {
+      renderMenuSkinPreview();
+    } catch {}
   });
 }
 
@@ -7869,8 +8221,9 @@ function onInit(msg) {
   // K7: вход в комнату состоялся — реконнект-цель обновлена, флаг «ушёл сам» снят.
   rejoinRoomId = roomId;
   userLeftRoom = false;
+  const wasRejoin = rejoinPending;
   if (rejoinPending) {
-    rejoinPending = false;
+    rejoinFinish();
     addToast('✅', t('net.rejoined'), null, null, { key: 'net_reconnect' });
   }
 
@@ -7878,6 +8231,9 @@ function onInit(msg) {
   matchEndTick = Number(msg?.matchEnd) || 0;
   matchEnded = !!msg?.matchEnded;
   matchResetAt = Number(msg?.matchReset) || 0;
+  // C2: фаза приходит прямо в init — при входе посреди матча баннер не нужен.
+  matchPhaseBannerSeq = Number(msg?.phase) === PHASE_FINAL ? matchSeq : -1;
+  applyMatchPhase(msg?.phase, msg?.phaseUntil, false, matchSeq);
   updateRoomInfo();
 
   matchContinuePending = false;
@@ -7909,7 +8265,8 @@ function onInit(msg) {
   // F13: раньше подсказка гасилась прямо здесь, ещё до того как игрок её прочитал.
   // Теперь её снимает первое реальное действие (см. setDir).
   syncMenuOnboardingUi();
-  obResetMatch();
+  // C9: реконнект не считается новым входом в матч.
+  obResetMatch(!wasRejoin);
   obAnnounceShop();
   try {
     document.body.classList.add('inGame');
@@ -8053,6 +8410,10 @@ function onCosmetics(msg) {
   syncCosmeticsUi();
 
   renderMetaHud();
+  // C3: инвентарь/экипировка обновились — перерисовываем «Ваш облик».
+  try {
+    renderMenuSkinPreview();
+  } catch {}
 }
 
 function cosmeticsDesiredLoad() {
@@ -8890,6 +9251,16 @@ function syncCosmeticsUi() {
     }
   }
 
+  /* C4: запись «где это видно» стояла НИЖЕ ветки титулов, поэтому на вкладке
+     «Титулы» элемент сохранял описание предыдущей категории — в EN там
+     оставалась русская строка посреди английского магазина. Пишем до ветки,
+     для любой категории, включая титулы.
+     «Где это видно» — свойство КАТЕГОРИИ, а не предмета: показываем один раз
+     под вкладками; пустая строка скрывается стилями через :empty. */
+  try {
+    if (cosmeticsWhereEl) cosmeticsWhereEl.textContent = t(`cosmetics.where_${cosmeticsCat}`) || '';
+  } catch {}
+
   if (cosmeticsItemsEl && cosmeticsCat === 'title') {
     renderCosmeticsTitles();
     renderCosmeticsPreview();
@@ -8899,13 +9270,6 @@ function syncCosmeticsUi() {
 
   if (cosmeticsItemsEl) {
     cosmeticsItemsEl.classList.remove('isTitles');
-    // «Где это видно» — свойство КАТЕГОРИИ, а не предмета: раньше одна и та же
-    // строка дублировалась на всех восьми карточках. Показываем один раз под
-    // вкладками; пустая строка скрывается стилями через :empty.
-    try {
-      const whereEl = document.getElementById('cosmeticsWhere');
-      if (whereEl) whereEl.textContent = t(`cosmetics.where_${cosmeticsCat}`) || '';
-    } catch {}
     const mask = cosmeticsMaskForCat(cosmeticsCat);
     const eq = cosmeticsEqForCat(cosmeticsCat);
     // C9: until the server confirms the inventory, everything we show is provisional.
@@ -8980,35 +9344,31 @@ function syncCosmeticsUi() {
       left.className = 'cosmeticsItemLeft';
       const titleEl = document.createElement('div');
       titleEl.className = 'cosmeticsItemTitle';
-      titleEl.textContent = `${cosmeticsLabel(cosmeticsCat)}: ${variant}`;
+      // C11: префикс «Территория:» повторялся на всех восьми названиях внутри
+      // одной вкладки — категория уже написана на самой вкладке.
+      titleEl.textContent = variant;
 
-      // D11: бейдж редкости, тир вычислен из цены.
-      const badge = document.createElement('span');
-      badge.className = `tierBadge tier${tier.charAt(0).toUpperCase()}${tier.slice(1)}`;
-      badge.textContent = cosmeticsTierLabel(tier);
-      titleEl.appendChild(document.createTextNode(' '));
-      titleEl.appendChild(badge);
-
-      const sub = document.createElement('div');
-      sub.className = 'cosmeticsItemSub';
+      /* C11: три узла на карточку создавались и прятались CSS-ом —
+         .tierBadge (редкость уже названа разделителем группы),
+         .cosmeticsItemWhere (то же самое стоит один раз в шапке категории,
+         #cosmeticsWhere) и .cosmeticsItemSub.isBlocked («до покупки N» дублирует
+         ценник и подпись кнопки). Больше их не создаём вовсе. */
       const missing = Math.max(0, Math.ceil(price - balance));
+      let sub = null;
       if (!owned && missing > 0) {
-        sub.textContent = `${t('cosmetics.missing_prefix')} ${fmtInt(missing)} ${t('cosmetics.style_points')}`;
-        sub.classList.add('isBlocked');
+        // текста нет: он целиком в ценнике и на кнопке
       } else if (owned && !confirmed) {
+        sub = document.createElement('div');
+        sub.className = 'cosmeticsItemSub isUnconfirmed';
         sub.textContent = t('cosmetics.item_owned_unconfirmed');
-        sub.classList.add('isUnconfirmed');
-      } else {
-        sub.textContent = equipped ? t('cosmetics.item_equipped') : owned ? t('cosmetics.item_owned') : t('cosmetics.item_not_owned');
+      } else if (!equipped) {
+        // C11: «Экипировано» стояло и в подписи, и на кнопке — оставляем кнопку.
+        sub = document.createElement('div');
+        sub.className = 'cosmeticsItemSub';
+        sub.textContent = owned ? t('cosmetics.item_owned') : t('cosmetics.item_not_owned');
       }
       left.appendChild(titleEl);
-      // Короткое описание: где именно предмет виден. Закрывает претензию
-      // «не понимаю, за что плачу».
-      const where = document.createElement('div');
-      where.className = 'cosmeticsItemWhere';
-      where.textContent = t(`cosmetics.where_${cosmeticsCat}`);
-      left.appendChild(where);
-      left.appendChild(sub);
+      if (sub) left.appendChild(sub);
 
       // D11: прогресс-бар накопления на заблокированном товаре.
       if (!owned && price > 0 && missing > 0) {
@@ -9040,19 +9400,37 @@ function syncCosmeticsUi() {
 
         const buy = document.createElement('button');
         buy.type = 'button';
-        // C2/C9: buying needs a live socket and server-confirmed state.
-        buy.disabled = poor || pending || !online || !confirmed || !!pendingCosmeticsOp;
-        buy.className = buy.disabled && !pending ? 'btnSecondary' : 'btnPrimary';
+        /* C2/C9: buying needs a live socket and server-confirmed state.
+           C12: нехватка валюты БОЛЬШЕ не делает кнопку disabled — раньше клик
+           не давал вообще ничего. Кнопка живая, клик объясняет, сколько не
+           хватает, и раскрывает блок «Как заработать». */
+        buy.disabled = pending || !online || !confirmed || !!pendingCosmeticsOp;
+        buy.className = buy.disabled || poor ? 'btnSecondary' : 'btnPrimary';
+        if (poor) buy.classList.add('isPoor');
         // C14: show exactly how much is missing.
         buy.textContent = poor ? `${t('cosmetics.not_enough_short')} ${fmtInt(missing)} ✨` : t('cosmetics.buy');
         if (pending) buy.classList.add('isLoading');
         if (!online) buy.title = t('cosmetics.no_connection');
         else if (!confirmed) buy.title = t('cosmetics.unconfirmed_hint');
+        else if (poor) buy.title = `${t('cosmetics.need_more')} ${fmtInt(missing)} ✨`;
 
         buy.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
           if (pendingCosmeticsOp) return;
+          if (poor) {
+            // C12: сообщение + подсказка, где взять, + раскрытие «Как заработать».
+            setCosmeticsStatus(
+              () => `${t('cosmetics.need_more')} ${fmtInt(missing)} ✨ — ${t('cosmetics.need_more_hint')}`,
+              'error'
+            );
+            if (!cosmeticsEarnExpanded) cosmeticsEarnExpanded = true;
+            syncCosmeticsUi();
+            try {
+              cosmeticsEarnStyleEl?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+            } catch {}
+            return;
+          }
           if (!cosmeticsServerReady()) {
             setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'error');
             cosmeticsBuyLocal(cat, id);
@@ -9205,8 +9583,9 @@ function renderCosmeticsPreview() {
 
   const setHint = () => {
     if (!cosmeticsHintEl) return;
-    const where = t(`cosmetics.where_${cosmeticsCat}`);
-    cosmeticsHintEl.textContent = `${cosmeticsLabel(cosmeticsCat)}: ${cosmeticsVariantName(cosmeticsCat, selId)} — ${where}`;
+    // C11: раньше сюда дописывалось «где это видно» — слово в слово то же, что
+    // уже стоит в #cosmeticsWhere прямо над списком. Оставляем только предмет.
+    cosmeticsHintEl.textContent = `${cosmeticsLabel(cosmeticsCat)}: ${cosmeticsVariantName(cosmeticsCat, selId)}`;
   };
 
   if (cosmeticsCat === 'frame') {
@@ -9393,6 +9772,114 @@ function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, he
     drawSegTile(ctx2, startX - i * scell - scell / 2, headY - scell / 2, scell, base, segId, i + 17, 0.88, now);
   }
   drawHead(ctx2, headX, headY, scell, c, headId, 1, 0, now);
+}
+
+/* C3 — #menuSkinPreview -----------------------------------------------------
+   Панель «Ваш облик» в меню висела пустым канвасом: имя элемента не
+   встречалось в JS ни разу, 0 непрозрачных пикселей. Рисуем экипированный
+   облик теми же примитивами, что и игра с магазином (drawTerrTile через
+   drawCosmeticsZone, drawSegTile, drawHead, drawNamePlate, drawCaptureFx),
+   поэтому расхождений между меню, магазином и полем быть не может. */
+let menuSkinAnimRaf = 0;
+let menuSkinAnimAt = 0;
+
+function menuSkinPreviewVisible() {
+  if (!menuSkinPreviewEl) return false;
+  if (!menuOverlay || menuOverlay.classList.contains('hidden')) return false;
+  // Панель может быть скрыта по ширине экрана — тогда рисовать нечего.
+  return menuSkinPreviewEl.clientWidth > 0 && menuSkinPreviewEl.clientHeight > 0;
+}
+
+function renderMenuSkinPreview() {
+  if (!menuSkinPreviewVisible()) return;
+  const cssW = Math.max(180, Math.round(menuSkinPreviewEl.clientWidth || 320));
+  const cssH = Math.max(120, Math.round(menuSkinPreviewEl.clientHeight || 200));
+  // DPR учитывается внутри cosPrepCanvas — тот же путь, что и у превью магазина.
+  const c = cosPrepCanvas(menuSkinPreviewEl, cssW, cssH);
+  if (!c) return;
+
+  const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  const now = reduceMotion ? 0 : performance.now();
+  const baseC = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
+
+  const pad = Math.round(Math.min(cssW, cssH) * 0.07);
+  const fx = pad;
+  const fy = pad;
+  const fw = cssW - pad * 2;
+  const fh = cssH - pad * 2;
+  drawCosmeticsFieldBackdrop(c, fx, fy, fw, fh);
+
+  const scell = Math.max(12, Math.round(Math.min(fw, fh) * 0.13));
+
+  // Территория — справа, змейка идёт к ней слева.
+  const zone = {
+    x: Math.round(fx + fw * 0.52),
+    y: Math.round(fy + fh * 0.30),
+    w: Math.round(fw * 0.40),
+    h: Math.round(fh * 0.56)
+  };
+  drawCosmeticsZone(c, zone, you, 0.58, youCosEqTerr, scell);
+
+  const period = 2600;
+  const p = reduceMotion ? 0.45 : (now % period) / period;
+  const hx = fx + fw * (0.16 + 0.26 * Math.min(1, p / 0.55));
+  const hy = Math.round(fy + fh * 0.62);
+
+  drawCosmeticsSnake(c, hx, hy, scell, you, youCosEqSeg, youCosEqHead, baseC, 6);
+
+  const plateFont = Math.max(11, Math.round(scell * 0.62));
+  // Ник берём живой: storedName снимается один раз при загрузке модуля и
+  // отстаёт, если игрок только что поменял имя в меню.
+  const liveName = (menuNameInput?.value || '').trim() || nameById.get(you) || storedName;
+  const label = `${cosTitlePrefix(youTitleId)}${liveName || t('cosmetics.balance_you')}`;
+  drawNamePlate(c, label, hx, hy - scell * 0.95, baseC, youCosEqNameplate, 0.95, plateFont, now);
+
+  // Короткая вспышка захвата в цикле — иначе купленный эффект в меню не виден.
+  const burstStart = 0.62;
+  const burstP = p < burstStart ? -1 : (p - burstStart) / (650 / period);
+  if (burstP >= 0 && burstP <= 1) {
+    drawCaptureFx(
+      c,
+      zone.x + zone.w / 2,
+      zone.y + zone.h / 2,
+      Math.max(16, Math.round(scell * 1.3)),
+      baseC,
+      youCosEqCaptureFx,
+      burstP
+    );
+  }
+}
+
+function menuSkinPreviewTick(ts) {
+  menuSkinAnimRaf = 0;
+  if (!menuSkinPreviewVisible()) return;
+  // ~24 fps: панель декоративная, гнать её на 60 незачем.
+  if (!menuSkinAnimAt || ts - menuSkinAnimAt >= 40) {
+    menuSkinAnimAt = ts;
+    try {
+      renderMenuSkinPreview();
+    } catch {}
+  }
+  menuSkinAnimRaf = requestAnimationFrame(menuSkinPreviewTick);
+}
+
+function scheduleMenuSkinPreview() {
+  if (!menuSkinPreviewVisible()) return;
+  try {
+    renderMenuSkinPreview();
+  } catch {}
+  if (menuSkinAnimRaf) return;
+  const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  if (reduceMotion) return;
+  menuSkinAnimRaf = requestAnimationFrame(menuSkinPreviewTick);
+}
+
+function stopMenuSkinPreview() {
+  if (!menuSkinAnimRaf) return;
+  try {
+    cancelAnimationFrame(menuSkinAnimRaf);
+  } catch {}
+  menuSkinAnimRaf = 0;
 }
 
 function cosmeticsFrameSampleName(i) {
@@ -9584,7 +10071,11 @@ const EN = {
     4: { name: 'Contract' },
     5: { name: 'Daily' },
     6: { name: 'Win' },
-    7: { name: 'Top-5' }
+    7: { name: 'Top-5' },
+    // C6: сервер шлёт до 10 причин, 8..10 оставались без названий.
+    8: { name: 'Capture' },
+    9: { name: 'Achievement' },
+    10: { name: 'Survivor' }
   }
 };
 
@@ -9637,7 +10128,11 @@ const RU = {
     4: { name: 'Контракт' },
     5: { name: 'Задание' },
     6: { name: 'Победа' },
-    7: { name: 'Топ-5' }
+    7: { name: 'Топ-5' },
+    // C6: сервер шлёт до 10 причин, 8..10 оставались без названий.
+    8: { name: 'Захват' },
+    9: { name: 'Достижение' },
+    10: { name: 'Дожил до конца' }
   }
 };
 
@@ -10120,7 +10615,15 @@ function pushEventFeed(text, kind) {
   const s = String(text || '').trim();
   if (!s) return;
   const k = String(kind || '');
-  eventFeed.unshift({ t, text: s, k });
+  /* C8: подряд идущие одинаковые строки читались как зависший лог. Схлопываем
+     их в одну с множителем ×N (окно 10 с — дальше строка всё равно истечёт). */
+  const head = eventFeed[0];
+  if (head && head.text === s && head.k === k && t - head.t < 10000) {
+    head.n = (head.n || 1) + 1;
+    head.t = t;
+    return;
+  }
+  eventFeed.unshift({ t, text: s, k, n: 1 });
   if (eventFeed.length > 64) eventFeed.length = 64;
 }
 
@@ -10134,16 +10637,24 @@ function renderKillfeed() {
   const small = window.innerWidth <= 720;
   const maxAge = small ? 8000 : 12000;
   const maxLines = small ? 4 : 6;
-  const lines = eventFeed
-    .filter((e) => now - e.t < maxAge)
-    .slice(0, maxLines)
-    .map((e) => {
-      const div = document.createElement('div');
-      const k = String(e?.k || '').trim();
-      div.className = k ? `killLine killLine${k}` : 'killLine';
-      div.textContent = e.text;
-      return div;
-    });
+  const visible = eventFeed.filter((e) => now - e.t < maxAge).slice(0, maxLines);
+  /* C8: замер до правки — 195 узлов за 12 с. Половина пересборок приходилась на
+     пакеты, где видимый текст не менялся вообще: killfeedDirty выставляется на
+     любое событие, а строк на экране всего 4-6. Сверяем подпись и не трогаем
+     DOM, когда рисовать нечего нового. */
+  const sig = visible.map((e) => `${e.k}${e.text}${e.n || 1}`).join('');
+  if (renderKillfeed._sig === sig) return;
+  renderKillfeed._sig = sig;
+
+  const lines = visible.map((e) => {
+    const div = document.createElement('div');
+    const k = String(e?.k || '').trim();
+    div.className = k ? `killLine killLine${k}` : 'killLine';
+    // C8: множитель схлопнутых повторов.
+    const rep = Number(e?.n) || 1;
+    div.textContent = rep > 1 ? `${e.text} ×${rep}` : e.text;
+    return div;
+  });
   killfeedEl.replaceChildren(...lines);
 
   try {
@@ -10231,7 +10742,7 @@ function renderMetaHud() {
     }
   }
   if (bountyTarget && obKills) {
-    const bn = nameById.get(bountyTarget) || String(bountyTarget);
+    const bn = displayNameOf(bountyTarget);
     const rem = formatTickRemain(bountyUntil);
     const sec = tickRemainSeconds(bountyUntil);
     addRow(matchRows, infoPack().labels.bounty, rem ? `${bn} (${rem})` : bn, sec != null && sec <= 6);
@@ -10268,8 +10779,12 @@ function renderMetaHud() {
   // Ежедневки — со второго матча: в первом они только добавляют шума.
   const dailyRows = [];
   if (obDaily) {
-    if (youDaily1Type) addRow(dailyRows, dailyLabel(youDaily1Type), `${youDaily1Prog}/${youDaily1Goal}`);
-    if (youDaily2Type) addRow(dailyRows, dailyLabel(youDaily2Type), `${youDaily2Prog}/${youDaily2Goal}`);
+    // C7: все слоты, сколько бы их ни прислал сервер.
+    for (const s of dailySlots()) {
+      const it = youDailies.get(s);
+      if (!it || !it.type) continue;
+      addRow(dailyRows, dailyLabel(it.type), `${it.prog}/${it.goal}`);
+    }
   }
 
   const detailSections = [];
@@ -10484,7 +10999,7 @@ function handleStateBinary(buf) {
         cosSeg,
         cosNameplate,
         cosFrame,
-        nm: nameById.get(n) || (bot ? botDisplayName(n) : `Игрок ${n}`),
+        nm: displayNameOf(n, bot ? botDisplayName(n) : `${t('leaderboard.player')} ${n}`),
         b: 0
       });
     }
@@ -10598,7 +11113,7 @@ function handleStateBinary(buf) {
         cosSeg,
         cosNameplate,
         cosFrame,
-        nm: nameById.get(n) || (bot ? botDisplayName(n) : `Игрок ${n}`),
+        nm: displayNameOf(n, bot ? botDisplayName(n) : `${t('leaderboard.player')} ${n}`),
         b: 0
       });
     }
@@ -10730,8 +11245,8 @@ function handleStateBinary(buf) {
         o += 2;
         const ey = dv.getUint16(o, true);
         o += 2;
-        const vn = nameById.get(victim) || String(victim);
-        const kn = killer ? nameById.get(killer) || String(killer) : '';
+        const vn = displayNameOf(victim);
+        const kn = killer ? displayNameOf(killer) : '';
 
         if (victim === you) {
           lastDeathInfo = { killer, killerName: kn, reason };
@@ -10791,7 +11306,7 @@ function handleStateBinary(buf) {
         o += 4;
         const fxId = dv.getUint8(o);
         o += 1;
-        const pn = nameById.get(pid) || String(pid);
+        const pn = displayNameOf(pid);
         pushEventFeed(`${pn} ${lang === 'en' ? 'captured' : 'захватил'} +${delta} ${lang === 'en' ? 'zone' : 'зоны'}`, 'Capture');
         addFxBurst(ex, ey, `cap${Math.max(0, Math.min(7, Number(fxId) || 0))}`, { pid });
         if (pid === you) {
@@ -10842,7 +11357,7 @@ function handleStateBinary(buf) {
         o += 2;
         const ey = dv.getUint16(o, true);
         o += 2;
-        const pn = nameById.get(pid) || String(pid);
+        const pn = displayNameOf(pid);
         pushEventFeed(`${pn} ${lang === 'en' ? 'reclaimed' : 'вернул'} +${cells}`, 'Reclaim');
         addFxBurst(ex, ey, `cap${cosClampId(cosCaptureFxByPlayer(pid))}`, { pid });
         if (pid === you && cells > 0) {
@@ -10897,19 +11412,13 @@ function handleStateBinary(buf) {
         const type = (packed >>> 16) & 0xffff;
         const prog = packed & 0xffff;
         if (pid === you) {
-          if (slot === 1) {
-            youDaily1Type = type;
-            youDaily1Goal = goal;
-            youDaily1Prog = prog;
-          } else {
-            youDaily2Type = type;
-            youDaily2Goal = goal;
-            youDaily2Prog = prog;
-          }
+          dailySetAssign(slot, type, goal, prog);
           bumpMatchTabBadge();
           // J16: назначение ежедневки было беззвучным.
           sfx.dailyAssigned();
-          addToast('📅', `${infoPack().labels.daily}: ${dailyLabel(type)}`, 'big', infoDesc(infoPack().dailies, type, ''), { tab: 'match', key: `daily_assign_${type}`, prio: 'important' });
+          // C7: ключ тоста включает слот — иначе два слота с одним типом
+          // схлопывались в один тост и одно из заданий оставалось невидимым.
+          addToast('📅', `${infoPack().labels.daily}: ${dailyLabel(type)}`, 'big', infoDesc(infoPack().dailies, type, ''), { tab: 'match', key: `daily_assign_${slot}_${type}`, prio: 'important' });
         }
         continue;
       }
@@ -10923,8 +11432,7 @@ function handleStateBinary(buf) {
         const prog = dv.getUint16(o, true);
         o += 2;
         if (pid === you) {
-          if (slot === 1) youDaily1Prog = prog;
-          else youDaily2Prog = prog;
+          dailySetProgress(slot, prog);
         }
         continue;
       }
@@ -10937,7 +11445,11 @@ function handleStateBinary(buf) {
         o += 1;
         if (pid === you) {
           bumpMatchTabBadge();
-          addToast('🏁', infoPack().labels.dailyComplete, 'big', '', { tab: 'match', key: 'daily_complete', prio: 'important' });
+          // C7: тост называет конкретное задание и различает слоты.
+          const doneIt = youDailies.get(Number(slot) || 0);
+          if (doneIt) doneIt.prog = doneIt.goal || doneIt.prog;
+          const doneName = doneIt?.type ? dailyLabel(doneIt.type) : '';
+          addToast('🏁', infoPack().labels.dailyComplete, 'big', doneName, { tab: 'match', key: `daily_complete_${slot}`, prio: 'important' });
           sfx.dailyDone();
           comboBump();
         }
@@ -10950,7 +11462,7 @@ function handleStateBinary(buf) {
         o += 2;
         const achv = dv.getUint8(o);
         o += 1;
-        const pn = nameById.get(pid) || String(pid);
+        const pn = displayNameOf(pid);
         pushEventFeed(`${pn} — ${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'Achv');
         if (pid === you) {
           bumpMatchTabBadge();
@@ -10976,7 +11488,7 @@ function handleStateBinary(buf) {
         o += 2;
         const until = dv.getUint32(o, true);
         o += 4;
-        const pn = nameById.get(pid) || String(pid);
+        const pn = displayNameOf(pid);
         pushEventFeed(`${pn} — ${infoPack().labels.contract}: ${contractLabel(type) || type} ${goal}`, 'Contract');
         if (pid === you) {
           youContractType = type;
@@ -11013,7 +11525,7 @@ function handleStateBinary(buf) {
         o += 2;
         const type = dv.getUint8(o);
         o += 1;
-        const pn = nameById.get(pid) || String(pid);
+        const pn = displayNameOf(pid);
         pushEventFeed(`${pn} — ${infoPack().labels.contractComplete}: ${contractLabel(type) || type}`, 'Contract');
         if (pid === you) {
           youContractProgress = youContractGoal;
@@ -11036,9 +11548,11 @@ function handleStateBinary(buf) {
         o += 4;
         const reason = dv.getUint8(o);
         o += 1;
-        const pn = nameById.get(pid) || String(pid);
-        pushEventFeed(`${pn} +${delta} ${t('cosmetics.style_points')} (${styleLabel(reason)})`, 'Style');
+        /* C8: начисления Стиля чужих игроков давали вторую строку на каждый
+           захват бота — при одном человеке в комнате это ~16 строк/с про чужую
+           валюту, ценности для игрока ноль. В ленту идёт только свой Стиль. */
         if (pid === you) {
+          pushEventFeed(`+${delta} ${t('cosmetics.style_points')} (${styleLabel(reason)})`, 'Style');
           if (delta > 0) matchStyleEarned += delta;
           setYouStyle(total);
           bumpMatchTabBadge();
@@ -11075,8 +11589,8 @@ function handleStateBinary(buf) {
         o += 2;
         const victim = dv.getUint16(o, true);
         o += 2;
-        const kn = nameById.get(killer) || String(killer);
-        const vn = nameById.get(victim) || String(victim);
+        const kn = displayNameOf(killer);
+        const vn = displayNameOf(victim);
         pushEventFeed(`${lang === 'en' ? 'REVENGE' : 'МЕСТЬ'}: ${kn} -> ${vn}`, 'Revenge');
         if (killer === you) {
           bumpMatchTabBadge();
@@ -11096,7 +11610,7 @@ function handleStateBinary(buf) {
         o += 2;
         const streak = dv.getUint8(o);
         o += 1;
-        const pn = nameById.get(pid) || String(pid);
+        const pn = displayNameOf(pid);
         pushEventFeed(`${pn} — ${t('event.streak')} x${streak}`, 'Streak');
         if (pid === you) {
           youStreak = streak;
@@ -11127,7 +11641,7 @@ function handleStateBinary(buf) {
         o += 4;
         bountyTarget = target;
         bountyUntil = until;
-        const tn = nameById.get(target) || String(target);
+        const tn = displayNameOf(target);
         pushEventFeed(`${t('event.bounty')}: ${tn}`, 'Bounty');
 
         bumpMatchTabBadge();
@@ -11146,8 +11660,8 @@ function handleStateBinary(buf) {
         o += 2;
         const victim = dv.getUint16(o, true);
         o += 2;
-        const kn = nameById.get(killer) || String(killer);
-        const vn = nameById.get(victim) || String(victim);
+        const kn = displayNameOf(killer);
+        const vn = displayNameOf(victim);
         pushEventFeed(`${t('event.bounty_claimed')}: ${kn} -> ${vn}`, 'Bounty');
 
         bumpMatchTabBadge();
@@ -11195,7 +11709,7 @@ function handleStateBinary(buf) {
         const ey = dv.getUint16(o, true);
         o += 2;
         powerUps.delete(id);
-        const pn = nameById.get(pid) || String(pid);
+        const pn = displayNameOf(pid);
         pushEventFeed(`${pn} ${t('event.picked')}: ${powerupLabel(type)}`, 'Pickup');
 
         if (pid === you) {
@@ -11228,7 +11742,7 @@ function handleStateBinary(buf) {
         o += 2;
         const ey = dv.getUint16(o, true);
         o += 2;
-        const pn = nameById.get(pid) || String(pid);
+        const pn = displayNameOf(pid);
         pushEventFeed(`${pn} ${t('event.used')}: ${powerupLabel(type)}`, 'Use');
 
         if (pid === you) {
@@ -11284,9 +11798,14 @@ function handleStateBinary(buf) {
       // разбор: иначе старый закешированный клиент терял бы весь остаток
       // пакета после первого же нового типа события — этот баг в проекте уже
       // случался дважды и молча ломал киллфид, тосты и обновления заданий.
-      try {
-        console.warn('unknown event kind', kind);
-      } catch {}
+      // C10: при рассинхроне версий это десятки предупреждений на тик —
+      // логируем один раз на тип события.
+      if (!unknownEventKindSeen.has(kind)) {
+        unknownEventKindSeen.add(kind);
+        try {
+          console.warn('unknown event kind', kind);
+        } catch {}
+      }
       if (!need(1)) break;
       o += 1;
       continue;
@@ -11352,12 +11871,23 @@ function onCosExtra(m) {
   try {
     if (cosmeticsOpen) syncCosmeticsUi();
   } catch {}
+  // C3: экипировка изменилась — обновляем панель «Ваш облик» в меню.
+  try {
+    renderMenuSkinPreview();
+  } catch {}
 }
 
-function onNameUpdate(m) {
-  const id = m?.n;
-  const nm = m?.nm;
-  if (typeof id !== 'number' || typeof nm !== 'string') return;
+// Разбор одной записи имени. Возвращает true, если что-то изменилось.
+function applyNameRecord(rec) {
+  const id = Number(rec?.n);
+  const nm = rec?.nm;
+  if (!Number.isFinite(id) || typeof nm !== 'string') return false;
+
+  // C5: английский вариант — отдельная карта, выбор делает displayNameOf().
+  const en = typeof rec?.nmEn === 'string' ? rec.nmEn.trim() : '';
+  if (en) nameEnById.set(id, en);
+  else nameEnById.delete(id);
+
   // G15: сервер генерирует уникальные шуточные ники ботов — используем их.
   // Свой запасной вариант нужен только когда сервер прислал пустую строку.
   const clean = nm.trim();
@@ -11366,13 +11896,35 @@ function onNameUpdate(m) {
   } else if (botIds && botIds.has(id)) {
     nameById.set(id, botDisplayName(id));
   } else {
-    return;
+    return !!en;
   }
+  return true;
+}
+
+function nameUpdateFlush(changed) {
+  if (!changed) return;
   if (chat.classList.contains('collapsed')) {
     chatDirty = true;
     return;
   }
   renderChat();
+}
+
+function onNameUpdate(m) {
+  nameUpdateFlush(applyNameRecord(m));
+}
+
+/* Защита на случай, если сервер начнёт слать один пакет со списком имён вместо
+   N отдельных сообщений (при входе в долгоживущую комнату их сотни). Старый
+   nameUpdate продолжает работать. Принимаем и {names:[...]}, и голый массив. */
+function onNameUpdateBatch(d) {
+  const list = Array.isArray(d) ? d : Array.isArray(d?.names) ? d.names : null;
+  if (!list) return;
+  let changed = false;
+  for (const rec of list) {
+    if (applyNameRecord(rec)) changed = true;
+  }
+  nameUpdateFlush(changed);
 }
 
 function onRttPong(m) {
@@ -11399,7 +11951,7 @@ function onRooms(rooms) {
 }
 function onLeft() {
   rejoinRoomId = null;
-  rejoinPending = false;
+  rejoinFinish();
   roomId = null;
   roomLimit = null;
   updateRoomInfo();
@@ -11808,9 +12360,16 @@ function draw() {
      60 fps, причём сквозь backdrop-filter: blur(8px) — худший из возможных
      сценариев для мобильного GPU: каждый кадр поля тянет за собой пересчёт
      размытия всей области оверлея. Поле там статично и всё равно размыто,
-     поэтому обновляем его раз в 4 кадра. */
+     поэтому обновляем его раз в 4 кадра.
+     C10: backdrop-filter стоит не только на этих двух оверлеях, но и на
+     магазине с меню — а магазин открывается прямо из HUD во время матча.
+     Единый признак — класс overlayActive на body. */
   const deathOverlayOpen = !!(deathOverlay && !deathOverlay.classList.contains('hidden'));
-  if (matchOverlayOpen || deathOverlayOpen) {
+  let anyOverlayOpen = matchOverlayOpen || deathOverlayOpen;
+  try {
+    if (document.body.classList.contains('overlayActive')) anyOverlayOpen = true;
+  } catch {}
+  if (anyOverlayOpen) {
     draw._blurSkip = ((draw._blurSkip || 0) + 1) % 4;
     if (draw._blurSkip !== 0) return;
   } else {
@@ -11872,22 +12431,57 @@ function draw() {
     shakeY = Math.max(-maxShake, Math.min(maxShake, shakeY));
   }
 
-  const cell = Math.max(6, Math.floor(Math.min(cw / VIEW_CELLS_X, viewH / VIEW_CELLS_Y)));
+  /* C1: масштаб считался только от вьюпорта, а ROI сервера фиксирован (80×56).
+     На портретном телефоне (viewH/cw > 1.4) масштаб упирался в ширину, по
+     высоте на экран влезало под сотню рядов — и всё, что выходило за 56 рядов
+     ROI, закрашивалось туманом: до 40% экрана. Клэмпим масштаб снизу так,
+     чтобы экран никогда не был больше фактического ROI. На десктопе
+     (cw/viewH ≈ 1.6) обе поправки меньше базового значения и ничего не
+     меняют. */
+  let cell = Math.max(6, Math.floor(Math.min(cw / VIEW_CELLS_X, viewH / VIEW_CELLS_Y)));
+  {
+    const roiW = Math.max(8, (Number(lastRoi?.rw) || VIEW_CELLS_X * 2) - ROI_MARGIN_CELLS);
+    const roiH = Math.max(8, (Number(lastRoi?.rh) || VIEW_CELLS_Y * 2) - ROI_MARGIN_CELLS);
+    cell = Math.max(cell, Math.ceil(cw / roiW), Math.ceil(viewH / roiH));
+  }
+
+  /* C1: одного клэмпа масштаба мало. Окно ROI строится вокруг точки
+     «голова + ROILookahead клеток по направлению движения» и снапится по
+     ROIStep, поэтому относительно игрока оно смещено вперёд на 12-20 клеток —
+     и при движении по вертикали нижняя (хвостовая) полоса экрана всё равно
+     оказывалась за ROI и уходила в туман. Подводим камеру к ROI, ограничив
+     сдвиг долей полуэкрана и сглаживая его: без ограничения игрок уезжал бы к
+     самому краю экрана, без сглаживания камера дёргалась бы на каждый снап. */
+  {
+    const halfW = cw / (2 * cell);
+    const halfH = viewH / (2 * cell);
+    let wantX = 0;
+    let wantY = 0;
+    if (lastRoi) {
+      const loX = lastRoi.rx + halfW;
+      const hiX = lastRoi.rx + lastRoi.rw - halfW;
+      if (hiX > loX) wantX = Math.max(loX, Math.min(hiX, camX)) - camX;
+      const loY = lastRoi.ry + halfH;
+      const hiY = lastRoi.ry + lastRoi.rh - halfH;
+      if (hiY > loY) wantY = Math.max(loY, Math.min(hiY, camY)) - camY;
+    }
+    const capX = halfW * CAM_LEAD_MAX;
+    const capY = halfH * CAM_LEAD_MAX;
+    wantX = Math.max(-capX, Math.min(capX, wantX));
+    wantY = Math.max(-capY, Math.min(capY, wantY));
+    camLeadX = lerp(camLeadX, wantX, 0.08);
+    camLeadY = lerp(camLeadY, wantY, 0.08);
+  }
 
   ctx.clearRect(0, 0, cw, ch);
 
-  const offsetX = cw / 2 - (camX + shakeX) * cell;
-  const offsetY = viewH / 2 - (camY + shakeY) * cell;
+  const offsetX = cw / 2 - (camX + camLeadX + shakeX) * cell;
+  const offsetY = viewH / 2 - (camY + camLeadY + shakeY) * cell;
 
   const minX = Math.max(0, Math.floor((-offsetX) / cell) - 2);
   const minY = Math.max(0, Math.floor((-offsetY) / cell) - 2);
   const maxX = Math.min(W - 1, Math.floor((cw - offsetX) / cell) + 2);
   const maxY = Math.min(H - 1, Math.floor((viewH - offsetY) / cell) + 2);
-
-  viewMinX = minX;
-  viewMinY = minY;
-  viewMaxX = maxX;
-  viewMaxY = maxY;
 
   /* K1: границы горячего цикла по сетке — пересечение экрана с последним
      полученным ROI. За его пределами gridOwner/trailOwner заведомо устарели. */
@@ -11897,18 +12491,34 @@ function draw() {
   const gMaxX = roi ? Math.min(maxX, roi.rx + roi.rw - 1) : maxX;
   const gMaxY = roi ? Math.min(maxY, roi.ry + roi.rh - 1) : maxY;
 
-  {
-    const bg = ctx.createLinearGradient(0, 0, cw, ch);
-    bg.addColorStop(0, '#070a0f');
-    bg.addColorStop(0.55, '#0b0f14');
-    bg.addColorStop(1, '#070812');
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, cw, ch);
+  /* C1: рамка обзора на миникарте рисовалась по границам экрана и заявляла
+     обзор больше реального — всё, что за ROI, на экране всё равно туман.
+     Рамка = фактически видимая область. */
+  viewMinX = Math.min(gMinX, gMaxX);
+  viewMinY = Math.min(gMinY, gMaxY);
+  viewMaxX = Math.max(gMinX, gMaxX);
+  viewMaxY = Math.max(gMinY, gMaxY);
 
-    const vg = ctx.createRadialGradient(cw * 0.52, viewH * 0.46, Math.min(cw, viewH) * 0.25, cw * 0.52, viewH * 0.46, Math.min(cw, viewH) * 0.85);
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.55)');
-    ctx.fillStyle = vg;
+  {
+    // C10: оба градиента зависят только от размеров — раньше пересоздавались
+    // каждый кадр. Кэш инвалидируется при изменении cw/ch/viewH.
+    const key = `${cw}x${ch}x${viewH}`;
+    if (bgGradCacheKey !== key) {
+      bgGradCacheKey = key;
+      const bg = ctx.createLinearGradient(0, 0, cw, ch);
+      bg.addColorStop(0, '#070a0f');
+      bg.addColorStop(0.55, '#0b0f14');
+      bg.addColorStop(1, '#070812');
+      bgGradLinear = bg;
+
+      const vg = ctx.createRadialGradient(cw * 0.52, viewH * 0.46, Math.min(cw, viewH) * 0.25, cw * 0.52, viewH * 0.46, Math.min(cw, viewH) * 0.85);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+      bgGradVignette = vg;
+    }
+    ctx.fillStyle = bgGradLinear;
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.fillStyle = bgGradVignette;
     ctx.fillRect(0, 0, cw, ch);
   }
 
@@ -11993,6 +12603,18 @@ function draw() {
   const headCX = my ? my.ix : -1;
   const headCY = my ? my.iy : -1;
 
+  /* C10: пунктир остывающей территории раньше стоил save()+setLineDash(новый
+     массив)+strokeRect+restore() НА КАЖДУЮ клетку — после смерти это 1000-2000
+     клеток в кадре. Теперь рёбра копятся в Path2D (по одному на квантованный
+     цвет), рисуются только по границе области, а пунктир задаётся один раз. */
+  const coolPaths = coolEdgePaths;
+  coolPaths.clear();
+  const coolSame = (nx, ny, owner) => {
+    if (nx < 0 || ny < 0 || nx >= W || ny >= H) return false;
+    const raw = gridOwner[ny * W + nx];
+    return gridCellIsCooling(raw) && gridCellOwner(raw) === owner;
+  };
+
   for (let y = gMinY; y <= gMaxY; y++) {
     for (let x = gMinX; x <= gMaxX; x++) {
       const i = y * W + x;
@@ -12025,13 +12647,35 @@ function draw() {
         ctx.fillStyle = getOwnerFillStyle(coolOwner, (0.14 + 0.10 * pulse) * fade);
         ctx.fillRect(px, py, cell, cell);
         if (cell >= 7) {
-          ctx.save();
-          ctx.setLineDash([Math.max(2, cell * 0.22), Math.max(2, cell * 0.22)]);
-          ctx.lineDashOffset = -nowFrame * 0.02;
-          ctx.strokeStyle = getOwnerFillStyle(coolOwner, (0.45 + 0.25 * pulse) * fade);
-          ctx.lineWidth = 1;
-          ctx.strokeRect(px + 0.5, py + 0.5, cell - 1, cell - 1);
-          ctx.restore();
+          // Альфа квантуется до 1/16 — иначе на каждую клетку приходился бы
+          // свой Path2D и группировка не давала бы выигрыша.
+          const aq = Math.max(1, Math.round((0.45 + 0.25 * pulse) * fade * 16)) / 16;
+          const key = getOwnerFillStyle(coolOwner, aq);
+          let path = coolPaths.get(key);
+          if (!path) {
+            path = new Path2D();
+            coolPaths.set(key, path);
+          }
+          const x1 = px + 0.5;
+          const y1 = py + 0.5;
+          const x2 = px + cell - 0.5;
+          const y2 = py + cell - 0.5;
+          if (!coolSame(x, y - 1, coolOwner)) {
+            path.moveTo(x1, y1);
+            path.lineTo(x2, y1);
+          }
+          if (!coolSame(x, y + 1, coolOwner)) {
+            path.moveTo(x1, y2);
+            path.lineTo(x2, y2);
+          }
+          if (!coolSame(x - 1, y, coolOwner)) {
+            path.moveTo(x1, y1);
+            path.lineTo(x1, y2);
+          }
+          if (!coolSame(x + 1, y, coolOwner)) {
+            path.moveTo(x2, y1);
+            path.lineTo(x2, y2);
+          }
         }
       }
 
@@ -12129,6 +12773,21 @@ function draw() {
         }
       }
     }
+  }
+
+  // C10: один save/restore и один setLineDash на весь кадр вместо одного на клетку.
+  if (coolPaths.size) {
+    const dash = Math.max(2, cell * 0.22);
+    ctx.save();
+    ctx.setLineDash([dash, dash]);
+    ctx.lineDashOffset = -nowFrame * 0.02;
+    ctx.lineWidth = 1;
+    for (const [style, path] of coolPaths) {
+      ctx.strokeStyle = style;
+      ctx.stroke(path);
+    }
+    ctx.restore();
+    coolPaths.clear();
   }
 
   if (nearHomeX >= 0) {

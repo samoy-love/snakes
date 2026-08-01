@@ -53,6 +53,31 @@
 симлинк автоматически возвращается на прошлый релиз, сервис перезапускается,
 скрипт завершается ненулевым кодом.
 
+Четыре свойства, на которые стоит обратить внимание:
+
+* **Обрыв ssh не срывает авто-откат.** Активация запускается не как обычная
+  foreground-команда по ssh, а как transient systemd-юнит
+  (`systemd-run --unit=snakes-deploy-<релиз> --wait --pipe`). Юнит — потомок PID 1,
+  поэтому SIGHUP от умершего ssh до него не доходит и healthcheck с авто-откатом
+  досчитывается до конца. `deploy.sh`, потеряв соединение, переподключается и
+  забирает результат командой `remote_ctl.sh await <релиз>`.
+* **Два деплоя одновременно невозможны.** `remote_ctl.sh` берёт `flock` на
+  `/opt/snakes/.deploy.lock` до любых действий с симлинками, поэтому ручной запуск
+  во время CI-деплоя просто встаёт в очередь (до `LOCK_WAIT` секунд).
+* **Healthcheck ходит и через nginx.** Локальная проверка `127.0.0.1:8090`
+  ничего не говорит про nginx/TLS/DNS: при сломанном vhost деплой рапортовал
+  «OK» на лежащем сайте. Теперь после локальной проверки идёт публичная по
+  `PUBLIC_HEALTH_URL`. Её провал — ошибка деплоя, но **без отката**: релиз тут ни
+  при чём, чинить надо nginx.
+* **`PROFILE_SECRET` проверяется ДО переключения симлинка.** Если `/etc/snakes/snakes.env`
+  пропал или переменная пуста, сервер стартанул бы с эфемерным ключом и разом
+  обесценил все токены игроков — это не лечится откатом. Проверяется только факт
+  наличия непустого значения, само значение нигде не печатается.
+
+Повторный `rollback.sh` **шагает вниз по списку релизов**, а не прыгает между
+двумя последними: каждый отвергнутый релиз записывается в `/opt/snakes/rejected`
+и больше никогда не становится целью отката.
+
 ---
 
 ## Как задеплоить вручную
@@ -89,6 +114,10 @@ export DEPLOY_HOST=207.127.93.34 DEPLOY_USER=ubuntu DEPLOY_KEY=~/.ssh/deploy_key
 | `DEPLOY_RUN_USER` | `www-data` | от кого работает сервис |
 | `HEALTH_PORT` / `HEALTH_PATH` | `8090` / `/healthz` | локальный healthcheck |
 | `HEALTH_RETRIES` / `HEALTH_DELAY` | `30` / `2` | до 60 секунд ожидания |
+| `PUBLIC_HEALTH_URL` | `https://snakes.samoy.love/healthz` | публичный healthcheck ЧЕРЕЗ nginx; пустая строка — пропустить |
+| `PUBLIC_HEALTH_RETRIES` | `10` | попыток публичного healthcheck (пауза 3 с) |
+| `DEPLOY_ENV_FILE` | `/etc/snakes/snakes.env` | env-файл юнита; проверяется на непустой `PROFILE_SECRET` до переключения симлинка |
+| `LOCK_WAIT` | `600` | сколько секунд ждать чужой деплой на блокировке |
 | `KEEP_RELEASES` | `5` | сколько релизов хранить |
 | `DEPLOY_GOOS` / `DEPLOY_GOARCH` | `linux` / `arm64` | цель кросс-сборки |
 | `DEPLOY_TRANSPORT` | `auto` | `auto` \| `ssh` \| `putty` |
@@ -201,5 +230,53 @@ curl -s -i --http1.1 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
 | `scripts/deploy.sh` | сборка + доставка + активация + healthcheck + авто-откат |
 | `scripts/rollback.sh` | откат на предыдущий релиз одной командой |
 | `scripts/lib_deploy.sh` | конфигурация и выбор транспорта (ssh/scp либо plink/pscp) |
-| `scripts/remote_ctl.sh` | серверная часть: распаковка, симлинк, рестарт, healthcheck, чистка |
+| `scripts/remote_ctl.sh` | серверная часть: блокировка, распаковка, симлинк, рестарт, healthcheck (локальный + публичный), авто-откат, чистка |
+| `scripts/backup_profiles.sh` | бэкап `profiles.json` (ставится на сервер как `/usr/local/bin/snakes-backup-profiles.sh`) |
+| `deploy/systemd/snakes-backup-profiles.{service,timer}` | часовой таймер этого бэкапа |
 | `.github/workflows/deploy.yml` | деплой по тегу `v*` и по кнопке |
+
+
+---
+
+## Бэкапы профилей игроков
+
+`/var/lib/snakes/profiles.json` — **единственная** копия балансов, статистики и
+косметики всех игроков. Деплой её не трогает, но испорченная запись, неудачный
+`rm` или потеря диска забирают всё сразу.
+
+Снапшоты снимает systemd-таймер `snakes-backup-profiles.timer` (раз в час,
+`Persistent=true`, разброс до 2 минут):
+
+```
+/var/lib/snakes/backups/hourly/profiles-<YYYYmmdd-HH>.json   последние 48
+/var/lib/snakes/backups/daily/profiles-<YYYYmmdd>.json       последние 14
+```
+
+Права не слабее исходных: каталоги `0700`, файлы `0600`, владелец `www-data`.
+Файл, который не парсится как JSON, снапшотом не становится — недописанный
+исходник не может вытеснить хорошие бэкапы.
+
+Установка (идемпотентна):
+
+```bash
+sudo install -m 0755 scripts/backup_profiles.sh /usr/local/bin/snakes-backup-profiles.sh
+sudo install -m 0644 deploy/systemd/snakes-backup-profiles.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/snakes-backup-profiles.timer   /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now snakes-backup-profiles.timer
+```
+
+Проверка и восстановление:
+
+```bash
+sudo /usr/local/bin/snakes-backup-profiles.sh            # снять снапшот прямо сейчас
+sudo /usr/local/bin/snakes-backup-profiles.sh --list     # что лежит
+sudo systemctl list-timers snakes-backup-profiles.timer
+
+# Восстановление: останавливает snakes, кладёт снапшот на место, стартует обратно.
+# Текущий файл при этом сохраняется как backups/pre-restore-<таймштамп>.json.
+sudo /usr/local/bin/snakes-backup-profiles.sh --restore   /var/lib/snakes/backups/daily/profiles-20260801.json
+```
+
+Восстановление проверено вживую: снапшот → `--restore` → sha256 совпал,
+`systemctl is-active snakes` = `active`, `https://snakes.samoy.love/healthz` = 200.

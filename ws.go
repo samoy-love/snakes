@@ -3,14 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -151,16 +149,19 @@ func normalizeWSOrigin(s string) string {
 
 // wsAllowLocalhost keeps the "any loopback Origin is fine" shortcut. It is
 // convenient in development and a hole in production, where it hands a page
-// served by malware on the player's own machine a valid Origin. On by default,
-// switch it off with WS_ALLOW_LOCALHOST=0.
+// served by malware on the player's own machine a valid Origin: production was
+// measured answering 101 to `Origin: http://localhost`.
+//
+// G9: OFF by default. Development turns it on explicitly with
+// WS_ALLOW_LOCALHOST=1 (also true/yes/on).
 var wsAllowLocalhost = loadWSAllowLocalhost()
 
 func loadWSAllowLocalhost() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("WS_ALLOW_LOCALHOST"))) {
-	case "0", "false", "no", "off":
-		return false
+	case "1", "true", "yes", "on":
+		return true
 	}
-	return true
+	return false
 }
 
 func isLoopbackOriginHost(h string) bool {
@@ -207,6 +208,9 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	// Signed identity: the legacy ?pid= parameter is never trusted, only ?t=.
 	pid, token := resolveProfileToken(r.URL.Query().Get("t"))
 	client := &Client{conn: c, sendCh: make(chan outbound, 256), ip: requestClientIP(r), pid: pid}
+	// G7: a profile held by a live connection is never an eviction candidate.
+	retainProfilePID(pid)
+	defer releaseProfilePID(pid)
 	touchProfileLastSeen(pid)
 	client.name.Store("Игрок")
 	metrics.wsConnections.Add(1)
@@ -384,33 +388,12 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			if !pl.alive {
 				rm.respawnPlayer(pl)
 			}
-			type knownNameItem struct {
-				N    uint16
-				Nm   string
-				NmEn string
-			}
-			known := make([]knownNameItem, 0, len(rm.knownNames))
-			for num, kn := range rm.knownNames {
-				nm := kn.Name
-				if nm == "" {
-					nm = sanitizeName(fmt.Sprintf("Игрок %d", num))
-				}
-				if !kn.Online {
-					nm = nm + " (отключен)"
-				}
-				// G25: bots carry an English twin; the client picks by locale.
-				known = append(known, knownNameItem{N: num, Nm: nm, NmEn: rm.displayNameEnLocked(num)})
-			}
+			// G5: one batch instead of a fan of N JSON messages, which at 2
+			// respawns per second could bury the 256-entry send queue.
+			known := rm.collectKnownNamesLocked()
 			rm.mu.Unlock()
 
-			sort.Slice(known, func(i, j int) bool { return known[i].N < known[j].N })
-			for _, it := range known {
-				payload := map[string]any{"n": it.N, "nm": it.Nm}
-				if it.NmEn != "" {
-					payload["nmEn"] = it.NmEn
-				}
-				client.sendJSON(r.Context(), "nameUpdate", payload)
-			}
+			client.sendKnownNames(r.Context(), known)
 		case "matchContinue":
 			if !client.lastMatchContinueAt.IsZero() && time.Since(client.lastMatchContinueAt) < 600*time.Millisecond {
 				continue
@@ -464,19 +447,31 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			pl := client.player
 			client.mu.Unlock()
 			pid := client.profileKey()
-			pr := profileForKey(pid)
-			if pr == nil {
-				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_unavailable"})
-				continue
-			}
 			bit := uint8(1) << id
 
 			// Ownership check, debit and grant happen in one critical section
 			// over the profile. Lock order stays rm.mu -> profilesMu.
+			//
+			// G8: this is a WRITE path, so the profile must be materialised with
+			// profileForKeyCreate. profileForKey hands back a transient object
+			// for a player with no stored profile yet, and a purchase through it
+			// is dropped on the floor while the client is told it succeeded —
+			// today only prices above zero hide the bug. The pointer is also
+			// taken under profilesMu: between a lookup and the debit the entry
+			// could otherwise be evicted.
 			if rm != nil {
 				rm.mu.Lock()
 			}
 			profilesMu.Lock()
+			pr := profileForKeyCreateLocked(pid)
+			if pr == nil {
+				profilesMu.Unlock()
+				if rm != nil {
+					rm.mu.Unlock()
+				}
+				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_unavailable"})
+				continue
+			}
 			ensureProfileCosmeticsLocked(pr)
 			inv := profileCosInvLocked(pr, cat)
 			var payload map[string]any
@@ -551,17 +546,22 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			pl := client.player
 			client.mu.Unlock()
 			pid := client.profileKey()
-			pr := profileForKey(pid)
-			if pr == nil {
-				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_unavailable"})
-				continue
-			}
 			bit := uint8(1) << id
 
+			// G8: write path, see cosmeticsBuy.
 			if rm != nil {
 				rm.mu.Lock()
 			}
 			profilesMu.Lock()
+			pr := profileForKeyCreateLocked(pid)
+			if pr == nil {
+				profilesMu.Unlock()
+				if rm != nil {
+					rm.mu.Unlock()
+				}
+				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_unavailable"})
+				continue
+			}
 			ensureProfileCosmeticsLocked(pr)
 			inv := profileCosInvLocked(pr, cat)
 			owned := inv != nil && (*inv&bit) != 0
@@ -615,17 +615,22 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			pl := client.player
 			client.mu.Unlock()
 			pid := client.profileKey()
-			pr := profileForKey(pid)
-			if pr == nil {
-				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_unavailable"})
-				continue
-			}
 
 			// Same lock order as the cosmetics branches: rm.mu -> profilesMu.
+			// G8: write path, so the entry is created under the lock.
 			if rm != nil {
 				rm.mu.Lock()
 			}
 			profilesMu.Lock()
+			pr := profileForKeyCreateLocked(pid)
+			if pr == nil {
+				profilesMu.Unlock()
+				if rm != nil {
+					rm.mu.Unlock()
+				}
+				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_unavailable"})
+				continue
+			}
 			ensureProfileCosmeticsLocked(pr)
 			// id 0 clears the title and is always allowed.
 			unlocked := p.ID == 0 || titleUnlockedLocked(pr, p.ID)

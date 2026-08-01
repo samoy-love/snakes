@@ -51,8 +51,13 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test
-        run: go test ./...
+      # -race is not optional here. Rooms, the profile store, the rate limiters,
+      # the bot AI and the economy all run on separate goroutines and were all
+      # recently rewritten; a data race in any of them corrupts player balances
+      # rather than crashing loudly. The deploy step below sets SKIP_TESTS=1, so
+      # this is the ONLY place tests run on the way to production.
+      - name: Test (race detector)
+        run: go test -race -count=1 ./...
 
       - name: Build (sanity, host arch)
         run: go build ./...
@@ -76,6 +81,10 @@ jobs:
           DEPLOY_SERVICE: ${{ vars.DEPLOY_SERVICE || 'snakes' }}
           DEPLOY_GOARCH: ${{ vars.DEPLOY_GOARCH || 'arm64' }}
           DEPLOY_TRANSPORT: ssh
+          # The server-side activation checks this through nginx before it calls
+          # the deploy a success, so a broken vhost can no longer be reported as
+          # "DEPLOY OK".
+          PUBLIC_HEALTH_URL: ${{ secrets.HEALTH_URL || 'https://snakes.samoy.love/healthz' }}
           SKIP_TESTS: '1'   # already run above
         run: |
           chmod +x scripts/*.sh

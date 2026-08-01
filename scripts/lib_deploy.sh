@@ -20,6 +20,14 @@ HEALTH_PORT="${HEALTH_PORT:-8090}"
 HEALTH_PATH="${HEALTH_PATH:-/healthz}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-30}"  # attempts
 HEALTH_DELAY="${HEALTH_DELAY:-2}"       # seconds between attempts
+# The local healthcheck hits 127.0.0.1:$HEALTH_PORT and so proves nothing about
+# nginx/TLS/DNS. The public one goes in through the front door; set it to an
+# empty string to skip it (e.g. when deploying a host without a domain yet).
+PUBLIC_HEALTH_URL="${PUBLIC_HEALTH_URL:-https://snakes.samoy.love/healthz}"
+PUBLIC_HEALTH_RETRIES="${PUBLIC_HEALTH_RETRIES:-10}"
+# EnvironmentFile of the systemd unit; checked for a non-empty PROFILE_SECRET
+# before the release symlink is switched.
+DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-/etc/snakes/snakes.env}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 DEPLOY_GOOS="${DEPLOY_GOOS:-linux}"
 # NOTE: the production host is an Oracle Ampere box -> aarch64. Override with
@@ -115,7 +123,8 @@ ship_remote_helper() {
 
 # remote_env - the environment prefix passed to remote_ctl.sh.
 remote_env() {
-  printf "DEPLOY_PATH='%s' DEPLOY_SERVICE='%s' DEPLOY_RUN_USER='%s' HEALTH_PORT='%s' HEALTH_PATH='%s' HEALTH_RETRIES='%s' HEALTH_DELAY='%s' KEEP_RELEASES='%s'" \
-    "$DEPLOY_PATH" "$DEPLOY_SERVICE" "$DEPLOY_RUN_USER" "$HEALTH_PORT" "$HEALTH_PATH" \
-    "$HEALTH_RETRIES" "$HEALTH_DELAY" "$KEEP_RELEASES"
+  printf "DEPLOY_PATH='%s' DEPLOY_SERVICE='%s' DEPLOY_RUN_USER='%s' DEPLOY_ENV_FILE='%s' HEALTH_PORT='%s' HEALTH_PATH='%s' HEALTH_RETRIES='%s' HEALTH_DELAY='%s' PUBLIC_HEALTH_URL='%s' PUBLIC_HEALTH_RETRIES='%s' KEEP_RELEASES='%s'" \
+    "$DEPLOY_PATH" "$DEPLOY_SERVICE" "$DEPLOY_RUN_USER" "$DEPLOY_ENV_FILE" \
+    "$HEALTH_PORT" "$HEALTH_PATH" "$HEALTH_RETRIES" "$HEALTH_DELAY" \
+    "$PUBLIC_HEALTH_URL" "$PUBLIC_HEALTH_RETRIES" "$KEEP_RELEASES"
 }

@@ -415,12 +415,27 @@
       <div id="help" data-i18n="hud.help">Управление: стрелки / WASD • Чат: Enter • Карта: M</div>
     </div>
 
+    <!-- U10: на телефоне «WASD/стрелки/Esc» — бесполезный текст, а свайп нигде
+         не назван. Строка показывается только при pointer: coarse (см. CSS).
+         Лежит вне #hud намеренно: у #hud есть filter/backdrop-filter, а они
+         создают containing block, и position: fixed внутри него ломается.
+         data-i18n сознательно НЕ проставлен: t() для отсутствующего ключа
+         возвращает сам ключ, и игрок увидел бы «hud.help_touch». Когда
+         клиентский агент заведёт ключ, заменить data-i18n-pending на data-i18n. -->
+    <div id="helpTouch" data-i18n="hud.help_touch">Свайп по экрану — движение</div>
+
     <div id="topHud" aria-hidden="true">
+      <!-- U6: иерархия перевёрнута обратно. Ранг — единственная цифра, по которой
+           игра ранжирует, поэтому он первый и крупный (client.js пишет сюда
+           «Место N/M · Очки P» через ensureTopHudPlaceEl — слот уже готов, чтобы
+           скрипт не создавал безымянную «пилюлю» 11px). Доля карты важнее
+           абсолютного числа клеток, поэтому проценты стоят перед клетками. -->
       <div class="topHudRow">
+        <span id="topHudPlace" class="topHudPlace">—</span>
         <div class="topHudZone">
           <span class="topHudLabel" data-i18n="hud.zone">Зона</span>
-          <span id="topHudCells" class="topHudValue">—</span>
-          <span id="topHudPct" class="topHudSub">—</span>
+          <span id="topHudPct" class="topHudZonePct">—</span>
+          <span id="topHudCells" class="topHudZoneCells">—</span>
         </div>
         <div class="topHudRight">
           <span id="topHudTime" class="topHudTime"></span>
