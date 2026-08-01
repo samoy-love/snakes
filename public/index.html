@@ -7,23 +7,18 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <button
-      id="langToggleGlobal"
-      class="iconBtn langToggle langToggleGlobal"
-      type="button"
-      aria-label="Сменить язык"
-      title="Сменить язык"
-      data-lang-toggle
-      data-i18n-aria-label="lang.toggle"
-      data-i18n-title="lang.toggle"
-    >
-      🇷🇺
-    </button>
-
     <div id="menuOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="menuOverlayTitle">
       <div class="card">
         <div class="menuHeader">
-          <div class="overlayKicker" data-i18n="menu.kicker">Онлайн • быстрый матч</div>
+          <div class="menuHeaderTop">
+            <div class="overlayKicker" data-i18n="menu.kicker">Онлайн • быстрый матч</div>
+            <!-- H15: счётчик онлайна — самая ценная для конверсии цифра, JS пишет в #menuOnlineCount -->
+            <div class="menuOnline" id="menuOnlineBadge">
+              <span class="menuOnlineDot" aria-hidden="true"></span>
+              <span id="menuOnlineCount" class="menuOnlineCount">—</span>
+              <span class="menuOnlineLabel" data-i18n="menu.online_now">сейчас играют</span>
+            </div>
+          </div>
           <div id="menuOverlayTitle" class="overlayTitle" data-i18n="game.title">Змейки</div>
           <div class="overlaySub" data-i18n="menu.subtitle">Захватывайте территорию, избегайте следов и побеждайте</div>
         </div>
@@ -42,6 +37,21 @@
                 <button id="playBtn" class="btnPrimary btnPlay" data-i18n="menu.play">Играть</button>
                 <button id="cosmeticsMenuBtn" class="btnSecondary btnMenuSecondary" type="button" data-i18n="menu.cosmetics">Косметика</button>
               </div>
+              <!-- H8: главная механика объяснена постоянно, а не один раз -->
+              <ol id="menuHowTo" class="menuHowTo" aria-label="Как играть" data-i18n-aria-label="menu.how_title">
+                <li class="menuHowToStep">
+                  <span class="menuHowToIcon" aria-hidden="true">➡️</span>
+                  <span class="menuHowToText" data-i18n="menu.how_step1">Выйди за свою зону</span>
+                </li>
+                <li class="menuHowToStep">
+                  <span class="menuHowToIcon" aria-hidden="true">✏️</span>
+                  <span class="menuHowToText" data-i18n="menu.how_step2">Оставь след</span>
+                </li>
+                <li class="menuHowToStep">
+                  <span class="menuHowToIcon" aria-hidden="true">🟥</span>
+                  <span class="menuHowToText" data-i18n="menu.how_step3">Замкни петлю — территория твоя</span>
+                </li>
+              </ol>
               <div id="menuOnboarding" class="menuOnboarding hidden">
                 <div class="menuOnboardingTitle" data-i18n="menu.controls_title"></div>
                 <div class="menuOnboardingDesc" data-i18n="menu.controls_desc"></div>
@@ -50,9 +60,15 @@
             </div>
           </div>
 
-          <div class="menuPanel">
-            <div class="menuPanelHeader">
-              <div class="menuPanelTitle" data-i18n="rooms.title">Комнаты</div>
+          <!-- H6: панель комнат свёрнута по умолчанию — первый экран остаётся простым -->
+          <details id="roomsDetails" class="menuPanel roomsDetails">
+            <summary class="roomsDetailsSummary">
+              <span class="menuPanelTitle" data-i18n="rooms.title">Комнаты</span>
+              <span class="roomsDetailsHint" data-i18n="menu.rooms_hint">выбрать вручную</span>
+              <span class="roomsDetailsChevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="roomsDetailsBody">
+            <div class="menuPanelHeader roomsHeaderActionsOnly">
               <div class="roomsHeaderActions">
                 <button id="joinRoomBtn" class="btnSecondary" disabled data-i18n="rooms.join">Войти</button>
                 <button id="toggleCreateRoomBtn" class="btnGhost" aria-controls="roomsCreate" aria-expanded="false" data-i18n="rooms.create">Создать</button>
@@ -85,7 +101,24 @@
               </div>
             </div>
             <div id="roomsList" aria-live="polite"></div>
-          </div>
+            </div>
+          </details>
+        </div>
+
+        <!-- H19: переключатель языка живёт в футере карточки, а не поверх её угла -->
+        <div class="menuFooterActions">
+          <button
+            id="langToggleGlobal"
+            class="iconBtn langToggle langToggleGlobal"
+            type="button"
+            aria-label="Сменить язык"
+            title="Сменить язык"
+            data-lang-toggle
+            data-i18n-aria-label="lang.toggle"
+            data-i18n-title="lang.toggle"
+          >
+            🇷🇺
+          </button>
         </div>
       </div>
     </div>
@@ -205,6 +238,15 @@
           <div class="menuPanel">
             <div class="menuPanelTitle" data-i18n="settings.visual">Визуал</div>
             <div class="menuPanelBody">
+              <label class="fieldInline">
+                <span class="fieldLabel" data-i18n="settings.fx_preset">Пресет</span>
+                <select id="fxPresetSelect">
+                  <option value="calm" data-i18n="settings.fx_preset_calm">Спокойно</option>
+                  <option value="normal" data-i18n="settings.fx_preset_normal">Обычно</option>
+                  <option value="casino" data-i18n="settings.fx_preset_casino">Казино</option>
+                </select>
+              </label>
+              <div class="fieldHint" data-i18n="settings.fx_preset_hint">Одним движением задаёт интенсивность, тряску и вспышки</div>
               <label class="fieldInline">
                 <span class="fieldLabel" data-i18n="settings.fx">Эффекты</span>
                 <input id="fxEnabled" type="checkbox" checked />
@@ -411,6 +453,11 @@
         <canvas id="minimapOverlayCanvas"></canvas>
       </div>
     </div>
+    <!-- Слои игровой «сочности». Содержимое и классы .isOn задаёт client.js -->
+    <div id="fxFlash" aria-hidden="true"></div>
+    <div id="hudCombo" aria-hidden="true"></div>
+    <div id="bigBanner" role="status" aria-live="polite" aria-hidden="true"></div>
+
     <canvas id="game"></canvas>
 
     <script src="https://cdn.jsdelivr.net/npm/twemoji@14.0.2/dist/twemoji.min.js" crossorigin="anonymous"></script>

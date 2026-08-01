@@ -145,7 +145,14 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 	defer client.close()
 
-	client.sendJSON(r.Context(), "hello", map[string]any{"w": W, "h": H, "tickMs": TickMS, "roomLimit": hub.roomLimit, "token": token})
+	client.sendJSON(r.Context(), "hello", map[string]any{
+		"w":               W,
+		"h":               H,
+		"tickMs":          TickMS,
+		"roomLimit":       hub.roomLimit,
+		"token":           token,
+		"cosmeticsPrices": cosmeticsPricesPayload(),
+	})
 	client.sendRooms(r.Context(), hub)
 
 	for {
@@ -345,11 +352,11 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			}
 			cat := strings.TrimSpace(strings.ToLower(p.Cat))
 			id := p.ID
-			if id > 4 {
+			if id > CosmeticsMaxID {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_invalid_id"})
 				continue
 			}
-			price, okCat := cosmeticsPriceForCat(cat)
+			price, okCat := cosmeticsPriceFor(cat, id)
 			if !okCat {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_invalid_cat"})
 				continue
@@ -430,11 +437,11 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			}
 			cat := strings.TrimSpace(strings.ToLower(p.Cat))
 			id := p.ID
-			if id > 4 {
+			if id > CosmeticsMaxID {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_invalid_id"})
 				continue
 			}
-			if _, okCat := cosmeticsPriceForCat(cat); !okCat {
+			if !cosmeticsCatValid(cat) {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_invalid_cat"})
 				continue
 			}

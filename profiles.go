@@ -298,6 +298,44 @@ func styleIncomeGrantLocked(pr *Profile, pid string, delta uint16) uint16 {
 	return delta
 }
 
+// styleDayIncomeGrantLocked applies the soft daily ceiling: the first
+// StyleDaySoftCap Style of a day pay in full, everything past it pays 40%.
+// Returns the granted amount. Caller holds profilesMu.
+func styleDayIncomeGrantLocked(pr *Profile, delta uint16) uint16 {
+	if pr == nil || delta == 0 {
+		return delta
+	}
+	today := dayStampNow()
+	if pr.DayIncomeDay != today {
+		pr.DayIncomeDay = today
+		pr.DayIncome = 0
+	}
+	reduce := func(v uint32) uint32 {
+		out := (v*StyleOverCapNumer + StyleOverCapDenom - 1) / StyleOverCapDenom
+		if out == 0 && v > 0 {
+			out = 1
+		}
+		return out
+	}
+	full := uint32(0)
+	if pr.DayIncome < StyleDaySoftCap {
+		full = StyleDaySoftCap - pr.DayIncome
+		if full > uint32(delta) {
+			full = uint32(delta)
+		}
+	}
+	out := full + reduce(uint32(delta)-full)
+	if out > uint32(^uint16(0)) {
+		out = uint32(^uint16(0))
+	}
+	if pr.DayIncome < ^uint32(0)-out {
+		pr.DayIncome += out
+	} else {
+		pr.DayIncome = ^uint32(0)
+	}
+	return uint16(out)
+}
+
 // ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------

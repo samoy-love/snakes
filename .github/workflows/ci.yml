@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (vet / build / test -race)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "::error::Найдены неотформатированные файлы, запустите gofmt -w ."
+            echo "$out"
+            gofmt -d .
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test -race
+        run: go test ./... -race
+
+  js:
+    name: JS syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # 22.x: `node --check` сам определяет ES-модуль по синтаксису.
+          # На 20.x файлы с `export` (client_net.js и др.) падали бы как CJS.
+          node-version: '22'
+
+      - name: node --check public/*.js
+        run: |
+          status=0
+          for f in public/client.js public/client_*.js; do
+            [ -e "$f" ] || continue
+            echo "check $f"
+            node --check "$f" || status=1
+          done
+          exit $status

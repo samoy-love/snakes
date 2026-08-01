@@ -25,6 +25,12 @@ const I18N = {
     'menu.play': 'Играть',
     'menu.cosmetics': 'Косметика',
     'menu.hint': 'Совет: чат — Enter • управление — WASD/стрелки',
+    'menu.online_now': 'сейчас играют',
+    'menu.how_title': 'Как играть',
+    'menu.how_step1': 'Выйди за свою зону',
+    'menu.how_step2': 'Оставь след',
+    'menu.how_step3': 'Замкни петлю — территория твоя',
+    'menu.rooms_hint': 'выбрать вручную',
 
     'menu.controls_title': 'Управление',
     'menu.controls_desc': 'WASD/стрелки — движение • Enter — чат • Esc — меню • Space — снова (после смерти)',
@@ -299,7 +305,44 @@ const I18N = {
     'minimap.overlay_aria': 'Увеличенная миникарта',
     'minimap.legend_you': 'Вы',
     'minimap.legend_view': 'Обзор',
-    'minimap.legend_zone': 'Зона'
+    'minimap.legend_zone': 'Зона',
+
+    'settings.fx_preset': 'Пресет эффектов',
+    'settings.fx_preset_hint': 'Управляет тряской, вспышками, частицами и счётчиками. «Спокойно» включается автоматически при системном запрете анимаций.',
+    'settings.fx_preset_calm': 'Спокойно',
+    'settings.fx_preset_normal': 'Обычно',
+    'settings.fx_preset_casino': 'Казино',
+
+    'hud.combo': 'Комбо',
+    'hud.trail_len': 'След',
+    'hud.time_left': 'До конца',
+
+    'banner.first_capture': 'Первый захват!',
+    'banner.first_capture_sub': 'Замкнул петлю — территория твоя. Так и набирают зону.',
+    'banner.jackpot': 'ДЖЕКПОТ',
+    'banner.jackpot_sub': 'Огромный захват территории',
+    'banner.revenge': 'МЕСТЬ',
+    'banner.streak': 'СЕРИЯ',
+
+    'death.hint.cut': 'Твой след пересекли. Пока петля не замкнута, след уязвим — возвращайся в свою зону, чтобы забрать территорию.',
+    'death.hint.headon': 'Лобовое столкновение. Не иди в голову чужой змейке — выживает тот, кто свернул.',
+    'death.hint.selftrail': 'Ты въехал в собственный след. Замыкай петлю только о свою территорию.',
+    'death.hint.wall': 'Ты врезался в границу поля. Край карты убивает так же, как чужой след.',
+    'death.hint.generic': 'Выйди из своей зоны, обведи участок и вернись в свою территорию — петля замкнётся и участок станет твоим.',
+
+    'match.peak': 'Пик зоны',
+    'match.avg': 'Средняя',
+    'match.deaths': 'Смерти',
+    'match.first_skin': 'До первого скина',
+    'match.first_skin_sub': 'Копи ✨ Стиль и открой первый предмет в магазине',
+
+    'cosmetics.tier_base': 'База',
+    'cosmetics.tier_common': 'Обычный',
+    'cosmetics.tier_rare': 'Редкий',
+    'cosmetics.tier_epic': 'Эпический',
+    'cosmetics.tier_legendary': 'Легендарный',
+    'cosmetics.tier_mythic': 'Мифический',
+    'cosmetics.locked': 'Заблокировано'
   },
   en: {
     'lang.toggle': 'Switch language',
@@ -318,6 +361,12 @@ const I18N = {
     'menu.play': 'Play',
     'menu.cosmetics': 'Cosmetics',
     'menu.hint': 'Tip: chat — Enter • movement — WASD/arrows',
+    'menu.online_now': 'playing now',
+    'menu.how_title': 'How to play',
+    'menu.how_step1': 'Leave your zone',
+    'menu.how_step2': 'Draw a trail',
+    'menu.how_step3': 'Close the loop — the land is yours',
+    'menu.rooms_hint': 'pick manually',
 
     'menu.controls_title': 'Controls',
     'menu.controls_desc': 'WASD/arrows — move • Enter — chat • Esc — menu • Space — retry (after death)',
@@ -590,7 +639,44 @@ const I18N = {
     'minimap.overlay_aria': 'Expanded minimap',
     'minimap.legend_you': 'You',
     'minimap.legend_view': 'View',
-    'minimap.legend_zone': 'Zone'
+    'minimap.legend_zone': 'Zone',
+
+    'settings.fx_preset': 'Effects preset',
+    'settings.fx_preset_hint': 'Controls shake, flashes, particles and count-ups. "Calm" turns on automatically when the system asks for reduced motion.',
+    'settings.fx_preset_calm': 'Calm',
+    'settings.fx_preset_normal': 'Normal',
+    'settings.fx_preset_casino': 'Casino',
+
+    'hud.combo': 'Combo',
+    'hud.trail_len': 'Trail',
+    'hud.time_left': 'Time left',
+
+    'banner.first_capture': 'First capture!',
+    'banner.first_capture_sub': 'You closed the loop — the land is yours. That is how you grow.',
+    'banner.jackpot': 'JACKPOT',
+    'banner.jackpot_sub': 'A massive land grab',
+    'banner.revenge': 'REVENGE',
+    'banner.streak': 'STREAK',
+
+    'death.hint.cut': 'Your trail was cut. Until the loop is closed the trail is vulnerable — get back into your own zone to bank the land.',
+    'death.hint.headon': 'Head-on collision. Never drive into another head — the one who turns away survives.',
+    'death.hint.selftrail': 'You ran into your own trail. Close the loop against your own territory only.',
+    'death.hint.wall': 'You hit the map border. The edge kills just like an enemy trail.',
+    'death.hint.generic': 'Leave your zone, draw a loop around some land and come back into your territory — the loop closes and the land becomes yours.',
+
+    'match.peak': 'Peak zone',
+    'match.avg': 'Average',
+    'match.deaths': 'Deaths',
+    'match.first_skin': 'To your first skin',
+    'match.first_skin_sub': 'Bank ✨ Style and unlock your first shop item',
+
+    'cosmetics.tier_base': 'Base',
+    'cosmetics.tier_common': 'Common',
+    'cosmetics.tier_rare': 'Rare',
+    'cosmetics.tier_epic': 'Epic',
+    'cosmetics.tier_legendary': 'Legendary',
+    'cosmetics.tier_mythic': 'Mythic',
+    'cosmetics.locked': 'Locked'
   }
 };
 
@@ -940,6 +1026,9 @@ function setLang(next) {
     syncMatchOverlayActions();
   } catch {}
   try {
+    ensureFxPresetControl();
+  } catch {}
+  try {
     updateMatchCountdown();
   } catch {}
   try {
@@ -1027,8 +1116,8 @@ function drawMiniCosmeticPreview(canvasEl, cat, id) {
   const cy = h / 2;
 
   if (cat === 'frame') {
-    const fr = Math.max(0, Math.min(4, Number(id) || 0));
-    const col = fr === 1 ? 'rgba(96,165,250,0.70)' : fr === 2 ? 'rgba(255,45,85,0.70)' : fr === 3 ? 'rgba(255,215,0,0.62)' : fr === 4 ? 'rgba(170,120,255,0.70)' : 'rgba(255,255,255,0.12)';
+    const fr = Math.max(0, Math.min(7, Number(id) || 0));
+    const col = fr === 0 ? 'rgba(255,255,255,0.12)' : cosmeticAccent(fr, fr === 3 ? 0.62 : 0.70);
     c.strokeStyle = col;
     c.lineWidth = 3;
     c.strokeRect(6, 6, w - 12, h - 12);
@@ -1036,8 +1125,8 @@ function drawMiniCosmeticPreview(canvasEl, cat, id) {
   }
 
   if (cat === 'capturefx') {
-    const fxId = Math.max(0, Math.min(4, Number(id) || 0));
-    const col = fxId === 1 ? 'rgba(96,165,250,0.92)' : fxId === 2 ? 'rgba(255,45,85,0.92)' : fxId === 3 ? 'rgba(170,120,255,0.92)' : fxId === 4 ? 'rgba(0,255,255,0.92)' : 'rgba(255,215,0,0.92)';
+    const fxId = Math.max(0, Math.min(7, Number(id) || 0));
+    const col = fxId === 0 ? 'rgba(255,215,0,0.92)' : cosmeticAccent(fxId, 0.92);
     c.strokeStyle = col;
     c.fillStyle = col;
     c.lineWidth = 2;
@@ -1109,7 +1198,7 @@ function drawMiniSeg(ctx2, x, y, w, h, c, segId) {
     const py = y + (i % 2) * 2;
     ctx2.save();
     ctx2.globalAlpha = 0.95;
-    const sid = Math.max(0, Math.min(4, Number(segId) || 0));
+    const sid = Math.max(0, Math.min(7, Number(segId) || 0));
     if (sid === 1) {
       ctx2.shadowColor = c;
       ctx2.shadowBlur = 12;
@@ -1148,7 +1237,7 @@ function drawMiniSeg(ctx2, x, y, w, h, c, segId) {
 }
 
 function drawMiniNameplate(ctx2, nameId) {
-  const np = Math.max(0, Math.min(4, Number(nameId) || 0));
+  const np = Math.max(0, Math.min(7, Number(nameId) || 0));
   ctx2.save();
   ctx2.font = `10px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
   const t = 'YOU';
@@ -1159,21 +1248,12 @@ function drawMiniNameplate(ctx2, nameId) {
   const x = Math.round((ctx2.canvas.width - w) / 2);
   const y = Math.round((ctx2.canvas.height - h) / 2);
   const r = 8;
-  if (np === 1) {
-    ctx2.fillStyle = 'rgba(0,0,0,0.30)';
-    ctx2.strokeStyle = 'rgba(96,165,250,0.32)';
-  } else if (np === 2) {
-    ctx2.fillStyle = 'rgba(255,45,85,0.10)';
-    ctx2.strokeStyle = 'rgba(255,45,85,0.40)';
-  } else if (np === 3) {
-    ctx2.fillStyle = 'rgba(255,215,0,0.10)';
-    ctx2.strokeStyle = 'rgba(255,215,0,0.35)';
-  } else if (np === 4) {
-    ctx2.fillStyle = 'rgba(170,120,255,0.12)';
-    ctx2.strokeStyle = 'rgba(170,120,255,0.40)';
-  } else {
+  if (np === 0) {
     ctx2.fillStyle = 'rgba(0,0,0,0.42)';
     ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
+  } else {
+    ctx2.fillStyle = np === 1 ? 'rgba(0,0,0,0.30)' : cosmeticAccent(np, 0.12);
+    ctx2.strokeStyle = cosmeticAccent(np, 0.38);
   }
   ctx2.lineWidth = 1;
   ctx2.beginPath();
@@ -1193,11 +1273,11 @@ function drawMiniNameplate(ctx2, nameId) {
 }
 
 function drawCaptureFxShopPreview(ctx2, fxId, w, h, baseHsl) {
-  const id = Math.max(0, Math.min(4, Number(fxId) || 0));
+  const id = Math.max(0, Math.min(7, Number(fxId) || 0));
   const now = performance.now() * 0.001;
   const rgb = hslToRgb(baseHsl);
   const fill = (a) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
-  const col = id === 1 ? 'rgba(96,165,250,0.92)' : id === 2 ? 'rgba(255,45,85,0.92)' : id === 3 ? 'rgba(170,120,255,0.92)' : id === 4 ? 'rgba(0,255,255,0.92)' : 'rgba(255,215,0,0.92)';
+  const col = id === 0 ? 'rgba(255,215,0,0.92)' : cosmeticAccent(id, 0.92);
 
   // animated tile capture
   const cols = 10;
@@ -1332,7 +1412,7 @@ function drawCaptureFxShopPreview(ctx2, fxId, w, h, baseHsl) {
 }
 
 function drawMiniHead(ctx2, x, y, r, c, headId) {
-  const id = Math.max(0, Math.min(4, Number(headId) || 0));
+  const id = Math.max(0, Math.min(7, Number(headId) || 0));
   ctx2.save();
   ctx2.fillStyle = c;
   ctx2.strokeStyle = 'rgba(0,0,0,0.35)';
@@ -1371,9 +1451,9 @@ function drawMiniHead(ctx2, x, y, r, c, headId) {
 }
 
 function drawCaptureFxPreview(ctx2, fxId, cx, cy, cell, baseC) {
-  const id = Math.max(0, Math.min(4, Number(fxId) || 0));
+  const id = Math.max(0, Math.min(7, Number(fxId) || 0));
   const now = performance.now() * 0.001;
-  const col = id === 1 ? 'rgba(96,165,250,0.92)' : id === 2 ? 'rgba(255,45,85,0.92)' : id === 3 ? 'rgba(170,120,255,0.92)' : id === 4 ? 'rgba(0,255,255,0.92)' : 'rgba(255,215,0,0.92)';
+  const col = id === 0 ? 'rgba(255,215,0,0.92)' : cosmeticAccent(id, 0.92);
   const r0 = cell * 0.55;
   const r1 = r0 * (0.6 + 0.25 * Math.sin(now * 2.4));
   ctx2.save();
@@ -1435,8 +1515,8 @@ function drawCaptureFxPreview(ctx2, fxId, cx, cy, cell, baseC) {
 }
 
 function drawFramePreview(ctx2, frId, w, h) {
-  const fr = Math.max(0, Math.min(4, Number(frId) || 0));
-  const col = fr === 1 ? 'rgba(96,165,250,0.70)' : fr === 2 ? 'rgba(255,45,85,0.70)' : fr === 3 ? 'rgba(255,215,0,0.62)' : fr === 4 ? 'rgba(170,120,255,0.70)' : 'rgba(255,255,255,0.12)';
+  const fr = Math.max(0, Math.min(7, Number(frId) || 0));
+  const col = fr === 0 ? 'rgba(255,255,255,0.12)' : cosmeticAccent(fr, fr === 3 ? 0.62 : 0.70);
   const x = 60;
   const y = 80;
   const rw = w - 120;
@@ -1457,7 +1537,7 @@ function drawFramePreview(ctx2, frId, w, h) {
 }
 
 function drawSegPreview(ctx2, segId, cx, cy, cell, baseC) {
-  const id = Math.max(0, Math.min(4, Number(segId) || 0));
+  const id = Math.max(0, Math.min(7, Number(segId) || 0));
   ctx2.save();
   for (let i = 0; i < 8; i++) {
     const x = cx - i * cell * 0.55;
@@ -1837,14 +1917,76 @@ const toastByKey = new Map();
 const toastQueue = [];
 const MAX_EVENT_TOASTS = 3;
 
+// J19: приоритеты вместо чистого FIFO — иначе ачивка ждёт за тремя «+15 Стиля».
+const TOAST_PRIO = { minor: 0, important: 1, jackpot: 2 };
+
+function toastPrioValue(name) {
+  return TOAST_PRIO[String(name || 'minor')] ?? 0;
+}
+
 function toastDrain() {
   if (!eventToastsEl) return;
   while (eventToastsEl.children.length < MAX_EVENT_TOASTS && toastQueue.length) {
-    const nextKey = toastQueue.shift();
+    // Берём самый приоритетный, при равенстве — самый старый.
+    let best = -1;
+    let bestPrio = -1;
+    for (let i = 0; i < toastQueue.length; i++) {
+      const it = toastByKey.get(toastQueue[i]);
+      if (!it || it.el) continue;
+      const pv = toastPrioValue(it.prio);
+      if (pv > bestPrio) {
+        bestPrio = pv;
+        best = i;
+      }
+    }
+    if (best < 0) {
+      toastQueue.length = 0;
+      return;
+    }
+    const nextKey = toastQueue.splice(best, 1)[0];
     const next = toastByKey.get(nextKey);
     if (!next || next.el) continue;
     toastMount(next);
   }
+}
+
+// Смонтированный тост с наименьшим приоритетом — кандидат на вытеснение.
+function toastLowestMounted() {
+  let worst = null;
+  let worstPrio = Infinity;
+  for (const it of toastByKey.values()) {
+    if (!it?.el) continue;
+    const pv = toastPrioValue(it.prio);
+    if (pv < worstPrio) {
+      worstPrio = pv;
+      worst = it;
+    }
+  }
+  return worst;
+}
+
+function toastUnmount(item) {
+  if (!item) return;
+  try {
+    if (item.timer) clearTimeout(item.timer);
+  } catch {}
+  item.timer = 0;
+  try {
+    item.el?.remove?.();
+  } catch {}
+  item.el = null;
+  item.textEl = null;
+  toastByKey.delete(item.key);
+}
+
+// J7: пульс при повторе события — с рефлоу-сбросом, иначе анимация не рестартует.
+function toastBump(el) {
+  if (!el) return;
+  try {
+    el.classList.remove('bump');
+    void el.offsetWidth;
+    el.classList.add('bump');
+  } catch {}
 }
 
 function toastMount(item) {
@@ -1905,11 +2047,9 @@ function toastMount(item) {
   const ttl = item.variant === 'big' ? 8200 : 2200;
   if (item.variant === 'big') {
     bigToastCooldownUntil = performance.now() + 2500;
-    setTimeout(() => {
-      try {
-        wrap.classList.remove('eventToastBig');
-      } catch {}
-    }, 2100);
+    // J21: класс .eventToastBig раньше снимался через 2100 мс при живущем
+    // 8200 мс тосте — 3/4 времени «крупный» тост выглядел обычным.
+    // Теперь модификатор держится всю жизнь тоста.
   }
 
   item.timer = setTimeout(() => {
@@ -1967,6 +2107,7 @@ const COSMETICS_DESIRED_KEY = 'snakes_cosmetics_desired_v1';
 
 let styleToastAcc = 0;
 let styleToastReason = 0;
+let styleToastCount = 0;
 let styleToastTimer = 0;
 let youContractType = 0;
 let youContractGoal = 0;
@@ -2006,8 +2147,17 @@ let shakeVelY = 0;
 const audio = createAudioModule();
 const fx = createFxModule();
 
+function audioState() {
+  return {
+    soundEnabled: soundEnabled && !soundMutedByBlur,
+    soundVolume: Math.max(0, Math.min(1, (Number(soundVolume) || 0) * fxVolumeScale()))
+  };
+}
+
+audio.configure(audioState);
+
 function playBeep(freq, ms, vol) {
-  audio.playBeep(freq, ms, vol, () => ({ soundEnabled: soundEnabled && !soundMutedByBlur, soundVolume }));
+  audio.playBeep(freq, ms, vol, audioState);
 }
 
 function applyHudSettings() {
@@ -2049,18 +2199,656 @@ function applyPerfUi() {
   if (perfEl) perfEl.classList.toggle('perfCompact', !!perfCompact);
 }
 
-function addFxBurst(x, y, kind) {
-  fx.addFxBurst(x, y, kind, () => ({ fxEnabled, fxBursts, shakeIntensity, addShakeVel }));
+function addFxBurst(x, y, kind, extra) {
+  fx.addFxBurst(x, y, kind, () => ({ fxEnabled, fxBursts, shakeIntensity, addShakeVel }), extra);
 }
 
-function addShake(amount) {
-  fx.addShake(amount, () => ({ shakeIntensity, addShakeVel }));
+function addShake(amount, dirX, dirY) {
+  fx.addShake(amount, () => ({ shakeIntensity, addShakeVel }), dirX, dirY);
 }
 
 function addShakeVel(dx, dy) {
   shakeVelX += dx;
   shakeVelY += dy;
 }
+
+/* ==========================================================================
+ * J22 — пресеты эффектов
+ * ======================================================================== */
+
+const FX_PRESET_KEY = 'fxPreset';
+const FX_PRESETS = {
+  calm: { shake: 0, flash: 0, particles: 0.35, hitstop: 0, countUp: false, volume: 0.6, banner: true },
+  normal: { shake: 1, flash: 1, particles: 1, hitstop: 1, countUp: true, volume: 1, banner: true },
+  casino: { shake: 1.45, flash: 1.25, particles: 1.4, hitstop: 1.3, countUp: true, volume: 1.1, banner: true }
+};
+
+let fxPreset = 'normal';
+// Ручное переопределение авто-падения в «Спокойно» при prefers-reduced-motion.
+let fxPresetUserSet = false;
+
+function prefersReducedMotion() {
+  try {
+    return !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  } catch {}
+  return false;
+}
+
+function fxPresetDef() {
+  return FX_PRESETS[fxPreset] || FX_PRESETS.normal;
+}
+
+function fxShakeScale() {
+  return Math.max(0, fxPresetDef().shake);
+}
+
+// J9: вспышки жёстко выключены при системном запрете анимаций и в «Спокойно».
+function fxFlashScale() {
+  if (prefersReducedMotion()) return 0;
+  return Math.max(0, fxPresetDef().flash);
+}
+
+function fxParticleScale() {
+  return Math.max(0, fxPresetDef().particles);
+}
+
+function fxHitstopScale() {
+  if (prefersReducedMotion()) return 0;
+  return Math.max(0, fxPresetDef().hitstop);
+}
+
+function fxCountUpEnabled() {
+  if (prefersReducedMotion()) return false;
+  return !!fxPresetDef().countUp;
+}
+
+function fxBannerEnabled() {
+  return !!fxPresetDef().banner;
+}
+
+function fxVolumeScale() {
+  return Math.max(0, fxPresetDef().volume);
+}
+
+function normalizeFxPreset(v) {
+  const s = String(v || '').trim();
+  return FX_PRESETS[s] ? s : '';
+}
+
+function applyFxPreset(next, fromUser) {
+  const v = normalizeFxPreset(next);
+  if (!v) return;
+  fxPreset = v;
+  if (fromUser) fxPresetUserSet = true;
+  try {
+    document.body.dataset.fxPreset = fxPreset;
+  } catch {}
+  const sel = document.getElementById('fxPresetSelect');
+  if (sel) {
+    try {
+      sel.value = fxPreset;
+    } catch {}
+  }
+}
+
+/* ==========================================================================
+ * J6 — count-up чисел
+ * ======================================================================== */
+
+const numberAnims = new WeakMap();
+
+function easeOutCubic(p) {
+  const t = Math.max(0, Math.min(1, p));
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function easeOutBack(p) {
+  const t = Math.max(0, Math.min(1, p));
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+
+function cancelNumberAnim(el) {
+  const prev = numberAnims.get(el);
+  if (!prev) return;
+  try {
+    if (prev.raf) cancelAnimationFrame(prev.raf);
+  } catch {}
+  try {
+    if (prev.to) clearTimeout(prev.to);
+  } catch {}
+  numberAnims.delete(el);
+  try {
+    el.classList.remove('counting');
+  } catch {}
+}
+
+// animateNumber(el, from, to, ms, { delay, prefix, suffix, format, onDone })
+function animateNumber(el, from, to, ms, opts) {
+  if (!el) return;
+  const o = opts || {};
+  const fmt = typeof o.format === 'function' ? o.format : (v) => fmtInt(v);
+  const pre = String(o.prefix ?? '');
+  const suf = String(o.suffix ?? '');
+  const a = Number(from) || 0;
+  const b = Number(to) || 0;
+  const dur = Math.max(0, Number(ms) || 0);
+  const delay = Math.max(0, Number(o.delay) || 0);
+
+  cancelNumberAnim(el);
+
+  const write = (v) => {
+    try {
+      el.textContent = `${pre}${fmt(v)}${suf}`;
+    } catch {}
+  };
+
+  const finish = () => {
+    write(b);
+    try {
+      el.classList.remove('counting');
+    } catch {}
+    numberAnims.delete(el);
+    try {
+      o.onDone?.();
+    } catch {}
+  };
+
+  const wide = Math.abs(b - a) > 5;
+  const animated = dur > 0 && wide && fxCountUpEnabled();
+
+  if (!animated) {
+    if (delay > 0) {
+      numberAnims.set(el, { raf: 0, to: setTimeout(finish, delay) });
+    } else {
+      finish();
+    }
+    return;
+  }
+
+  write(a);
+
+  const start = () => {
+    const rec = numberAnims.get(el) || { raf: 0, to: 0 };
+    rec.to = 0;
+    try {
+      el.classList.add('counting');
+    } catch {}
+    const t0 = performance.now();
+    const step = () => {
+      const p = dur > 0 ? (performance.now() - t0) / dur : 1;
+      if (p >= 1) {
+        finish();
+        return;
+      }
+      write(a + (b - a) * easeOutCubic(p));
+      rec.raf = requestAnimationFrame(step);
+      numberAnims.set(el, rec);
+    };
+    rec.raf = requestAnimationFrame(step);
+    numberAnims.set(el, rec);
+  };
+
+  if (delay > 0) {
+    numberAnims.set(el, { raf: 0, to: setTimeout(start, delay) });
+  } else {
+    start();
+  }
+}
+
+/* ==========================================================================
+ * J9 — полноэкранная вспышка (#fxFlash)
+ * ======================================================================== */
+
+const FX_FLASH_MIN_INTERVAL_MS = 400; // не чаще 2.5 Гц
+const FX_FLASH_PEAK_ALPHA = 0.35;
+const FX_FLASH_DUR_MS = 280;
+const FX_FLASH_RISE_MS = 90;
+
+let fxFlashLastAt = 0;
+let fxFlashRaf = 0;
+
+function clampByte(v) {
+  const n = Math.round(Number(v) || 0);
+  return Math.max(0, Math.min(255, n));
+}
+
+// Красный канал не должен мигать изолированно: подтягиваем G/B под R.
+function safeFlashRgb(rgb) {
+  let r = clampByte(rgb?.[0]);
+  let g = clampByte(rgb?.[1]);
+  let b = clampByte(rgb?.[2]);
+  const floor = Math.round(r * 0.45);
+  if (g < floor) g = floor;
+  if (b < floor) b = floor;
+  return [r, g, b];
+}
+
+function fxFlashScreen(rgb, strength) {
+  if (!fxEnabled) return;
+  const scale = fxFlashScale();
+  if (scale <= 0) return;
+  const el = document.getElementById('fxFlash');
+  if (!el) return;
+
+  const now = performance.now();
+  if (now - fxFlashLastAt < FX_FLASH_MIN_INTERVAL_MS) return;
+  fxFlashLastAt = now;
+
+  const [r, g, b] = safeFlashRgb(rgb);
+  const s = Math.max(0, Math.min(1, Number(strength ?? 1)));
+  const peak = Math.min(FX_FLASH_PEAK_ALPHA, FX_FLASH_PEAK_ALPHA * s * scale);
+  if (peak <= 0.005) return;
+
+  try {
+    if (fxFlashRaf) cancelAnimationFrame(fxFlashRaf);
+  } catch {}
+  fxFlashRaf = 0;
+
+  try {
+    el.style.transition = 'none';
+    el.style.background = `radial-gradient(circle at 50% 50%, rgba(${r},${g},${b},0.90) 0%, rgba(${r},${g},${b},0.42) 42%, rgba(${r},${g},${b},0) 72%)`;
+    el.style.opacity = '0';
+    el.classList.add('isOn');
+  } catch {
+    return;
+  }
+
+  const t0 = performance.now();
+  const step = () => {
+    const age = performance.now() - t0;
+    if (age >= FX_FLASH_DUR_MS) {
+      try {
+        el.style.opacity = '0';
+        el.classList.remove('isOn');
+      } catch {}
+      fxFlashRaf = 0;
+      return;
+    }
+    const a =
+      age < FX_FLASH_RISE_MS
+        ? (age / FX_FLASH_RISE_MS) * peak
+        : peak * (1 - (age - FX_FLASH_RISE_MS) / (FX_FLASH_DUR_MS - FX_FLASH_RISE_MS));
+    try {
+      el.style.opacity = Math.max(0, a).toFixed(3);
+    } catch {}
+    fxFlashRaf = requestAnimationFrame(step);
+  };
+  fxFlashRaf = requestAnimationFrame(step);
+}
+
+/* ==========================================================================
+ * J13 — центральный баннер крупных событий (#bigBanner)
+ * ======================================================================== */
+
+const BIG_BANNER_MIN_INTERVAL_MS = 3000;
+const BIG_BANNER_TTL_MS = 2600;
+
+let bigBannerLastAt = 0;
+let bigBannerTimer = 0;
+
+// Возвращает true, если баннер показан. Иначе вызывающий откатывается на тост.
+function showBigBanner(icon, title, sub, mod) {
+  if (!fxBannerEnabled()) return false;
+  const el = document.getElementById('bigBanner');
+  if (!el) return false;
+
+  const now = performance.now();
+  if (now - bigBannerLastAt < BIG_BANNER_MIN_INTERVAL_MS) return false;
+  bigBannerLastAt = now;
+
+  try {
+    if (bigBannerTimer) clearTimeout(bigBannerTimer);
+  } catch {}
+  bigBannerTimer = 0;
+
+  try {
+    el.classList.remove('bannerJackpot', 'bannerDanger');
+    const m = String(mod || '');
+    if (m === 'jackpot') el.classList.add('bannerJackpot');
+    else if (m === 'danger') el.classList.add('bannerDanger');
+
+    const wrap = document.createElement('div');
+    wrap.className = 'bigBannerInner';
+
+    const ic = document.createElement('div');
+    ic.className = 'bigBannerIcon';
+    ic.textContent = String(icon || '★');
+
+    const tt = document.createElement('div');
+    tt.className = 'bigBannerTitle';
+    tt.textContent = String(title || '');
+
+    wrap.appendChild(ic);
+    wrap.appendChild(tt);
+
+    const s = String(sub || '').trim();
+    if (s) {
+      const se = document.createElement('div');
+      se.className = 'bigBannerSub';
+      se.textContent = s;
+      wrap.appendChild(se);
+    }
+
+    el.replaceChildren(wrap);
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    // Перезапуск анимации: снимаем класс, форсируем рефлоу, ставим обратно.
+    el.classList.remove('isOn');
+    void el.offsetWidth;
+    el.classList.add('isOn');
+  } catch {
+    return false;
+  }
+
+  bigBannerTimer = setTimeout(() => {
+    bigBannerTimer = 0;
+    try {
+      el.classList.remove('isOn');
+    } catch {}
+  }, BIG_BANNER_TTL_MS);
+  return true;
+}
+
+/* ==========================================================================
+ * J14 — классы тряски
+ * ======================================================================== */
+
+const SHAKE_CLASSES = { micro: 0.08, small: 0.2, medium: 0.4, large: 0.7 };
+
+function addShakeClass(kind, dirX, dirY) {
+  const amt = SHAKE_CLASSES[String(kind || '')] ?? SHAKE_CLASSES.small;
+  const scaled = amt * fxShakeScale();
+  if (scaled <= 0) return;
+  addShake(scaled, dirX, dirY);
+}
+
+// Вектор «от точки события к моей голове» — толчок в сторону игрока.
+function shakeDirFrom(ex, ey) {
+  const me = currPlayers?.get?.(you);
+  if (!me) return [0, 0];
+  const dx = (Number(me.x) || 0) - (Number(ex) || 0);
+  const dy = (Number(me.y) || 0) - (Number(ey) || 0);
+  if (!dx && !dy) return [0, 0];
+  return [dx, dy];
+}
+
+/* ==========================================================================
+ * J5 — всплывающие числа над точкой захвата
+ * ======================================================================== */
+
+const SCORE_POPUP_MS = 900;
+const CAPTURE_JACKPOT_CELLS = 250;
+
+/* F14 — первый захват в жизни игрока празднуется отдельно. */
+const FIRST_CAPTURE_KEY = 'snakes_first_capture_v1';
+
+function hasFirstCapture() {
+  try {
+    return localStorage.getItem(FIRST_CAPTURE_KEY) === '1';
+  } catch {}
+  return true;
+}
+
+function celebrateFirstCapture(delta) {
+  if (hasFirstCapture()) return;
+  try {
+    localStorage.setItem(FIRST_CAPTURE_KEY, '1');
+  } catch {}
+  trackEvent('first_capture');
+  sfx.firstCapture();
+  fxFlashScreen([170, 255, 210], 1);
+  const sub = `+${fmtInt(delta)} · ${t('banner.first_capture_sub')}`;
+  if (!showBigBanner('🎉', t('banner.first_capture'), sub, 'jackpot')) {
+    addToast('🎉', t('banner.first_capture'), 'big', sub, { key: 'first_capture', prio: 'jackpot' });
+  }
+}
+
+function addScorePopup(x, y, value) {
+  const v = Math.max(0, Math.round(Number(value) || 0));
+  if (!v) return;
+  addFxBurst(x, y, 'score', { value: v });
+}
+
+/* ==========================================================================
+ * J10 — комбо с растущим тоном
+ * ======================================================================== */
+
+const COMBO_WINDOW_MS = 3000;
+let comboCount = 0;
+let comboLastAt = 0;
+let comboTimer = 0;
+
+let comboHudSig = '';
+
+function renderComboHud() {
+  const el = document.getElementById('hudCombo');
+  if (!el) return;
+  // renderTopHud вызывается каждый кадр — пересобираем DOM только при изменении.
+  const sig = started ? `${youKills}|${comboCount}` : '';
+  if (sig === comboHudSig) return;
+  comboHudSig = sig;
+
+  const showCombo = comboCount >= 2;
+  if (!started) {
+    el.classList.remove('isOn');
+    el.replaceChildren();
+    return;
+  }
+  try {
+    const kills = document.createElement('span');
+    kills.className = 'hudComboKills';
+    kills.textContent = `⚔ ${youKills}`;
+
+    el.replaceChildren(kills);
+
+    if (showCombo) {
+      const c = document.createElement('span');
+      c.className = 'hudComboValue';
+      c.textContent = `x${comboCount}`;
+      const grow = Math.min(2.0, 1 + (comboCount - 2) * 0.14);
+      c.style.fontSize = `${(100 * grow).toFixed(0)}%`;
+      el.appendChild(c);
+    }
+    el.classList.toggle('isOn', showCombo || youKills > 0);
+  } catch {}
+}
+
+function comboBump() {
+  const now = performance.now();
+  if (now - comboLastAt > COMBO_WINDOW_MS) comboCount = 0;
+  comboLastAt = now;
+  comboCount++;
+
+  if (comboCount >= 2) {
+    // +2 полутона за шаг цепочки.
+    const semis = Math.min(24, (comboCount - 2) * 2);
+    sfx.comboStep(semis);
+  }
+  renderComboHud();
+
+  try {
+    if (comboTimer) clearTimeout(comboTimer);
+  } catch {}
+  comboTimer = setTimeout(comboBreak, COMBO_WINDOW_MS + 40);
+}
+
+function comboBreak() {
+  comboTimer = 0;
+  const had = comboCount;
+  comboCount = 0;
+  renderComboHud();
+  if (had >= 2) sfx.comboBreak();
+}
+
+function comboReset() {
+  try {
+    if (comboTimer) clearTimeout(comboTimer);
+  } catch {}
+  comboTimer = 0;
+  comboCount = 0;
+  comboLastAt = 0;
+  comboHudSig = '';
+  renderComboHud();
+}
+
+/* ==========================================================================
+ * J16-J18 — звуковая палитра
+ * ======================================================================== */
+
+// Ноты (Гц)
+const NOTE = {
+  C3: 130.81,
+  E3: 164.81,
+  G3: 196.0,
+  A3: 220.0,
+  C4: 261.63,
+  D4: 293.66,
+  E4: 329.63,
+  F4: 349.23,
+  G4: 392.0,
+  A4: 440.0,
+  B4: 493.88,
+  C5: 523.25,
+  D5: 587.33,
+  E5: 659.25,
+  G5: 783.99,
+  A5: 880.0,
+  C6: 1046.5,
+  E6: 1318.51,
+  G6: 1567.98,
+  C7: 2093.0,
+  E7: 2637.02
+};
+
+const sfx = {
+  // ——— низ 70-350 Гц: опасность ———
+  death() {
+    audio.sweep(330, 82, 750, 'sawtooth', {
+      vol: 0.9,
+      attack: 0.012,
+      decay: 0.72,
+      filter: { type: 'lowpass', freq: 1400, freq2: 160, q: 1.2 },
+      prio: 5
+    });
+    audio.noiseBurst(240, 'lowpass', 420, { vol: 0.35, attack: 0.004, decay: 0.22, prio: 4 });
+  },
+  kill() {
+    audio.noiseBurst(160, 'lowpass', 900, { vol: 0.45, attack: 0.003, decay: 0.14, prio: 4 });
+    audio.sweep(180, 70, 220, 'sawtooth', { vol: 0.55, attack: 0.004, decay: 0.2, prio: 4 });
+  },
+  revenge() {
+    audio.sweep(220, 96, 380, 'sawtooth', { vol: 0.7, attack: 0.006, decay: 0.34, prio: 4 });
+    audio.tone({ type: 'triangle', freq: NOTE.E3, dur: 260, vol: 0.4, delay: 120, prio: 3 });
+  },
+  explode() {
+    audio.noiseBurst(320, 'lowpass', 700, { vol: 0.55, cutoff2: 140, attack: 0.002, decay: 0.3, prio: 4 });
+    audio.sweep(140, 62, 300, 'sawtooth', { vol: 0.5, prio: 3 });
+  },
+
+  // ——— середина 350-700 Гц, triangle: прогресс ———
+  captureSmall() {
+    audio.tone({ type: 'triangle', freq: NOTE.C5, dur: 100, vol: 0.28, attack: 0.004, prio: 1 });
+  },
+  captureBig() {
+    audio.arp([NOTE.C4, NOTE.E4, NOTE.G4, NOTE.C5], 62, { type: 'triangle', vol: 0.5, dur: 150, prio: 3 });
+  },
+  contractAssigned() {
+    audio.arp([NOTE.D4, NOTE.G4], 90, { type: 'triangle', vol: 0.45, dur: 190, prio: 2 });
+  },
+  contractDone() {
+    audio.arp([NOTE.G4, NOTE.B4, NOTE.D5], 70, { type: 'triangle', vol: 0.5, dur: 200, prio: 3 });
+  },
+  dailyAssigned() {
+    audio.arp([NOTE.C4, NOTE.F4], 100, { type: 'triangle', vol: 0.4, dur: 200, prio: 2 });
+  },
+  dailyDone() {
+    audio.arp([NOTE.F4, NOTE.A4, NOTE.C5], 72, { type: 'triangle', vol: 0.5, dur: 200, prio: 3 });
+  },
+  bountyAssigned(vol) {
+    audio.tone({ type: 'triangle', freq: NOTE.E4, dur: 150, vol: 0.42 * (vol ?? 1), prio: 2 });
+    audio.tone({ type: 'triangle', freq: NOTE.A4, dur: 190, vol: 0.38 * (vol ?? 1), delay: 110, prio: 2 });
+  },
+  bountyClaimed() {
+    audio.arp([NOTE.A4, NOTE.C5, NOTE.E5, NOTE.A5], 66, { type: 'triangle', vol: 0.55, dur: 200, prio: 4 });
+  },
+  pickup() {
+    audio.tone({ type: 'triangle', freq: NOTE.G4, dur: 90, vol: 0.35, prio: 1 });
+    audio.tone({ type: 'triangle', freq: NOTE.D5, dur: 110, vol: 0.3, delay: 55, prio: 1 });
+  },
+  powerUsed() {
+    audio.tone({ type: 'square', freq: NOTE.E4, dur: 120, vol: 0.3, filter: { type: 'lowpass', freq: 1600 }, prio: 2 });
+  },
+  streak(step) {
+    const n = Math.max(0, Math.min(10, Number(step) || 0));
+    audio.tone({ type: 'triangle', freq: 440 * Math.pow(2, n / 12), dur: 110, vol: 0.42, prio: 2 });
+  },
+
+  // ——— верх 700-1400 Гц, sine/аккорды: награды ———
+  achievement() {
+    audio.chord([NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C6], 520, { type: 'sine', vol: 0.7, spread: 22, prio: 5 });
+    audio.tone({ type: 'sine', freq: NOTE.E7, dur: 220, vol: 0.22, delay: 150, attack: 0.004, prio: 3 });
+  },
+  jackpot() {
+    audio.arp([NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C6, NOTE.E6], 58, { type: 'triangle', vol: 0.55, dur: 200, prio: 5 });
+    audio.chord([NOTE.C5, NOTE.G5, NOTE.C6], 620, { type: 'sine', vol: 0.55, delay: 300, prio: 4 });
+  },
+  victory() {
+    audio.arp([NOTE.C5, NOTE.D5, NOTE.E5, NOTE.G5, NOTE.A5, NOTE.C6], 130, {
+      type: 'triangle',
+      vol: 0.5,
+      dur: 240,
+      prio: 6
+    });
+    audio.chord([NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C6], 780, { type: 'sine', vol: 0.65, delay: 820, prio: 6 });
+  },
+  defeat() {
+    audio.arp([NOTE.A4, NOTE.G4, NOTE.F4, NOTE.E4], 150, { type: 'triangle', vol: 0.45, dur: 300, prio: 6 });
+    audio.chord([NOTE.A3, NOTE.C4, NOTE.E4], 700, { type: 'sine', vol: 0.5, delay: 620, prio: 5 });
+  },
+  firstCapture() {
+    audio.arp([NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C6], 90, { type: 'triangle', vol: 0.55, dur: 260, prio: 6 });
+    audio.tone({ type: 'sine', freq: NOTE.E7, dur: 260, vol: 0.2, delay: 320, prio: 4 });
+  },
+  styleGain() {
+    audio.tone({ type: 'sine', freq: NOTE.C6, dur: 120, vol: 0.24, prio: 1 });
+  },
+
+  // ——— свипы: временные состояния ———
+  mutatorOn(vol) {
+    audio.sweep(240, 720, 340, 'sawtooth', {
+      vol: 0.45 * (vol ?? 1),
+      filter: { type: 'lowpass', freq: 700, freq2: 2600 },
+      prio: 2
+    });
+  },
+  mutatorOff(vol) {
+    audio.sweep(620, 220, 300, 'triangle', { vol: 0.35 * (vol ?? 1), prio: 1 });
+  },
+  speedOn() {
+    audio.sweep(420, 980, 260, 'triangle', { vol: 0.4, prio: 2 });
+  },
+
+  // ——— комбо ———
+  comboStep(semis) {
+    const s = Math.max(0, Math.min(28, Number(semis) || 0));
+    audio.tone({ type: 'triangle', freq: 392 * Math.pow(2, s / 12), dur: 110, vol: 0.34, prio: 2 });
+  },
+  comboBreak() {
+    audio.sweep(520, 180, 260, 'sine', { vol: 0.28, prio: 1 });
+  },
+
+  ui() {
+    audio.tone({ type: 'sine', freq: NOTE.A5, dur: 70, vol: 0.2, prio: 0 });
+  },
+
+  // J6: восходящий бип каскада результатов.
+  countStep(i) {
+    const n = Math.max(0, Math.min(8, Number(i) || 0));
+    audio.tone({ type: 'sine', freq: 523.25 * Math.pow(2, (n * 2) / 12), dur: 110, vol: 0.26, prio: 2 });
+  }
+};
 
 let started = false;
 let youAlive = false;
@@ -2420,6 +3208,68 @@ let lastDeathInfo = null;
 
 let lastYouStats = null;
 
+/* I2/F18: геометрия «своего» — длина следа и ближайшая своя клетка. */
+const TRAIL_PULSE_FROM = 22;
+let youTrailLen = 0;
+let youInOwnZone = true;
+let youNearestHomeX = -1;
+let youNearestHomeY = -1;
+let youNearestHomeAt = 0;
+let ownGeometryAt = 0;
+
+// Полный проход по сетке дешевле, чем кажется (200x140), и вызывается 5 раз в
+// секунду вне кадрового цикла: считает длину своего следа и ближайшую свою
+// клетку, если её не нашлось в видимой области.
+function refreshOwnGeometry(force) {
+  if (!gridOwner || !trailOwner || !you || !W || !H) return;
+  const now = performance.now();
+  if (!force && now - ownGeometryAt < 200) return;
+  ownGeometryAt = now;
+
+  const me = currPlayers.get(you);
+  if (!me || !me.a) {
+    youTrailLen = 0;
+    youInOwnZone = true;
+    youNearestHomeX = -1;
+    youNearestHomeY = -1;
+    return;
+  }
+
+  const hx = Number(me.x) || 0;
+  const hy = Number(me.y) || 0;
+  const hi = hy * W + hx;
+  youInOwnZone = hi >= 0 && hi < gridOwner.length ? gridOwner[hi] === you : false;
+
+  const staleHome = now - youNearestHomeAt > 400;
+  let len = 0;
+  let bestD = Infinity;
+  let bx = -1;
+  let by = -1;
+  let i = 0;
+  for (let y = 0; y < H; y++) {
+    const dy = y - hy;
+    const dy2 = dy * dy;
+    for (let x = 0; x < W; x++, i++) {
+      if (trailOwner[i] === you) len++;
+      if (staleHome && gridOwner[i] === you) {
+        const dx = x - hx;
+        const d = dx * dx + dy2;
+        if (d < bestD) {
+          bestD = d;
+          bx = x;
+          by = y;
+        }
+      }
+    }
+  }
+  youTrailLen = len;
+  if (staleHome) {
+    youNearestHomeX = bx;
+    youNearestHomeY = by;
+    youNearestHomeAt = bx >= 0 ? now : 0;
+  }
+}
+
 function fmtInt(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return '0';
@@ -2457,6 +3307,24 @@ function deathReasonText(info) {
   if (killer && killer === you) return rs ? `${t('death.reason_prefix')}: ${rs}` : '';
   if (killer && killerName) return rs ? `${t('death.killed_by')}: ${killerName} (${rs})` : `${t('death.killed_by')}: ${killerName}`;
   return rs ? `${t('death.reason_prefix')}: ${rs}` : '';
+}
+
+// F15: сухое «Разрез следа» ничего не объясняет новичку. Даём правило игры.
+function deathReasonHint(info) {
+  const reason = Number(info?.reason) || 0;
+  const killerName = String(info?.killerName || '').trim();
+  if (reason === 1) {
+    if (killerName) {
+      return lang === 'en'
+        ? `${killerName} crossed your trail. Until the loop is closed you are vulnerable.`
+        : `${killerName} пересёк твой след. Пока след не замкнут — ты уязвим.`;
+    }
+    return t('death.hint.cut');
+  }
+  if (reason === 2) return t('death.hint.headon');
+  if (reason === 3) return t('death.hint.selftrail');
+  if (reason === 4) return t('death.hint.wall');
+  return t('death.hint.generic');
 }
 
 const storedName = localStorage.getItem('name') || '';
@@ -2910,6 +3778,24 @@ for (const b of rightTabButtons) {
 
 setRightTab(getRightTabDefault(), false);
 
+// I5: отдельный слот баунти в верхнем HUD. Разметку добавляет вёрсточный агент
+// (#topHudBounty); пока её нет — создаём сами, рядом с киллами.
+function ensureTopHudBountyEl() {
+  let el = document.getElementById('topHudBounty');
+  if (el) return el;
+  const host = topHudKillsEl?.parentElement || topHudTimeEl?.parentElement || null;
+  if (!host) return null;
+  try {
+    el = document.createElement('span');
+    el.id = 'topHudBounty';
+    el.className = 'topHudBounty hidden';
+    host.insertBefore(el, topHudKillsEl || null);
+  } catch {
+    return null;
+  }
+  return el;
+}
+
 function renderTopHud() {
   if (!topHudEl) return;
   if (!started || !lastState) {
@@ -2923,31 +3809,48 @@ function renderTopHud() {
   const cells = Number(me?.s) || 0;
   const pct = mapCells ? (cells / mapCells) * 100 : 0;
 
-  if (topHudCellsEl) topHudCellsEl.textContent = String(cells);
+  // J6: счётчик клеток догоняется анимацией, а не прыгает.
+  if (topHudCellsEl) {
+    const prevCells = Number(topHudCellsEl.dataset.value);
+    if (!Number.isFinite(prevCells)) {
+      topHudCellsEl.textContent = String(cells);
+    } else if (prevCells !== cells) {
+      animateNumber(topHudCellsEl, prevCells, cells, 420);
+    }
+    topHudCellsEl.dataset.value = String(cells);
+  }
   if (topHudPctEl) topHudPctEl.textContent = `${pct.toFixed(1)}%`;
 
   if (topHudKillsEl) topHudKillsEl.textContent = `⚔ ${youKills}`;
+  renderComboHud();
 
-  // Таймер: показываем самый полезный "сейчас" (бафф/контракт/раунд/награда)
-  const nt = approxNowTick();
-  const parts = [];
-  if (matchEndTick) {
-    const rem = formatTickRemain(matchEndTick);
-    if (rem) parts.push(`${t('right.match')} ${rem}`);
+  // I5: таймер матча — отдельный крупный элемент. Только время, без «•»-склейки,
+  // иначе самое важное («сколько до конца») обрезается по ellipsis.
+  if (topHudTimeEl) {
+    const rem = matchEndTick ? formatTickRemain(matchEndTick) : '';
+    topHudTimeEl.textContent = rem || '';
+    const sec = matchEndTick ? tickRemainSeconds(matchEndTick) : null;
+    topHudTimeEl.classList.toggle('isUrgent', sec != null && sec <= 30);
+    topHudTimeEl.classList.toggle('hidden', !rem);
+    try {
+      topHudTimeEl.title = t('hud.time_left');
+    } catch {}
   }
-  if (bountyTarget) {
-    const bn = nameById.get(bountyTarget) || String(bountyTarget);
-    const rem = formatTickRemain(bountyUntil);
-    parts.push(rem ? `🎯 ${bn} (${rem})` : `🎯 ${bn}`);
+
+  // I5: баунти — отдельный элемент, а не часть таймерной строки.
+  const bountyEl = ensureTopHudBountyEl();
+  if (bountyEl) {
+    if (bountyTarget) {
+      const bn = nameById.get(bountyTarget) || String(bountyTarget);
+      const rem = formatTickRemain(bountyUntil);
+      bountyEl.textContent = rem ? `🎯 ${bn} (${rem})` : `🎯 ${bn}`;
+      bountyEl.classList.remove('hidden');
+      bountyEl.classList.toggle('isMe', bountyTarget === you);
+    } else {
+      bountyEl.textContent = '';
+      bountyEl.classList.add('hidden');
+    }
   }
-  if (youContractType) {
-    const cn = contractLabel(youContractType) || infoPack().labels.contract;
-    const goal = Number(youContractGoal) || 0;
-    const prog = Number(youContractProgress) || 0;
-    const rem = formatTickRemain(youContractUntil);
-    parts.push(`${cn}: ${prog}/${goal}${rem ? ` (${rem})` : ''}`);
-  }
-  if (topHudTimeEl) topHudTimeEl.textContent = parts.join(' • ');
 
   const ensureContractParts = () => {
     if (!topHudContractEl) return { obj: null, chip: null };
@@ -3093,10 +3996,32 @@ function showDeathOverlay() {
   renderDeathStats();
   lastDeathStatsAt = 0;
 
+  // J16: собственная смерть была беззвучной.
+  sfx.death();
+  comboBreak();
+
   if (deathReasonEl) {
-    const t = deathReasonText(lastDeathInfo);
-    deathReasonEl.textContent = t;
-    deathReasonEl.style.display = t ? '' : 'none';
+    const reasonText = deathReasonText(lastDeathInfo);
+    const hintText = deathReasonHint(lastDeathInfo);
+    try {
+      const frag = document.createDocumentFragment();
+      if (reasonText) {
+        const r = document.createElement('div');
+        r.className = 'deathReasonMain';
+        r.textContent = reasonText;
+        frag.appendChild(r);
+      }
+      if (hintText) {
+        const h = document.createElement('div');
+        h.className = 'deathReasonHint';
+        h.textContent = hintText;
+        frag.appendChild(h);
+      }
+      deathReasonEl.replaceChildren(frag);
+    } catch {
+      deathReasonEl.textContent = reasonText || hintText;
+    }
+    deathReasonEl.style.display = reasonText || hintText ? '' : 'none';
   }
 
   overlayManager.focusDefault('death');
@@ -3137,6 +4062,15 @@ function showMatchOverlay() {
   overlayManager.open('match');
   syncOverlayUiState();
   syncMatchOverlayActions();
+
+  // J16: конец матча был беззвучным.
+  comboReset();
+  const rows = Array.isArray(lastMatchResults) ? lastMatchResults : [];
+  const meIdx = rows.findIndex((r) => (Number(r?.n) || 0) === you);
+  if (meIdx === 0) sfx.victory();
+  else sfx.defeat();
+
+  runMatchResultsCascade();
   overlayManager.focusDefault('match');
 }
 
@@ -3144,6 +4078,89 @@ function hideMatchOverlay() {
   if (matchOverlay) matchOverlay.classList.add('hidden');
   overlayManager.close('match');
   syncOverlayUiState();
+}
+
+// Поля Pk/Avg/D появились в matchResult позже; читаем терпимо к регистру ключа
+// и откатываемся на мгновенный снимок, если сервер их ещё не шлёт.
+function resultPeak(r) {
+  const v = Number(r?.pk ?? r?.Pk);
+  if (Number.isFinite(v) && v > 0) return v;
+  return Number(r?.cells) || 0;
+}
+
+function resultAvg(r) {
+  const v = Number(r?.avg ?? r?.Avg);
+  return Number.isFinite(v) && v >= 0 ? v : 0;
+}
+
+function resultDeaths(r) {
+  const v = Number(r?.d ?? r?.D);
+  return Number.isFinite(v) && v >= 0 ? v : 0;
+}
+
+const FIRST_MATCH_KEY = 'snakes_matches_played_v1';
+
+function matchesPlayed() {
+  try {
+    return Math.max(0, Number(localStorage.getItem(FIRST_MATCH_KEY)) || 0);
+  } catch {}
+  return 0;
+}
+
+function bumpMatchesPlayed() {
+  try {
+    localStorage.setItem(FIRST_MATCH_KEY, String(matchesPlayed() + 1));
+  } catch {}
+}
+
+// F16: крючок «до первого скина N ✨» на экране результатов первого матча.
+function firstSkinHookHtml() {
+  if (matchesPlayed() > 1) return '';
+  let owned = 0;
+  for (const cat of COSMETICS_CATS) owned += Math.max(0, cosmeticsOwnedCount(cat) - 1);
+  if (owned > 0) return '';
+
+  const price = cosmeticsCheapestPrice();
+  if (price <= 0) return '';
+  const have = Math.max(0, Math.floor(Number(youStyle) || 0));
+  const left = Math.max(0, price - have);
+  const pct = Math.max(0, Math.min(100, (have / price) * 100));
+
+  return `
+      <div class="matchFirstSkin">
+        <div class="matchFirstSkinTop">
+          <span class="matchFirstSkinLabel">${escapeHtml(t('match.first_skin'))}</span>
+          <span class="matchFirstSkinValue">${left > 0 ? `${escapeHtml(t('cosmetics.missing_prefix'))} ${fmtInt(left)} ✨` : '✨ ' + escapeHtml(t('cosmetics.buy'))}</span>
+        </div>
+        <div class="matchFirstSkinBar"><div class="matchFirstSkinFill" style="width:${pct.toFixed(1)}%"></div></div>
+        <div class="matchFirstSkinSub">${escapeHtml(t('match.first_skin_sub'))}</div>
+      </div>`;
+}
+
+// J6: каскад чисел — место → очки → зона → киллы → награда,
+// по 250 мс со сдвигом 180 мс, каждое со своим восходящим бипом.
+const MATCH_CASCADE_ORDER = ['place', 'points', 'zone', 'kills', 'reward'];
+
+function runMatchResultsCascade() {
+  if (!matchResultsEl) return;
+  if (!fxCountUpEnabled()) return;
+  let step = 0;
+  for (const key of MATCH_CASCADE_ORDER) {
+    const el = matchResultsEl.querySelector(`[data-count="${key}"]`);
+    if (!el) continue;
+    const to = Number(el.dataset.to) || 0;
+    if (to <= 0) continue;
+    const prefix = String(el.dataset.prefix || '');
+    const delay = step * 180;
+    animateNumber(el, 0, to, 250, {
+      delay,
+      prefix,
+      onDone: () => {}
+    });
+    const i = step;
+    setTimeout(() => sfx.countStep(i), delay);
+    step++;
+  }
 }
 
 function renderMatchResults(results) {
@@ -3156,7 +4173,11 @@ function renderMatchResults(results) {
   const meIndex = rows.findIndex((r) => (Number(r?.n) || 0) === you);
   const me = meIndex >= 0 ? rows[meIndex] : null;
   const mePoints = Number(me?.p) || 0;
-  const meCells = Number(me?.cells) || 0;
+  // Мгновенный снимок зоны бесполезен: умерший на последней секунде видел 0.
+  // Сервер шлёт пик (Pk), среднюю (Avg) и смерти (D) — показываем их.
+  const meCells = resultPeak(me);
+  const meAvg = resultAvg(me);
+  const meDeaths = resultDeaths(me);
   const meKills = Number(me?.k) || 0;
   const mePlace = Number(me?.place) || (meIndex >= 0 ? meIndex + 1 : 0);
   const meCt = Number(me?.ct) || 0;
@@ -3188,18 +4209,20 @@ function renderMatchResults(results) {
       const n = Number(r?.n) || 0;
       const nm = String(r?.nm || n || '—');
       const p = Number(r?.p) || 0;
-      const cells = Number(r?.cells) || 0;
+      const peak = resultPeak(r);
       const k = Number(r?.k) || 0;
+      const d = resultDeaths(r);
       const isMe = n === you;
       const fr = Number(r?.fr) || 0;
-      const frClass = `frame${Math.max(0, Math.min(4, fr))}`;
+      const frClass = `frame${Math.max(0, Math.min(7, fr))}`;
       return `
         <tr class="${isMe ? 'matchRowMe' : ''} ${frClass}">
           <td class="num">${i + 1}</td>
           <td>${escapeHtml(nm)}</td>
           <td class="num">${fmtInt(p)}</td>
-          <td class="num">${fmtInt(cells)}</td>
+          <td class="num">${fmtInt(peak)}</td>
           <td class="num">${fmtInt(k)}</td>
+          <td class="num">${fmtInt(d)}</td>
         </tr>
       `;
     })
@@ -3216,25 +4239,35 @@ function renderMatchResults(results) {
       <div class="matchKpiGrid">
         <div class="matchKpi">
           <div class="matchKpiLabel">${escapeHtml(t('match.place'))}</div>
-          <div class="matchKpiValue">${mePlace ? fmtInt(mePlace) : '—'}<span class="matchKpiOf"> ${escapeHtml(t('match.out_of'))} ${fmtInt(totalPlayers)}</span></div>
+          <div class="matchKpiValue"><span data-count="place" data-to="${mePlace || 0}">${mePlace ? fmtInt(mePlace) : '—'}</span><span class="matchKpiOf"> ${escapeHtml(t('match.out_of'))} ${fmtInt(totalPlayers)}</span></div>
         </div>
         <div class="matchKpi">
           <div class="matchKpiLabel">${escapeHtml(t('match.points'))}</div>
-          <div class="matchKpiValue">${me ? fmtInt(mePoints) : '—'}</div>
+          <div class="matchKpiValue" data-count="points" data-to="${mePoints}">${me ? fmtInt(mePoints) : '—'}</div>
         </div>
       </div>
 
       <div class="matchMiniGrid">
         <div class="matchMini">
-          <div class="matchMiniLabel">${escapeHtml(t('match.zone'))}</div>
-          <div class="matchMiniValue">${me ? fmtInt(meCells) : '—'}</div>
+          <div class="matchMiniLabel">${escapeHtml(t('match.peak'))}</div>
+          <div class="matchMiniValue" data-count="zone" data-to="${meCells}">${me ? fmtInt(meCells) : '—'}</div>
+        </div>
+        <div class="matchMini">
+          <div class="matchMiniLabel">${escapeHtml(t('match.avg'))}</div>
+          <div class="matchMiniValue">${me ? fmtInt(meAvg) : '—'}</div>
         </div>
         <div class="matchMini">
           <div class="matchMiniLabel">${escapeHtml(t('match.kills'))}</div>
-          <div class="matchMiniValue">${me ? fmtInt(meKills) : '—'}</div>
+          <div class="matchMiniValue" data-count="kills" data-to="${meKills}">${me ? fmtInt(meKills) : '—'}</div>
         </div>
-        ${meSe > 0 ? `<div class="matchMini matchMiniReward"><div class="matchMiniLabel">${escapeHtml(t('match.reward'))}</div><div class="matchMiniValue">✨ +${fmtInt(meSe)} ${escapeHtml(t('cosmetics.style_points'))}</div></div>` : ''}
+        <div class="matchMini">
+          <div class="matchMiniLabel">${escapeHtml(t('match.deaths'))}</div>
+          <div class="matchMiniValue">${me ? fmtInt(meDeaths) : '—'}</div>
+        </div>
+        ${meSe > 0 ? `<div class="matchMini matchMiniReward"><div class="matchMiniLabel">${escapeHtml(t('match.reward'))}</div><div class="matchMiniValue"><span data-count="reward" data-to="${meSe}" data-prefix="✨ +">✨ +${fmtInt(meSe)}</span> ${escapeHtml(t('cosmetics.style_points'))}</div></div>` : ''}
       </div>
+
+      ${firstSkinHookHtml()}
 
       ${me && meCt ? `<div class="matchNextGap">${escapeHtml(t('match.contract'))}: ${escapeHtml(contractLabel(meCt) || String(meCt))} ${fmtInt(meCp)}/${fmtInt(meCg)}</div>` : ''}
 
@@ -3269,8 +4302,9 @@ function renderMatchResults(results) {
             <th class="num">#</th>
             <th>${escapeHtml(t('match.player'))}</th>
             <th class="num">${escapeHtml(t('match.points'))}</th>
-            <th class="num">${escapeHtml(t('match.zone'))}</th>
+            <th class="num">${escapeHtml(t('match.peak'))}</th>
             <th class="num">${escapeHtml(t('match.kills'))}</th>
+            <th class="num">${escapeHtml(t('match.deaths'))}</th>
           </tr>
         </thead>
         <tbody>
@@ -3395,6 +4429,12 @@ function resetClientForNewMatch() {
 
   youKills = 0;
   youStreak = 0;
+  youTrailLen = 0;
+  youInOwnZone = true;
+  youNearestHomeX = -1;
+  youNearestHomeY = -1;
+  youNearestHomeAt = 0;
+  comboReset();
   youContractType = 0;
   youContractGoal = 0;
   youContractProgress = 0;
@@ -3464,6 +4504,7 @@ function onMatchEnd(d) {
 
   lastMatchResults = d?.results || null;
 
+  bumpMatchesPlayed();
   renderMatchResults(lastMatchResults);
   updateMatchCountdown();
   showMatchOverlay();
@@ -3798,9 +4839,17 @@ function roomsQueryText(r) {
 }
 
 function updateRoomsStats(rawRooms) {
-  if (!roomsStatsEl) return;
   const rooms = Array.isArray(rawRooms) ? rawRooms : [];
   const totalHumans = rooms.reduce((acc, r) => acc + (Number(r?.humans) || 0), 0);
+
+  // Счётчик онлайна в шапке меню: самая ценная для конверсии цифра, раньше она
+  // была спрятана в служебную строку внутри свёрнутой панели комнат.
+  try {
+    const onlineEl = document.getElementById('menuOnlineCount');
+    if (onlineEl) onlineEl.textContent = formatNumber(totalHumans);
+  } catch {}
+
+  if (!roomsStatsEl) return;
   const status = roomsLoading ? ` • ${t('rooms.loading')}` : roomsLoadError ? ` • ${roomsLoadError}` : '';
   roomsStatsEl.textContent = `${t('rooms.stats_prefix')}: ${formatNumber(rooms.length)} • ${t('rooms.stats_online')}: ${formatNumber(totalHumans)}${wsStatusSuffix()}${status}`;
 }
@@ -5010,6 +6059,11 @@ let lastDirSent = null;
 function setDir(dir) {
   if (!youAlive) return;
   if (dir === lastDirSent) return;
+  // F13: подсказка про управление гаснет по факту действия, а не по факту входа.
+  if (!getMenuControlsSeen()) {
+    setMenuControlsSeen();
+    syncMenuOnboardingUi();
+  }
   lastDirSent = dir;
   wsSend('input', { dir });
 }
@@ -5269,9 +6323,8 @@ function onInit(msg) {
   hideOverlays();
 
   started = true;
-  if (!getMenuControlsSeen()) {
-    setMenuControlsSeen();
-  }
+  // F13: раньше подсказка гасилась прямо здесь, ещё до того как игрок её прочитал.
+  // Теперь её снимает первое реальное действие (см. setDir).
   syncMenuOnboardingUi();
   try {
     document.body.classList.add('inGame');
@@ -5358,7 +6411,7 @@ function onCosmetics(msg) {
     for (const cat of Object.keys(nextInv)) {
       const added = nextInv[cat] & ~prevInv[cat];
       if (!added) continue;
-      for (let id = 0; id < 5; id++) {
+      for (let id = 0; id <= COSMETICS_MAX_ID; id++) {
         if (added & (1 << id)) {
           boughtCat = cat;
           boughtId = id;
@@ -5412,7 +6465,7 @@ function cosmeticsDesiredSave(s) {
 
 function cosmeticsSetDesiredEq(cat, id) {
   const c = String(cat || '').trim().toLowerCase();
-  const itemId = Math.max(0, Math.min(4, Number(id) || 0));
+  const itemId = Math.max(0, Math.min(7, Number(id) || 0));
   const d = cosmeticsDesiredLoad() || {};
   if (c === 'capturefx') d.eqCaptureFx = itemId;
   else if (c === 'head') d.eqHead = itemId;
@@ -5432,8 +6485,8 @@ function cosmeticsApplyDesiredServer() {
 
   const apply = (cat, desiredId, invMask, currentEq, keyName) => {
     if (desiredId === undefined || desiredId === null) return;
-    const want = Math.max(0, Math.min(4, Number(desiredId) || 0));
-    if (want === Math.max(0, Math.min(4, Number(currentEq) || 0))) return;
+    const want = Math.max(0, Math.min(7, Number(desiredId) || 0));
+    if (want === Math.max(0, Math.min(7, Number(currentEq) || 0))) return;
     const bit = 1 << want;
     if ((Number(invMask) & bit) === 0) {
       // C9: the cache promised an item the account does not have — say so out loud.
@@ -5569,6 +6622,10 @@ function scheduleCosmeticsPreviewAnim() {
   cosmeticsPreviewRaf = requestAnimationFrame(tick);
 }
 
+// Потолок id косметики: маска инвентаря — uint8, ровно 8 слотов (0..7).
+const COSMETICS_MAX_ID = 7;
+const COSMETICS_CATS = ['frame', 'nameplate', 'head', 'seg', 'capturefx'];
+
 function bitHas(mask, id) {
   const bit = 1 << (Number(id) || 0);
   return (Number(mask) & bit) !== 0;
@@ -5590,16 +6647,69 @@ function cosmeticsEqForCat(cat) {
   return youCosEqFrame;
 }
 
-function cosmeticsPrice(cat) {
+// Фолбэк-цены по id, если сервер ещё не прислал `cosmeticsPrices` в hello.
+const COSMETICS_FALLBACK_PRICES = {
+  frame: [0, 30, 45, 85, 115, 200, 330, 550],
+  nameplate: [0, 40, 60, 105, 140, 240, 390, 640],
+  seg: [0, 160, 55, 210, 360, 90, 580, 950],
+  head: [0, 50, 75, 135, 175, 300, 500, 800],
+  capturefx: [0, 65, 100, 180, 240, 410, 660, 1050]
+};
+
+// Сервер шлёт массив цен по id: {"frame":[0,30,45,...], ...}.
+// Старый формат (одно число на категорию) поддерживаем как деградацию.
+function cosmeticsPrice(cat, id) {
+  const c = String(cat || '');
+  const i = Math.max(0, Math.min(COSMETICS_MAX_ID, Number(id) || 0));
   if (cosmeticsPrices && typeof cosmeticsPrices === 'object') {
-    const v = Number(cosmeticsPrices[String(cat || '')]);
-    if (Number.isFinite(v) && v >= 0) return v;
+    const row = cosmeticsPrices[c];
+    if (Array.isArray(row)) {
+      const v = Number(row[i]);
+      if (Number.isFinite(v) && v >= 0) return v;
+    } else {
+      const v = Number(row);
+      if (Number.isFinite(v) && v >= 0) return i === 0 ? 0 : v;
+    }
   }
-  if (cat === 'capturefx') return 60;
-  if (cat === 'head') return 50;
-  if (cat === 'seg') return 40;
-  if (cat === 'nameplate') return 35;
-  return 30;
+  const fb = COSMETICS_FALLBACK_PRICES[c] || COSMETICS_FALLBACK_PRICES.frame;
+  const v = Number(fb[i]);
+  return Number.isFinite(v) ? v : 0;
+}
+
+// D11: тир считается из цены — единая лестница редкости для всех категорий.
+function cosmeticsTier(price) {
+  const p = Math.max(0, Number(price) || 0);
+  if (p <= 0) return 'base';
+  if (p <= 100) return 'common';
+  if (p <= 250) return 'rare';
+  if (p <= 450) return 'epic';
+  if (p <= 700) return 'legendary';
+  return 'mythic';
+}
+
+function cosmeticsTierLabel(tier) {
+  return t(`cosmetics.tier_${String(tier || 'base')}`) || String(tier || '');
+}
+
+// Самый дешёвый платный предмет во всём магазине — крючок «до первого скина».
+function cosmeticsCheapestPrice() {
+  let best = Infinity;
+  for (const cat of COSMETICS_CATS) {
+    for (let id = 1; id <= COSMETICS_MAX_ID; id++) {
+      const p = cosmeticsPrice(cat, id);
+      if (p > 0 && p < best) best = p;
+    }
+  }
+  return Number.isFinite(best) ? best : 0;
+}
+
+function cosmeticsOwnedCount(cat) {
+  const mask = cosmeticsMaskForCat(cat);
+  let n = 0;
+  for (let id = 0; id <= COSMETICS_MAX_ID; id++) {
+    if (bitHas(mask, id)) n++;
+  }
+  return n;
 }
 
 function cosmeticsLabel(cat) {
@@ -5611,23 +6721,53 @@ function cosmeticsLabel(cat) {
 }
 
 function cosmeticsVariantName(cat, id) {
-  const i = Math.max(0, Math.min(4, Number(id) || 0));
+  const i = Math.max(0, Math.min(COSMETICS_MAX_ID, Number(id) || 0));
+  const en = lang === 'en';
   if (cat === 'capturefx') {
-    return (lang === 'en' ? ['Rings', 'Beam', 'Diamond', 'Spiral', 'Confetti'] : ['Кольца', 'Луч', 'Ромб', 'Спираль', 'Конфетти'])[i];
+    return (en
+      ? ['Rings', 'Beam', 'Diamond', 'Spiral', 'Confetti', 'Nova', 'Vortex', 'Prism']
+      : ['Кольца', 'Луч', 'Ромб', 'Спираль', 'Конфетти', 'Нова', 'Вихрь', 'Призма'])[i];
   }
   if (cat === 'seg') {
-    return (lang === 'en' ? ['Classic', 'Neon', 'Stripes', 'Plasma', 'Sparks'] : ['Классика', 'Неон', 'Полосы', 'Плазма', 'Искры'])[i];
+    return (en
+      ? ['Classic', 'Neon', 'Stripes', 'Plasma', 'Sparks', 'Circuit', 'Frost', 'Void']
+      : ['Классика', 'Неон', 'Полосы', 'Плазма', 'Искры', 'Схема', 'Иней', 'Бездна'])[i];
   }
   if (cat === 'frame') {
-    return (lang === 'en' ? ['Steel', 'Azure', 'Crimson', 'Gold', 'Amethyst'] : ['Сталь', 'Лазурь', 'Алая', 'Золото', 'Аметист'])[i];
+    return (en
+      ? ['Steel', 'Azure', 'Crimson', 'Gold', 'Amethyst', 'Emerald', 'Ember', 'Prism']
+      : ['Сталь', 'Лазурь', 'Алая', 'Золото', 'Аметист', 'Изумруд', 'Жар', 'Призма'])[i];
   }
   if (cat === 'nameplate') {
-    return (lang === 'en' ? ['Dark', 'Azure', 'Crimson', 'Gold', 'Amethyst'] : ['Тёмная', 'Лазурь', 'Алая', 'Золото', 'Аметист'])[i];
+    return (en
+      ? ['Dark', 'Azure', 'Crimson', 'Gold', 'Amethyst', 'Emerald', 'Ember', 'Prism']
+      : ['Тёмная', 'Лазурь', 'Алая', 'Золото', 'Аметист', 'Изумруд', 'Жар', 'Призма'])[i];
   }
   if (cat === 'head') {
-    return (lang === 'en' ? ['Classic', 'Diamond', 'Square', 'Octagon', 'Shield'] : ['Классика', 'Ромб', 'Квадрат', 'Октагон', 'Щит'])[i];
+    return (en
+      ? ['Classic', 'Diamond', 'Square', 'Octagon', 'Shield', 'Star', 'Arrow', 'Crown']
+      : ['Классика', 'Ромб', 'Квадрат', 'Октагон', 'Щит', 'Звезда', 'Стрела', 'Корона'])[i];
   }
   return `#${i + 1}`;
+}
+
+// Акцентный цвет варианта косметики. Единая палитра для превью и игры.
+const COSMETIC_ACCENT_RGB = [
+  [255, 255, 255],
+  [96, 165, 250],
+  [255, 45, 85],
+  [255, 215, 0],
+  [170, 120, 255],
+  [0, 230, 180],
+  [255, 140, 40],
+  [255, 90, 200]
+];
+
+function cosmeticAccent(id, alpha) {
+  const i = Math.max(0, Math.min(COSMETICS_MAX_ID, Number(id) || 0));
+  const [r, g, b] = COSMETIC_ACCENT_RGB[i] || COSMETIC_ACCENT_RGB[0];
+  const a = Math.max(0, Math.min(1, Number(alpha ?? 0.92)));
+  return `rgba(${r},${g},${b},${a})`;
 }
 
 function cosmeticsSetFilter(next) {
@@ -5746,7 +6886,7 @@ function cosmeticsBuyLocal(cat, id) {
 
 function cosmeticsEquipLocal(cat, id) {
   const c = String(cat || '').trim().toLowerCase();
-  const itemId = Math.max(0, Math.min(4, Number(id) || 0));
+  const itemId = Math.max(0, Math.min(7, Number(id) || 0));
   const bit = 1 << itemId;
   const mask = cosmeticsMaskForCat(c);
   if ((mask & bit) === 0) return;
@@ -5885,7 +7025,8 @@ function syncCosmeticsUi() {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'cosmeticsTabBtn';
-      b.textContent = c.title;
+      // D11: счётчик владения прямо в табе — «Рамки 2/8».
+      b.textContent = `${c.title} ${cosmeticsOwnedCount(c.id)}/${COSMETICS_MAX_ID + 1}`;
       b.setAttribute('role', 'tab');
       b.setAttribute('aria-selected', c.id === cosmeticsCat ? 'true' : 'false');
       b.addEventListener('click', () => {
@@ -5902,22 +7043,47 @@ function syncCosmeticsUi() {
   if (cosmeticsItemsEl) {
     const mask = cosmeticsMaskForCat(cosmeticsCat);
     const eq = cosmeticsEqForCat(cosmeticsCat);
-    const price = cosmeticsPrice(cosmeticsCat);
     // C9: until the server confirms the inventory, everything we show is provisional.
     const confirmed = cosmeticsSource === 'server';
     const online = wsIsConnected();
     const items = [];
-    for (let id = 0; id < 5; id++) {
+    const balance = Math.max(0, Math.floor(Number(youStyle) || 0));
+
+    // D11: порядок по цене, а не по id — при поштучных ценах порядок по id
+    // ломает восприятие лестницы редкости.
+    const order = [];
+    for (let id = 0; id <= COSMETICS_MAX_ID; id++) {
+      order.push({ id, price: cosmeticsPrice(cosmeticsCat, id) });
+    }
+    order.sort((x, y) => (x.price - y.price) || (x.id - y.id));
+
+    let lastTier = '';
+    for (const entry of order) {
+      const id = entry.id;
+      const price = entry.price;
       const owned = bitHas(mask, id);
       const equipped = Number(eq) === id;
 
       if (cosmeticsFilter === 'owned' && !owned) continue;
-      if (cosmeticsFilter === 'available' && (owned || (youStyle || 0) < price)) continue;
+      if (cosmeticsFilter === 'available' && (owned || balance < price)) continue;
 
       const variant = cosmeticsVariantName(cosmeticsCat, id);
+      const tier = cosmeticsTier(price);
+
+      // D11: разделители между группами тиров.
+      if (tier !== lastTier) {
+        lastTier = tier;
+        const sep = document.createElement('div');
+        sep.className = `cosmeticsTierSep tier${tier.charAt(0).toUpperCase()}${tier.slice(1)}`;
+        sep.textContent = cosmeticsTierLabel(tier);
+        items.push(sep);
+      }
 
       const card = document.createElement('div');
       card.className = 'cosmeticsItem' + (cosmeticsSelId === id ? ' isSelected' : '');
+      card.classList.toggle('isOwned', owned);
+      card.classList.toggle('isEquipped', owned && equipped);
+      card.classList.toggle('isLocked', !owned && balance < price);
       card.addEventListener('click', () => {
         cosmeticsSelId = id;
         syncCosmeticsUi();
@@ -5936,9 +7102,17 @@ function syncCosmeticsUi() {
       const titleEl = document.createElement('div');
       titleEl.className = 'cosmeticsItemTitle';
       titleEl.textContent = `${cosmeticsLabel(cosmeticsCat)}: ${variant}`;
+
+      // D11: бейдж редкости, тир вычислен из цены.
+      const badge = document.createElement('span');
+      badge.className = `tierBadge tier${tier.charAt(0).toUpperCase()}${tier.slice(1)}`;
+      badge.textContent = cosmeticsTierLabel(tier);
+      titleEl.appendChild(document.createTextNode(' '));
+      titleEl.appendChild(badge);
+
       const sub = document.createElement('div');
       sub.className = 'cosmeticsItemSub';
-      const missing = Math.max(0, Math.ceil(price - (youStyle || 0)));
+      const missing = Math.max(0, Math.ceil(price - balance));
       if (!owned && missing > 0) {
         sub.textContent = `${t('cosmetics.missing_prefix')} ${fmtInt(missing)} ${t('cosmetics.style_points')}`;
         sub.classList.add('isBlocked');
@@ -5951,6 +7125,22 @@ function syncCosmeticsUi() {
       left.appendChild(titleEl);
       left.appendChild(sub);
 
+      // D11: прогресс-бар накопления на заблокированном товаре.
+      if (!owned && price > 0 && missing > 0) {
+        const bar = document.createElement('div');
+        bar.className = 'cosmeticsItemProgress';
+        const fill = document.createElement('div');
+        fill.className = 'cosmeticsItemProgressFill';
+        fill.style.width = `${Math.max(0, Math.min(100, (balance / price) * 100)).toFixed(1)}%`;
+        bar.appendChild(fill);
+        bar.setAttribute('role', 'progressbar');
+        bar.setAttribute('aria-valuemin', '0');
+        bar.setAttribute('aria-valuemax', String(price));
+        bar.setAttribute('aria-valuenow', String(Math.min(balance, price)));
+        bar.setAttribute('aria-label', `${t('cosmetics.missing_prefix')} ${fmtInt(missing)}`);
+        left.appendChild(bar);
+      }
+
       const right = document.createElement('div');
       right.className = 'cosmeticsItemRight';
       if (!owned) {
@@ -5961,7 +7151,7 @@ function syncCosmeticsUi() {
 
         const cat = cosmeticsCat;
         const pending = cosmeticsOpIsPending(cat, id);
-        const poor = (youStyle || 0) < price;
+        const poor = balance < price;
 
         const buy = document.createElement('button');
         buy.type = 'button';
@@ -6190,7 +7380,7 @@ function renderCosmeticsPreview() {
 
 function drawPreviewSegment(ctx2, x, y, r, c, segId, i) {
   ctx2.save();
-  const sid = Math.max(0, Math.min(4, Number(segId) || 0));
+  const sid = Math.max(0, Math.min(7, Number(segId) || 0));
   if (sid === 1) {
     ctx2.shadowColor = c;
     ctx2.shadowBlur = 16;
@@ -6305,23 +7495,14 @@ function drawGameNameplatePreview(ctx2, label, x, y, alpha, nameplateId) {
   const px = Math.round(x - w / 2);
   const py = Math.round(y - h);
 
-  const np = Math.max(0, Math.min(4, Number(nameplateId) || 0));
+  const np = Math.max(0, Math.min(7, Number(nameplateId) || 0));
   ctx2.globalAlpha = alpha;
-  if (np === 1) {
-    ctx2.fillStyle = 'rgba(0,0,0,0.30)';
-    ctx2.strokeStyle = 'rgba(96,165,250,0.32)';
-  } else if (np === 2) {
-    ctx2.fillStyle = 'rgba(255,45,85,0.10)';
-    ctx2.strokeStyle = 'rgba(255,45,85,0.40)';
-  } else if (np === 3) {
-    ctx2.fillStyle = 'rgba(255,215,0,0.10)';
-    ctx2.strokeStyle = 'rgba(255,215,0,0.35)';
-  } else if (np === 4) {
-    ctx2.fillStyle = 'rgba(170,120,255,0.12)';
-    ctx2.strokeStyle = 'rgba(170,120,255,0.40)';
-  } else {
+  if (np === 0) {
     ctx2.fillStyle = 'rgba(0,0,0,0.42)';
     ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
+  } else {
+    ctx2.fillStyle = np === 1 ? 'rgba(0,0,0,0.30)' : cosmeticAccent(np, 0.12);
+    ctx2.strokeStyle = cosmeticAccent(np, 0.38);
   }
   ctx2.lineWidth = 1;
   ctx2.beginPath();
@@ -6342,7 +7523,7 @@ function drawGameNameplatePreview(ctx2, label, x, y, alpha, nameplateId) {
 }
 
 function drawGameHeadPreview(ctx2, x, y, cell, c, headId) {
-  const id = Math.max(0, Math.min(4, Number(headId) || 0));
+  const id = Math.max(0, Math.min(7, Number(headId) || 0));
   ctx2.save();
   ctx2.fillStyle = c;
   ctx2.strokeStyle = 'rgba(0,0,0,0.35)';
@@ -6413,7 +7594,7 @@ function drawGameTrailPreview(ctx2, x0, y0, cell, ownerId, segId) {
 }
 
 function drawGameSegTilePreview(ctx2, px, py, cell, baseHsl, segId, seed, alpha) {
-  const id = Math.max(0, Math.min(4, Number(segId) || 0));
+  const id = Math.max(0, Math.min(7, Number(segId) || 0));
   const nowFrame = performance.now();
   const rgb = hslToRgb(baseHsl);
   const fill = (a) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
@@ -6497,7 +7678,7 @@ function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, he
 }
 
 function drawGameCaptureFxPreview(ctx2, fxId, cx, cy, cell) {
-  const capId = Math.max(0, Math.min(4, Number(fxId) || 0));
+  const capId = Math.max(0, Math.min(7, Number(fxId) || 0));
   const p = (performance.now() * 0.0012) % 1;
   const base = cell * 1.05;
   const r = base * (0.35 + 1.25 * p);
@@ -6591,8 +7772,8 @@ function drawGameCaptureFxPreview(ctx2, fxId, cx, cy, cell) {
 }
 
 function drawGameFramePreview(ctx2, frId, x, y, w, h) {
-  const fr = Math.max(0, Math.min(4, Number(frId) || 0));
-  const col = fr === 1 ? 'rgba(96,165,250,0.70)' : fr === 2 ? 'rgba(255,45,85,0.70)' : fr === 3 ? 'rgba(255,215,0,0.62)' : fr === 4 ? 'rgba(170,120,255,0.70)' : 'rgba(255,255,255,0.12)';
+  const fr = Math.max(0, Math.min(7, Number(frId) || 0));
+  const col = fr === 0 ? 'rgba(255,255,255,0.12)' : cosmeticAccent(fr, fr === 3 ? 0.62 : 0.70);
   ctx2.save();
   ctx2.fillStyle = 'rgba(0,0,0,0.22)';
   ctx2.fillRect(x, y, w, h);
@@ -6603,7 +7784,7 @@ function drawGameFramePreview(ctx2, frId, x, y, w, h) {
 }
 
 function cosmeticsFrameColor(frId) {
-  const fr = Math.max(0, Math.min(4, Number(frId) || 0));
+  const fr = Math.max(0, Math.min(7, Number(frId) || 0));
   if (fr === 1) return { edge: 'rgba(96,165,250,0.70)', glow: 'rgba(96,165,250,0.35)' };
   if (fr === 2) return { edge: 'rgba(255,45,85,0.70)', glow: 'rgba(255,45,85,0.35)' };
   if (fr === 3) return { edge: 'rgba(255,215,0,0.62)', glow: 'rgba(255,215,0,0.30)' };
@@ -6938,14 +8119,22 @@ function styleLabel(type) {
   return infoName(p.style, type, p.labels.style);
 }
 
+// J19: мелкие начисления Стиля агрегируются в один тост «+N Стиля ×3».
 function flushStyleToast() {
   styleToastTimer = 0;
   const delta = styleToastAcc;
   if (!delta) return;
   const reason = styleToastReason;
+  const count = Math.max(1, styleToastCount);
   styleToastAcc = 0;
   styleToastReason = 0;
-  addToast('✨', `+${delta} ${t('cosmetics.style_points')}`, null, styleLabel(reason), { tab: 'match', key: `style_small_${reason}` });
+  styleToastCount = 0;
+  const suffix = count > 1 ? ` ×${count}` : '';
+  addToast('✨', `+${delta} ${t('cosmetics.style_points')}${suffix}`, null, styleLabel(reason), {
+    tab: 'match',
+    key: `style_small_${reason}`,
+    prio: 'minor'
+  });
 }
 
 function approxNowTick() {
@@ -6994,8 +8183,17 @@ function ensureSettingsState() {
       hudBrightness = s.hudBrightness ?? hudBrightness;
       hudContrast = s.hudContrast ?? hudContrast;
       hudPanelOpacity = s.hudPanelOpacity ?? hudPanelOpacity;
+      const p = normalizeFxPreset(s.fxPreset);
+      if (p) {
+        fxPreset = p;
+        fxPresetUserSet = !!s.fxPresetUserSet;
+      }
     }
   } catch {}
+
+  // J22: без явного выбора пользователя уважаем системный запрет анимаций.
+  if (!fxPresetUserSet && prefersReducedMotion()) fxPreset = 'calm';
+  applyFxPreset(fxPreset, false);
 
   if (fxEnabledInput) fxEnabledInput.checked = !!fxEnabled;
   if (fxIntensityInput) fxIntensityInput.value = String(fxIntensity);
@@ -7031,7 +8229,9 @@ function saveSettingsState() {
         muteOnBlur,
         hudBrightness,
         hudContrast,
-        hudPanelOpacity
+        hudPanelOpacity,
+        fxPreset,
+        fxPresetUserSet
       })
     );
   } catch {}
@@ -7050,6 +8250,8 @@ function resetSettingsState() {
   hudContrast = 1;
   hudPanelOpacity = 0.82;
   soundMutedByBlur = false;
+  fxPresetUserSet = false;
+  applyFxPreset(prefersReducedMotion() ? 'calm' : 'normal', false);
 
   if (fxEnabledInput) fxEnabledInput.checked = !!fxEnabled;
   if (fxIntensityInput) fxIntensityInput.value = String(fxIntensity);
@@ -7082,8 +8284,69 @@ function hideSettingsOverlay() {
   syncOverlayUiState();
 }
 
+// J22: тумблер пресета. Разметку добавляет вёрсточный агент (#fxPresetSelect);
+// пока её нет — создаём поле сами, чтобы настройка была доступна.
+function ensureFxPresetControl() {
+  let sel = document.getElementById('fxPresetSelect');
+  if (!sel) {
+    const anchor = fxEnabledInput?.closest?.('.fieldInline') || null;
+    const host = anchor?.parentElement || null;
+    if (!host) return null;
+    try {
+      const label = document.createElement('label');
+      label.className = 'fieldInline';
+      const span = document.createElement('span');
+      span.className = 'fieldLabel';
+      span.setAttribute('data-i18n', 'settings.fx_preset');
+      span.textContent = t('settings.fx_preset');
+      sel = document.createElement('select');
+      sel.id = 'fxPresetSelect';
+      label.appendChild(span);
+      label.appendChild(sel);
+
+      const hint = document.createElement('div');
+      hint.className = 'fieldHint';
+      hint.setAttribute('data-i18n', 'settings.fx_preset_hint');
+      hint.textContent = t('settings.fx_preset_hint');
+
+      host.insertBefore(label, anchor);
+      host.insertBefore(hint, anchor);
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    const opts = [
+      ['calm', t('settings.fx_preset_calm')],
+      ['normal', t('settings.fx_preset_normal')],
+      ['casino', t('settings.fx_preset_casino')]
+    ];
+    const need = sel.options?.length !== opts.length;
+    if (need) sel.replaceChildren();
+    for (let i = 0; i < opts.length; i++) {
+      let op = sel.options?.[i];
+      if (!op) {
+        op = document.createElement('option');
+        sel.appendChild(op);
+      }
+      op.value = opts[i][0];
+      op.textContent = opts[i][1];
+    }
+    sel.value = fxPreset;
+  } catch {}
+  return sel;
+}
+
 function bindSettingsUi() {
   ensureSettingsState();
+
+  const fxPresetSelect = ensureFxPresetControl();
+  fxPresetSelect?.addEventListener('change', () => {
+    applyFxPreset(fxPresetSelect.value, true);
+    saveSettingsState();
+    sfx.ui();
+  });
 
   if (hudDensitySelect) {
     try {
@@ -7223,14 +8486,21 @@ function addToast(icon, text, variant, subtext, action) {
     st = '';
   }
 
-  const key = String(act?.key || `${String(icon || '')}|${String(text || '')}|${String(st || '')}|${v}`);
+  // J20: ключ не включает вариант. Раньше `v` даунгрейдился с 'big' на '' при
+  // активном кулдауне, из-за чего одно событие получало два разных ключа и
+  // вместо счётчика «x2» появлялся второй тост.
+  const key = String(act?.key || `${String(icon || '')}|${String(text || '')}|${String(st || '')}`);
+  const prio = String(act?.prio || (String(variant || '') === 'big' ? 'important' : 'minor'));
+
   const prev = toastByKey.get(key);
   if (prev && prev.el) {
     prev.at = now;
     prev.count = (prev.count || 1) + 1;
+    if (toastPrioValue(prio) > toastPrioValue(prev.prio)) prev.prio = prio;
     try {
       const bt = String(prev.baseText || prev.text || '');
       if (prev.textEl) prev.textEl.textContent = `${bt} x${prev.count}`;
+      toastBump(prev.el);
       if (prev.timer) clearTimeout(prev.timer);
       prev.timer = setTimeout(() => {
         try {
@@ -7246,6 +8516,7 @@ function addToast(icon, text, variant, subtext, action) {
   if (prev && !prev.el) {
     prev.at = now;
     prev.count = (prev.count || 1) + 1;
+    if (toastPrioValue(prio) > toastPrioValue(prev.prio)) prev.prio = prio;
     return;
   }
 
@@ -7255,6 +8526,7 @@ function addToast(icon, text, variant, subtext, action) {
     text: String(text || ''),
     baseText: String(text || ''),
     variant: v,
+    prio,
     subtext: String(st || ''),
     action: act,
     at: now,
@@ -7266,6 +8538,13 @@ function addToast(icon, text, variant, subtext, action) {
 
   toastByKey.set(key, item);
   if (eventToastsEl.children.length >= MAX_EVENT_TOASTS) {
+    // J19: важное событие вытесняет самый незначительный тост на экране.
+    const worst = toastLowestMounted();
+    if (worst && toastPrioValue(item.prio) > toastPrioValue(worst.prio)) {
+      toastUnmount(worst);
+      toastMount(item);
+      return;
+    }
     toastQueue.push(key);
     return;
   }
@@ -7408,12 +8687,8 @@ function renderMetaHud() {
     const sec = tickRemainSeconds(matchEndTick);
     addRow(mainRows, t('meta.until_end'), rem || '—', sec != null && sec <= 10);
   }
-  if (youContractType) {
-    const cn = contractLabel(youContractType) || infoPack().labels.contract;
-    const rem = formatTickRemain(youContractUntil);
-    const base = `${youContractProgress}/${youContractGoal}${rem ? ` (${rem})` : ''}`;
-    addRow(mainRows, cn, base, tickRemainSeconds(youContractUntil) != null && tickRemainSeconds(youContractUntil) <= 10);
-  }
+  // I6: контракт живёт только в чипе #topHudContract. Третья копия здесь
+  // (плюс копия в строке таймера) просто съедала место в HUD.
   if (youStyle) addRow(mainRows, infoPack().labels.style, String(youStyle));
 
   const dailyRows = [];
@@ -7489,7 +8764,7 @@ function renderTeamHud() {
       const isMe = p.n === you;
       const pp = mapCells ? ((Number(p.s) || 0) / mapCells) * 100 : 0;
       const fr = Number(p.cosFrame) || 0;
-      const frClass = `frame${Math.max(0, Math.min(4, fr))}`;
+      const frClass = `frame${Math.max(0, Math.min(7, fr))}`;
       return `
         <tr class="${isMe ? 'me' : ''} ${frClass}" data-pid="${pid}">
           <td class="num">${i + 1}</td>
@@ -7892,8 +9167,16 @@ function handleStateBinary(buf) {
         if (killer && killer === you) {
           youKills++;
           addFxBurst(ex, ey, 'kill');
-          addShake(0.35);
-          playBeep(220 + Math.random() * 60, 120, 1);
+          addShakeClass('medium', ...shakeDirFrom(ex, ey));
+          sfx.kill();
+          fxFlashScreen([255, 96, 96], 0.75);
+          comboBump();
+        }
+        if (victim === you) {
+          // J2: отклик на собственную смерть — не на чужую.
+          addShakeClass('large', ...shakeDirFrom(ex, ey));
+          fxFlashScreen([255, 80, 80], 1);
+          comboBreak();
         }
         renderKillfeed();
         continue;
@@ -7913,10 +9196,33 @@ function handleStateBinary(buf) {
         o += 1;
         const pn = nameById.get(pid) || String(pid);
         pushEventFeed(`${pn} ${lang === 'en' ? 'captured' : 'захватил'} +${delta} ${lang === 'en' ? 'zone' : 'зоны'}`, 'Capture');
-        addFxBurst(ex, ey, `cap${Math.max(0, Math.min(4, Number(fxId) || 0))}`);
+        addFxBurst(ex, ey, `cap${Math.max(0, Math.min(7, Number(fxId) || 0))}`);
         if (pid === you) {
-          addShake(0.10);
-          if (delta >= 40) playBeep(760, 110, 0.55);
+          // J5: самое частое приятное действие теперь показывает число.
+          addScorePopup(ex, ey, delta);
+          comboBump();
+
+          const jackpot = delta >= CAPTURE_JACKPOT_CELLS;
+          if (jackpot) {
+            addShakeClass('large', ...shakeDirFrom(ex, ey));
+            fxFlashScreen([255, 215, 120], 1);
+            sfx.jackpot();
+            bumpMatchTabBadge();
+            if (!showBigBanner('💎', t('banner.jackpot'), `+${fmtInt(delta)} · ${t('banner.jackpot_sub')}`, 'jackpot')) {
+              addToast('💎', `${t('banner.jackpot')} +${fmtInt(delta)}`, 'big', t('banner.jackpot_sub'), {
+                tab: 'match',
+                key: 'capture_jackpot',
+                prio: 'jackpot'
+              });
+            }
+          } else {
+            addShakeClass('small', ...shakeDirFrom(ex, ey));
+            // J17: раньше захват меньше 40 клеток звучал как ничто.
+            if (delta >= 40) sfx.captureBig();
+            else sfx.captureSmall();
+          }
+
+          celebrateFirstCapture(delta);
         }
         renderKillfeed();
         continue;
@@ -7945,7 +9251,9 @@ function handleStateBinary(buf) {
             youDaily2Prog = prog;
           }
           bumpMatchTabBadge();
-          addToast('📅', `${infoPack().labels.daily}: ${dailyLabel(t)}`, 'big', infoDesc(infoPack().dailies, t, ''), { tab: 'match', key: `daily_assign_${t}` });
+          // J16: назначение ежедневки было беззвучным.
+          sfx.dailyAssigned();
+          addToast('📅', `${infoPack().labels.daily}: ${dailyLabel(t)}`, 'big', infoDesc(infoPack().dailies, t, ''), { tab: 'match', key: `daily_assign_${t}`, prio: 'important' });
         }
         continue;
       }
@@ -7973,8 +9281,9 @@ function handleStateBinary(buf) {
         o += 1;
         if (pid === you) {
           bumpMatchTabBadge();
-          addToast('🏁', infoPack().labels.dailyComplete, 'big', '', { tab: 'match', key: 'daily_complete' });
-          playBeep(900, 170, 1);
+          addToast('🏁', infoPack().labels.dailyComplete, 'big', '', { tab: 'match', key: 'daily_complete', prio: 'important' });
+          sfx.dailyDone();
+          comboBump();
         }
         continue;
       }
@@ -7989,8 +9298,12 @@ function handleStateBinary(buf) {
         pushEventFeed(`${pn} — ${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'Achv');
         if (pid === you) {
           bumpMatchTabBadge();
-          addToast('🏅', `${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'big', infoDesc(infoPack().achv, achv, ''), { tab: 'match', key: `achv_${achv}` });
-          playBeep(980, 180, 1);
+          sfx.achievement();
+          fxFlashScreen([255, 225, 150], 0.8);
+          // J13: ачивка идёт в центральный баннер, а не тонет за тремя мелкими тостами.
+          if (!showBigBanner('🏅', achvLabel(achv), infoDesc(infoPack().achv, achv, ''), 'jackpot')) {
+            addToast('🏅', `${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'big', infoDesc(infoPack().achv, achv, ''), { tab: 'match', key: `achv_${achv}`, prio: 'jackpot' });
+          }
         }
         renderKillfeed();
         continue;
@@ -8014,7 +9327,9 @@ function handleStateBinary(buf) {
           youContractProgress = 0;
           youContractUntil = until;
           bumpMatchTabBadge();
-          addToast('📜', `${infoPack().labels.contract}: ${contractLabel(type) || type}`, 'big', infoDesc(infoPack().contracts, type, ''), { tab: 'match', key: `contract_assign_${type}` });
+          // J16: назначение контракта было беззвучным.
+          sfx.contractAssigned();
+          addToast('📜', `${infoPack().labels.contract}: ${contractLabel(type) || type}`, 'big', infoDesc(infoPack().contracts, type, ''), { tab: 'match', key: `contract_assign_${type}`, prio: 'important' });
         }
         renderKillfeed();
         continue;
@@ -8046,8 +9361,9 @@ function handleStateBinary(buf) {
         if (pid === you) {
           youContractProgress = youContractGoal;
           bumpMatchTabBadge();
-          addToast('✅', `${infoPack().labels.contractComplete}: ${contractLabel(type) || type}`, 'big', infoDesc(infoPack().contracts, type, ''), { tab: 'match', key: `contract_complete_${type}` });
-          playBeep(900, 170, 1);
+          addToast('✅', `${infoPack().labels.contractComplete}: ${contractLabel(type) || type}`, 'big', infoDesc(infoPack().contracts, type, ''), { tab: 'match', key: `contract_complete_${type}`, prio: 'important' });
+          sfx.contractDone();
+          comboBump();
         }
         renderKillfeed();
         continue;
@@ -8077,6 +9393,7 @@ function handleStateBinary(buf) {
               styleToastTimer = 0;
               styleToastAcc = 0;
               styleToastReason = 0;
+              styleToastCount = 0;
             }
             addToast('✨', `+${delta} ${t('cosmetics.style_points')}`, 'big', styleLabel(reason), { tab: 'match', key: `style_${reason}_${delta}` });
           } else if (delta > 0) {
@@ -8085,6 +9402,7 @@ function handleStateBinary(buf) {
             }
             styleToastAcc += delta;
             styleToastReason = reason;
+            styleToastCount++;
             if (!styleToastTimer) {
               styleToastTimer = setTimeout(flushStyleToast, 650);
             }
@@ -8105,8 +9423,11 @@ function handleStateBinary(buf) {
         pushEventFeed(`${lang === 'en' ? 'REVENGE' : 'МЕСТЬ'}: ${kn} -> ${vn}`, 'Revenge');
         if (killer === you) {
           bumpMatchTabBadge();
-          addToast('😈', lang === 'en' ? 'Revenge!' : 'Месть!', 'big', lang === 'en' ? 'A kill in return for your death' : 'Убийство в ответ на вашу смерть', { tab: 'match', key: 'revenge' });
-          playBeep(260, 160, 1);
+          sfx.revenge();
+          fxFlashScreen([255, 110, 110], 0.85);
+          if (!showBigBanner('😈', t('banner.revenge'), lang === 'en' ? 'A kill in return for your death' : 'Убийство в ответ на вашу смерть', 'danger')) {
+            addToast('😈', lang === 'en' ? 'Revenge!' : 'Месть!', 'big', lang === 'en' ? 'A kill in return for your death' : 'Убийство в ответ на вашу смерть', { tab: 'match', key: 'revenge', prio: 'jackpot' });
+          }
         }
         renderKillfeed();
         continue;
@@ -8122,16 +9443,21 @@ function handleStateBinary(buf) {
         pushEventFeed(`${pn} — ${t('event.streak')} x${streak}`, 'Streak');
         if (pid === you) {
           youStreak = streak;
+          // J3: раньше бип стоял вне этой проверки — в комнате с 14 ботами
+          // получался метроном.
+          sfx.streak(Math.max(0, streak - 2));
           if (streak === 3) {
             bumpMatchTabBadge();
-            addToast('🔥', `${t('toast.streak')} x${streak}`, null, t('toast.streak_3'), { tab: 'match', key: `streak_${streak}` });
+            addToast('🔥', `${t('toast.streak')} x${streak}`, null, t('toast.streak_3'), { tab: 'match', key: `streak_${streak}`, prio: 'important' });
           }
-          if (streak === 5) {
+          if (streak >= 5) {
             bumpMatchTabBadge();
-            addToast('🔥', `${t('toast.streak')} x${streak}`, 'big', t('toast.streak_5'), { tab: 'match', key: `streak_${streak}` });
+            fxFlashScreen([255, 170, 90], 0.8);
+            if (!showBigBanner('🔥', `${t('banner.streak')} x${streak}`, t('toast.streak_5'), 'jackpot')) {
+              addToast('🔥', `${t('toast.streak')} x${streak}`, 'big', t('toast.streak_5'), { tab: 'match', key: `streak_${streak}`, prio: 'jackpot' });
+            }
           }
         }
-        playBeep(520, 90, 0.7);
         renderKillfeed();
         continue;
       }
@@ -8148,8 +9474,11 @@ function handleStateBinary(buf) {
         pushEventFeed(`${t('event.bounty')}: ${tn}`, 'Bounty');
 
         bumpMatchTabBadge();
-        addToast('🎯', `${infoPack().labels.bounty}: ${tn}`, 'big', t('toast.bounty_desc'), { tab: 'match', key: `bounty_${target}` });
-        playBeep(660, 140, 0.8);
+        addToast('🎯', `${infoPack().labels.bounty}: ${tn}`, 'big', t('toast.bounty_desc'), { tab: 'match', key: `bounty_${target}`, prio: target === you ? 'jackpot' : 'important' });
+        // J2/J3: назначение баунти — глобальное событие. Полная громкость только
+        // если цель — ты, иначе 40%.
+        sfx.bountyAssigned(target === you ? 1 : 0.4);
+        if (target === you) fxFlashScreen([255, 140, 90], 0.7);
         renderKillfeed();
         continue;
       }
@@ -8165,9 +9494,17 @@ function handleStateBinary(buf) {
         pushEventFeed(`${t('event.bounty_claimed')}: ${kn} -> ${vn}`, 'Bounty');
 
         bumpMatchTabBadge();
-        addToast('🏆', t('toast.bounty_claim_title'), 'big', t('toast.bounty_claim_desc'), { tab: 'match', key: 'bounty_claim' });
-        playBeep(880, 160, 0.9);
-        addShake(0.65);
+        const mineClaim = killer === you;
+        addToast('🏆', t('toast.bounty_claim_title'), 'big', t('toast.bounty_claim_desc'), { tab: 'match', key: 'bounty_claim', prio: mineClaim ? 'jackpot' : 'minor' });
+        // J2: тряска и полная громкость только тому, кто забрал награду.
+        if (mineClaim) {
+          sfx.bountyClaimed();
+          addShakeClass('large');
+          fxFlashScreen([255, 210, 120], 0.9);
+          comboBump();
+        } else {
+          sfx.bountyAssigned(0.4);
+        }
         renderKillfeed();
         continue;
       }
@@ -8215,7 +9552,10 @@ function handleStateBinary(buf) {
             youSpeedType = 4;
           }
           addFxBurst(ex, ey, type === 2 ? 'pickup2' : type === 4 ? 'pickup4' : 'pickup');
-          playBeep(740, 80, 0.7);
+          if (type === 2 || type === 4) sfx.speedOn();
+          else sfx.pickup();
+          addShakeClass('micro', ...shakeDirFrom(ex, ey));
+          comboBump();
         }
         renderKillfeed();
         continue;
@@ -8238,8 +9578,13 @@ function handleStateBinary(buf) {
           if (type === 1) youShield = false;
           addFxBurst(ex, ey, 'use');
           addToast(type === 3 ? '💥' : '🛡', `${t('toast.powerup_used')}: ${powerupLabel(type)}`, null, infoDesc(infoPack().powerups, type, ''));
-          playBeep(330, 120, 0.9);
-          addShake(0.4);
+          if (type === 3) {
+            sfx.explode();
+            fxFlashScreen([255, 150, 90], 0.8);
+          } else {
+            sfx.powerUsed();
+          }
+          addShakeClass('medium', ...shakeDirFrom(ex, ey));
         }
         renderKillfeed();
         continue;
@@ -8256,8 +9601,9 @@ function handleStateBinary(buf) {
         const mn = mutatorLabel(type);
         if (mn) pushEventFeed(`${t('event.round')}: ${mn}`, 'Round');
 
-        if (mn) addToast('⚡', `${infoPack().labels.round}: ${mn}`, 'big', infoDesc(infoPack().mutators, type, ''));
-        playBeep(560, 130, 0.8);
+        if (mn) addToast('⚡', `${infoPack().labels.round}: ${mn}`, 'big', infoDesc(infoPack().mutators, type, ''), { key: `mutator_${type}`, prio: 'important' });
+        // J2: глобальное событие — 40% громкости.
+        sfx.mutatorOn(0.4);
         renderKillfeed();
         continue;
       }
@@ -8272,7 +9618,7 @@ function handleStateBinary(buf) {
         }
 
         addToast('✓', infoPack().labels.roundEnded, 'big');
-        playBeep(420, 90, 0.6);
+        sfx.mutatorOff(0.4);
         continue;
       }
 
@@ -8458,6 +9804,10 @@ function onState(s) {
   }
   lastStateAt = lastPacketAt;
 
+  try {
+    refreshOwnGeometry(false);
+  } catch {}
+
   const me = s.players?.find((p) => p.n === you);
   if (me) {
     const alive = !!me.a;
@@ -8589,15 +9939,30 @@ function drawMinimap() {
   mmCtx.putImageData(minimapImage, 0, 0);
   minimapHadChunkUpdate = false;
 
-  // Players overlay (cheap: count is small)
+  // I3: на миникарте видны все живые игроки, а не только ты.
+  // Свою точку рисуем последней и крупнее (ниже, после рамки обзора).
   for (const p of lastState.players) {
-    if (p.n !== you) continue;
     if (!p.a) continue;
+    if (p.n === you) continue;
     if (p.x < 0 || p.y < 0 || p.x >= W || p.y >= H) continue;
     const c = boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)');
     const rgb = hslToRgb(c);
-    mmCtx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-    mmCtx.fillRect(p.x, p.y, 1, 1);
+    const isBot = botIds.has(p.n);
+    const isBounty = !!(bountyTarget && p.n === bountyTarget);
+
+    // Тёмная подложка, чтобы точка читалась на своей же территории.
+    mmCtx.fillStyle = 'rgba(0,0,0,0.62)';
+    mmCtx.fillRect(p.x - 1, p.y - 1, 3, 3);
+    mmCtx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${isBot ? 0.62 : 0.98})`;
+    mmCtx.fillRect(p.x, p.y, isBot ? 1 : 2, isBot ? 1 : 2);
+
+    if (isBounty) {
+      mmCtx.save();
+      mmCtx.strokeStyle = 'rgba(255,90,60,0.95)';
+      mmCtx.lineWidth = 1;
+      mmCtx.strokeRect(p.x - 2.5, p.y - 2.5, 6, 6);
+      mmCtx.restore();
+    }
   }
 
   mmCtx.save();
@@ -8711,7 +10076,8 @@ function draw() {
     shakeX *= Math.pow(0.72, k);
     shakeY *= Math.pow(0.72, k);
 
-    const maxShake = 0.35 * Math.max(0, shakeIntensity);
+    // J14: потолок поднят до 0.8 клетки, иначе класс large физически незаметен.
+    const maxShake = 0.8 * Math.max(0, shakeIntensity);
     shakeX = Math.max(-maxShake, Math.min(maxShake, shakeX));
     shakeY = Math.max(-maxShake, Math.min(maxShake, shakeY));
   }
@@ -8752,7 +10118,7 @@ function draw() {
 
   const segByOwner = new Map();
   for (const p of lastState.players) {
-    segByOwner.set(p.n, Math.max(0, Math.min(4, Number(p.cosSeg) || 0)));
+    segByOwner.set(p.n, Math.max(0, Math.min(7, Number(p.cosSeg) || 0)));
   }
 
   if (fxEnabled && speedActive) {
@@ -8764,8 +10130,9 @@ function draw() {
     const bx = my.ix + 0.5 - dx * 0.55;
     const by = my.iy + 0.5 - dy * 0.55;
     const c = boostHsl(colors.get(you) || my.c || 'hsl(210 20% 60%)');
-    const rate = 0.22 + 0.55 * fxIntensity;
-    const count = Math.max(0, Math.min(5, Math.round((dt / 16) * rate * 3)));
+    // J22: пресет эффектов масштабирует плотность частиц.
+    const rate = (0.22 + 0.55 * fxIntensity) * fxParticleScale();
+    const count = Math.max(0, Math.min(7, Math.round((dt / 16) * rate * 3)));
     for (let k = 0; k < count; k++) {
       const jx = (Math.random() - 0.5) * 0.25;
       const jy = (Math.random() - 0.5) * 0.25;
@@ -8789,11 +10156,43 @@ function draw() {
     }
   }
 
+  // I2: собственный след — главный объект риска в игре. Раньше он отличался от
+  // собственной территории всего на 0.07 альфы. Теперь: 0.85 + светлая обводка,
+  // а на длинном следе (сигнал риска) добавляется пульсация яркости.
+  const trailRisk =
+    youTrailLen <= TRAIL_PULSE_FROM ? 0 : Math.min(1, (youTrailLen - TRAIL_PULSE_FROM) / 55);
+  const trailPulse =
+    trailRisk <= 0 || !fxEnabled || prefersReducedMotion()
+      ? 0
+      : trailRisk * (0.5 + 0.5 * Math.sin(nowFrame * 0.0115));
+  const ownTrailA = Math.min(0.98, 0.85 + 0.11 * trailPulse);
+  const otherTrailA = 0.74;
+  const ownTrailStroke = `rgba(255,255,255,${(0.45 + 0.40 * trailPulse).toFixed(3)})`;
+  const drawOwnOutline = cell >= 8;
+
+  // F18/I4: ближайшая своя клетка ищется бесплатно, прямо в горячем цикле.
+  let nearHomeD = Infinity;
+  let nearHomeX = -1;
+  let nearHomeY = -1;
+  const headCX = my ? my.ix : -1;
+  const headCY = my ? my.iy : -1;
+
   for (let y = minY; y <= maxY; y++) {
     for (let x = minX; x <= maxX; x++) {
       const i = y * W + x;
       const o = gridOwner[i];
       const t = trailOwner[i];
+
+      if (o === you && headCX >= 0) {
+        const hdx = x - headCX;
+        const hdy = y - headCY;
+        const hd = hdx * hdx + hdy * hdy;
+        if (hd < nearHomeD) {
+          nearHomeD = hd;
+          nearHomeX = x;
+          nearHomeY = y;
+        }
+      }
 
       if (o !== 0) {
         const baseA = 0.58;
@@ -8835,7 +10234,8 @@ function draw() {
       }
 
       if (t !== 0) {
-        let a = 0.65;
+        const mineTrail = t === you;
+        let a = mineTrail ? ownTrailA : otherTrailA;
         if (headIndexByOwner.get(t) === i) a *= interp;
         if (a > 0.02) {
           const segId = segByOwner.get(t) || 0;
@@ -8906,9 +10306,21 @@ function draw() {
             ctx.fillStyle = getOwnerFillStyle(t, a);
             ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
           }
+
+          if (mineTrail && drawOwnOutline) {
+            ctx.strokeStyle = ownTrailStroke;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(px + 1.5, py + 1.5, cell - 3, cell - 3);
+          }
         }
       }
     }
+  }
+
+  if (nearHomeX >= 0) {
+    youNearestHomeX = nearHomeX;
+    youNearestHomeY = nearHomeY;
+    youNearestHomeAt = nowFrame;
   }
 
   {
@@ -9138,24 +10550,15 @@ function draw() {
     const px = Math.round(x - w / 2);
     const py = Math.round(y - h);
 
-    const np = Math.max(0, Math.min(4, Number(nameplateId) || 0));
+    const np = Math.max(0, Math.min(7, Number(nameplateId) || 0));
     ctx.save();
     ctx.globalAlpha = alpha;
-    if (np === 1) {
-      ctx.fillStyle = 'rgba(0,0,0,0.30)';
-      ctx.strokeStyle = 'rgba(96,165,250,0.32)';
-    } else if (np === 2) {
-      ctx.fillStyle = 'rgba(255,45,85,0.10)';
-      ctx.strokeStyle = 'rgba(255,45,85,0.40)';
-    } else if (np === 3) {
-      ctx.fillStyle = 'rgba(255,215,0,0.10)';
-      ctx.strokeStyle = 'rgba(255,215,0,0.35)';
-    } else if (np === 4) {
-      ctx.fillStyle = 'rgba(170,120,255,0.12)';
-      ctx.strokeStyle = 'rgba(170,120,255,0.40)';
-    } else {
+    if (np === 0) {
       ctx.fillStyle = 'rgba(0,0,0,0.42)';
       ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+    } else {
+      ctx.fillStyle = np === 1 ? 'rgba(0,0,0,0.30)' : cosmeticAccent(np, 0.12);
+      ctx.strokeStyle = cosmeticAccent(np, 0.38);
     }
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -9202,9 +10605,27 @@ function draw() {
     }
 
     const isBounty = !!(bountyTarget && p.n === bountyTarget);
-    const hasShield = ip.sh > 0;
+    // Байт `sh` — битовая маска: бит0 = щит, бит1 = неуязвимость после респавна.
+    const shMask = Number(ip.sh) || 0;
+    const hasShield = (shMask & 1) !== 0;
+    const hasInvuln = (shMask & 2) !== 0;
     const hasSpeed = !!(p.n === you && speedActive);
     const speedType = hasSpeed ? (youSpeedType === 4 ? 4 : 2) : 0;
+
+    if (hasInvuln) {
+      const tt = performance.now() * 0.010 + (p.n % 997) * 0.02;
+      const pulse = 0.5 + 0.5 * Math.sin(tt);
+      ctx.save();
+      ctx.globalAlpha = 0.30 + 0.30 * pulse;
+      ctx.setLineDash([Math.max(2, cell * 0.14), Math.max(2, cell * 0.12)]);
+      ctx.lineDashOffset = -performance.now() * 0.04;
+      ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+      ctx.lineWidth = Math.max(1, cell * 0.07);
+      ctx.beginPath();
+      ctx.arc(px, py, cell * (0.54 + 0.04 * pulse), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     if (hasShield) {
       const tt = performance.now() * 0.004 + (p.n % 997) * 0.01;
@@ -9251,7 +10672,7 @@ function draw() {
       ctx.restore();
     }
 
-    const headId = Math.max(0, Math.min(4, Number(ip.cosHead) || 0));
+    const headId = Math.max(0, Math.min(7, Number(ip.cosHead) || 0));
 
     // body/head
     ctx.save();
@@ -9320,8 +10741,9 @@ function draw() {
       ctx.restore();
     }
 
-    if (hasShield || hasSpeed || isBounty) {
+    if (hasShield || hasSpeed || isBounty || hasInvuln) {
       const badges = [];
+      if (hasInvuln) badges.push({ fill: 'rgba(255,255,255,0.95)', stroke: 'rgba(0,0,0,0.35)' });
       if (hasShield) badges.push({ fill: 'rgba(120,200,255,0.95)', stroke: 'rgba(255,255,255,0.25)' });
       if (hasSpeed) badges.push({ fill: speedType === 4 ? 'rgba(190,150,255,0.95)' : 'rgba(255,215,0,0.95)', stroke: 'rgba(255,255,255,0.25)' });
       if (isBounty) badges.push({ fill: 'rgba(255,80,80,0.95)', stroke: 'rgba(255,255,255,0.25)' });
@@ -9352,6 +10774,97 @@ function draw() {
     drawNamePill(label, px, py - cell * 0.58, 0.95, ip.cosNameplate);
   }
 
+  // I4: радар угрозы. Дуга по краю экрана в направлении чужой головы ближе
+  // 25 клеток, пока игрок вне своей территории. Интенсивность растёт при сближении.
+  if (fxEnabled && my && my.a && !youInOwnZone) {
+    const reduce = prefersReducedMotion();
+    const hx = my.ix + 0.5;
+    const hy = my.iy + 0.5;
+    const ecx = cw / 2;
+    const ecy = viewH / 2;
+    const rx = Math.max(40, cw / 2 - 16);
+    const ry = Math.max(40, viewH / 2 - 16);
+    const THREAT_CELLS = 25;
+    let drawn = 0;
+
+    for (const p of lastState.players) {
+      if (!p.a || p.n === you) continue;
+      const dx = p.x + 0.5 - hx;
+      const dy = p.y + 0.5 - hy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist >= THREAT_CELLS) continue;
+
+      const inten = Math.max(0, Math.min(1, 1 - dist / THREAT_CELLS));
+      const ang = Math.atan2(dy, dx);
+      const pulse = reduce ? 1 : 0.8 + 0.2 * Math.sin(nowFrame * 0.012 + p.n * 0.7);
+      const span = 0.28 + 0.34 * inten;
+      const col = bountyTarget && p.n === bountyTarget ? 'rgba(255,140,60,0.95)' : 'rgba(255,70,92,0.95)';
+
+      ctx.save();
+      ctx.globalAlpha = Math.min(0.9, (0.14 + 0.66 * inten * inten) * pulse);
+      ctx.lineCap = 'round';
+      ctx.lineWidth = Math.max(3, 4 + 13 * inten);
+      ctx.strokeStyle = col;
+      ctx.shadowColor = col;
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.ellipse(ecx, ecy, rx, ry, 0, ang - span, ang + span);
+      ctx.stroke();
+      ctx.restore();
+
+      if (++drawn >= 4) break;
+    }
+  }
+
+  // F18: счётчик длины следа у головы + компас в сторону ближайшей своей клетки.
+  if (my && my.a && started) {
+    const hpx = offsetX + (my.ix + 0.5) * cell;
+    const hpy = offsetY + (my.iy + 0.5) * cell;
+    const fontPx = Math.max(11, Math.round(cell * 0.60));
+
+    if (youTrailLen > 0) {
+      const risky = youTrailLen >= TRAIL_PULSE_FROM;
+      const txt = String(youTrailLen);
+      ctx.save();
+      ctx.font = `700 ${fontPx}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.92)';
+      ctx.strokeText(txt, hpx, hpy + cell * 0.98);
+      ctx.fillStyle = risky ? 'rgba(255,190,80,0.98)' : 'rgba(255,255,255,0.90)';
+      ctx.fillText(txt, hpx, hpy + cell * 0.98);
+      ctx.restore();
+    }
+
+    if (!youInOwnZone && youNearestHomeX >= 0) {
+      const ax = youNearestHomeX + 0.5 - (my.ix + 0.5);
+      const ay = youNearestHomeY + 0.5 - (my.iy + 0.5);
+      const dlen = Math.sqrt(ax * ax + ay * ay);
+      if (dlen > 1.2) {
+        const ang = Math.atan2(ay, ax);
+        const rr = cell * 1.25;
+        const tipX = hpx + Math.cos(ang) * rr;
+        const tipY = hpy + Math.sin(ang) * rr;
+        const wgt = cell * 0.26;
+        ctx.save();
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = 'rgba(120,255,190,0.95)';
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = Math.max(1, cell * 0.05);
+        ctx.beginPath();
+        ctx.moveTo(tipX + Math.cos(ang) * wgt, tipY + Math.sin(ang) * wgt);
+        ctx.lineTo(tipX + Math.cos(ang + 2.4) * wgt, tipY + Math.sin(ang + 2.4) * wgt);
+        ctx.lineTo(tipX + Math.cos(ang - 2.4) * wgt, tipY + Math.sin(ang - 2.4) * wgt);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+
   if (!chat.classList.contains('collapsed')) {
     if (!chat.contains(document.activeElement) && performance.now() > chatOpenUntil) {
       setChatCollapsed(true);
@@ -9363,21 +10876,54 @@ function draw() {
     lastMinimapDrawAt = nowFrame;
   }
 
-  if (fxEnabled && fxBursts.length) {
+  if (fxBursts.length) {
     for (let i = fxBursts.length - 1; i >= 0; i--) {
       const fx = fxBursts[i];
+      const knd0 = String(fx.kind || '');
+      const isScore = knd0 === 'score';
+      const life = isScore ? SCORE_POPUP_MS : 650;
       const age = nowFrame - fx.t0;
-      if (age > 650) {
+      if (age > life) {
         fxBursts.splice(i, 1);
         continue;
       }
-      const p = Math.max(0, Math.min(1, age / 650));
+      if (!isScore && !fxEnabled) continue;
       const x = fx.x;
       const y = fx.y;
       if (x < minX - 2 || x > maxX + 2 || y < minY - 2 || y > maxY + 2) continue;
+
+      // J5: всплывающее число «+247» над точкой захвата.
+      if (isScore) {
+        const sp = Math.max(0, Math.min(1, age / SCORE_POPUP_MS));
+        const v = Math.max(0, Math.round(Number(fx.value) || 0));
+        if (!v) continue;
+        const scale = age < 150 ? easeOutBack(age / 150) : 1;
+        const alpha = sp > 0.72 ? Math.max(0, (1 - sp) / 0.28) : 1;
+        const size = Math.round(12 + Math.min(28, v * 0.35));
+        const sx = offsetX + (x + 0.5) * cell;
+        const sy = offsetY + (y + 0.5) * cell - easeOutCubic(sp) * cell * 1.2;
+        const col = v >= 300 ? 'rgba(200,130,255,1)' : v >= 100 ? 'rgba(255,210,60,1)' : 'rgba(255,255,255,1)';
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(sx, sy);
+        if (scale !== 1) ctx.scale(scale, scale);
+        ctx.font = `700 ${size}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0,0,0,0.95)';
+        ctx.strokeText(`+${v}`, 0, 0);
+        ctx.fillStyle = col;
+        ctx.fillText(`+${v}`, 0, 0);
+        ctx.restore();
+        continue;
+      }
+
+      const p = Math.max(0, Math.min(1, age / 650));
       const cx = offsetX + (x + 0.5) * cell;
       const cy = offsetY + (y + 0.5) * cell;
-      const knd = String(fx.kind || '');
+      const knd = knd0;
       const isCap = knd.startsWith('cap');
       const base = cell * (knd === 'kill' ? 1.1 : isCap ? 1.05 : 0.85);
       const r = base * (0.35 + 1.25 * p) * (0.35 + fxIntensity * 0.95);
@@ -9393,6 +10939,9 @@ function draw() {
       else if (knd === 'cap2') col = 'rgba(255,45,85,0.92)';
       else if (knd === 'cap3') col = 'rgba(170,120,255,0.92)';
       else if (knd === 'cap4') col = 'rgba(0,255,255,0.92)';
+      else if (knd === 'cap5') col = cosmeticAccent(5, 0.92);
+      else if (knd === 'cap6') col = cosmeticAccent(6, 0.92);
+      else if (knd === 'cap7') col = cosmeticAccent(7, 0.92);
 
       ctx.save();
       ctx.globalAlpha = a;
@@ -9430,7 +10979,7 @@ function draw() {
           ctx.stroke();
         }
       } else {
-        const capId = Math.max(0, Math.min(4, Number(knd.slice(3)) || 0));
+        const capId = Math.max(0, Math.min(7, Number(knd.slice(3)) || 0));
         if (capId === 0) {
           // Rings
           ctx.beginPath();

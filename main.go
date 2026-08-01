@@ -40,7 +40,7 @@ const (
 
 var (
 	MatchDurationTicks     uint32 = 3000
-	MatchIntermissionTicks uint32 = 300
+	MatchIntermissionTicks uint32 = 150
 )
 
 func init() {
@@ -82,32 +82,49 @@ var allowedWSOrigins = map[string]struct{}{
 	"http://snakes.samoy.love":  {},
 }
 
-func cosmeticsPriceForCat(cat string) (uint16, bool) {
-	c := strings.TrimSpace(strings.ToLower(cat))
-	switch c {
-	case "capturefx":
-		return 60, true
-	case "head":
-		return 50, true
-	case "seg":
-		return 40, true
-	case "nameplate":
-		return 35, true
-	case "frame":
-		return 30, true
-	default:
-		return 0, false
-	}
+// CosmeticsMaxID is the highest cosmetic id; the inventory mask is a uint8, so
+// exactly 8 slots (0..7) fit per category.
+const CosmeticsMaxID = 7
+
+// cosmeticsPrices is the single source of truth for shop prices: per category,
+// per id. Index 0 is the free default that every profile owns. Server code and
+// the payload sent to the client both read this table, never a literal.
+var cosmeticsPrices = map[string][CosmeticsMaxID + 1]uint16{
+	"frame":     {0, 30, 45, 85, 115, 200, 330, 550},
+	"nameplate": {0, 40, 60, 105, 140, 240, 390, 640},
+	"seg":       {0, 160, 55, 210, 360, 90, 580, 950},
+	"head":      {0, 50, 75, 135, 175, 300, 500, 800},
+	"capturefx": {0, 65, 100, 180, 240, 410, 660, 1050},
 }
 
-func cosmeticsPricesPayload() map[string]any {
-	return map[string]any{
-		"capturefx": 60,
-		"head":      50,
-		"seg":       40,
-		"nameplate": 35,
-		"frame":     30,
+func cosmeticsCatKey(cat string) string {
+	return strings.TrimSpace(strings.ToLower(cat))
+}
+
+// cosmeticsCatValid reports whether the category exists.
+func cosmeticsCatValid(cat string) bool {
+	_, ok := cosmeticsPrices[cosmeticsCatKey(cat)]
+	return ok
+}
+
+// cosmeticsPriceFor returns the price of one item, false for unknown cat/id.
+func cosmeticsPriceFor(cat string, id uint8) (uint16, bool) {
+	row, ok := cosmeticsPrices[cosmeticsCatKey(cat)]
+	if !ok || id > CosmeticsMaxID {
+		return 0, false
 	}
+	return row[id], true
+}
+
+// cosmeticsPricesPayload renders the price table for the "hello" message.
+func cosmeticsPricesPayload() map[string]any {
+	out := make(map[string]any, len(cosmeticsPrices))
+	for cat, row := range cosmeticsPrices {
+		list := make([]uint16, len(row))
+		copy(list, row[:])
+		out[cat] = list
+	}
+	return out
 }
 
 func (r *Room) awardPoints(num uint16, base uint16, reason uint8) {
@@ -121,9 +138,11 @@ func (r *Room) awardPoints(num uint16, base uint16, reason uint8) {
 	if reason > PointsCapture {
 		reason = PointsOther
 	}
+	// The leader is the best score in the room, dead or alive: using only living
+	// players made every multiplier jump around while the leader lay dead.
 	best := uint16(0)
 	for _, o := range r.players {
-		if o == nil || !o.alive {
+		if o == nil {
 			continue
 		}
 		if v := r.points[o.num]; v > best {
@@ -135,31 +154,28 @@ func (r *Room) awardPoints(num uint16, base uint16, reason uint8) {
 	// Rubber-band only starts after the match has "some" points to avoid early randomness.
 	if best >= 20 {
 		d := float32(int(best) - int(me))
-		// Smooth, capped curve: ~+70% at large deficit, ~-25% when far ahead.
+		// Smooth, capped curve: ~+70% at large deficit, -10% when far ahead.
+		// The leader penalty stays mild on purpose; the catch-up bonus is the
+		// part that is allowed to bite.
 		x := d / 120.0
 		if x > 0.70 {
 			x = 0.70
-		} else if x < -0.25 {
-			x = -0.25
+		} else if x < -0.10 {
+			x = -0.10
 		}
 		mult = 1.0 + x
 	}
-	add := uint16(float32(base)*mult + 0.0001)
+	// No per-event cap: clamping to base+10 used to eat the whole catch-up bonus.
+	// Only overflow protection remains.
+	addF := float32(base)*mult + 0.0001
+	add := uint16(0)
+	if addF >= float32(^uint16(0)) {
+		add = ^uint16(0)
+	} else {
+		add = uint16(addF)
+	}
 	if add == 0 {
 		add = 1
-	}
-	// Prevent outlier spikes from a single event while still allowing a meaningful catch-up.
-	maxAdd := uint16(0)
-	{
-		v := uint32(base) + 10
-		if v > uint32(^uint16(0)) {
-			maxAdd = ^uint16(0)
-		} else {
-			maxAdd = uint16(v)
-		}
-	}
-	if add > maxAdd {
-		add = maxAdd
 	}
 	actualAdd := add
 	if me > ^uint16(0)-add {
@@ -278,6 +294,50 @@ func (r *Room) botPickDirOutside(p *Player) (Dir, bool) {
 	return best, true
 }
 
+// dailyGoalFor picks the goal for a daily type in a given slot. Slot 1 is the
+// hardest, slot 3 sits in the middle.
+func dailyGoalFor(slot uint8, t uint8) uint16 {
+	switch t {
+	case DailyKills:
+		switch slot {
+		case 1:
+			return 5
+		case 2:
+			return 3
+		default:
+			return 4
+		}
+	case DailyPickups:
+		switch slot {
+		case 1:
+			return 4
+		case 2:
+			return 2
+		default:
+			return 3
+		}
+	case DailyCapture:
+		switch slot {
+		case 1:
+			return 260
+		case 2:
+			return 160
+		default:
+			return 200
+		}
+	case DailyStyle:
+		switch slot {
+		case 1:
+			return 120
+		case 2:
+			return 80
+		default:
+			return 100
+		}
+	}
+	return 0
+}
+
 func (r *Room) ensureProfileDailyLocked(p *Profile) {
 	if p == nil {
 		return
@@ -291,41 +351,44 @@ func (r *Room) ensureProfileDailyLocked(p *Profile) {
 		p.DailyType2 = 0
 		p.DailyGoal2 = 0
 		p.DailyProg2 = 0
-	}
-	if p.DailyType1 == 0 {
-		t := uint8(1 + r.rng.Intn(4))
-		g := uint16(0)
-		switch t {
-		case DailyKills:
-			g = 5
-		case DailyPickups:
-			g = 4
-		case DailyCapture:
-			g = 260
-		case DailyStyle:
-			g = 120
+		p.DailyType3 = 0
+		p.DailyGoal3 = 0
+		p.DailyProg3 = 0
+		// Login streak: consecutive days keep counting, a gap restarts at 1.
+		if p.StreakLastDay == today-1 && p.StreakDays > 0 {
+			if p.StreakDays < ^uint32(0) {
+				p.StreakDays++
+			}
+		} else {
+			p.StreakDays = 1
 		}
-		p.DailyType1 = t
-		p.DailyGoal1 = g
-		p.DailyProg1 = 0
+		p.StreakLastDay = today
 	}
-	if p.DailyType2 == 0 {
-		t := uint8(1 + r.rng.Intn(4))
-		g := uint16(0)
-		switch t {
-		case DailyKills:
-			g = 3
-		case DailyPickups:
-			g = 2
-		case DailyCapture:
-			g = 160
-		case DailyStyle:
-			g = 80
+	roll := func(slot uint8, t *uint8, goal *uint16, prog *uint16) {
+		if *t != 0 {
+			return
 		}
-		p.DailyType2 = t
-		p.DailyGoal2 = g
-		p.DailyProg2 = 0
+		nt := uint8(1 + r.rng.Intn(4))
+		*t = nt
+		*goal = dailyGoalFor(slot, nt)
+		*prog = 0
 	}
+	roll(1, &p.DailyType1, &p.DailyGoal1, &p.DailyProg1)
+	roll(2, &p.DailyType2, &p.DailyGoal2, &p.DailyProg2)
+	roll(3, &p.DailyType3, &p.DailyGoal3, &p.DailyProg3)
+}
+
+// dailyStreakMultLocked returns the daily reward multiplier: 1 + 0.25*(streak-1),
+// capped at x2. Caller holds profilesMu.
+func dailyStreakMultLocked(pr *Profile) float32 {
+	if pr == nil || pr.StreakDays <= 1 {
+		return 1.0
+	}
+	m := 1.0 + 0.25*float32(pr.StreakDays-1)
+	if m > 2.0 {
+		m = 2.0
+	}
+	return m
 }
 
 func (r *Room) sendDailyStateToPlayer(p *Player) {
@@ -336,31 +399,108 @@ func (r *Room) sendDailyStateToPlayer(p *Player) {
 	if pr == nil {
 		return
 	}
+	type slotState struct {
+		slot uint8
+		t    uint8
+		goal uint16
+		prog uint16
+	}
 	profilesMu.Lock()
 	r.ensureProfileDailyLocked(pr)
-	t1 := pr.DailyType1
-	g1 := pr.DailyGoal1
-	p1 := pr.DailyProg1
-	t2 := pr.DailyType2
-	g2 := pr.DailyGoal2
-	p2 := pr.DailyProg2
+	slots := [3]slotState{
+		{1, pr.DailyType1, pr.DailyGoal1, pr.DailyProg1},
+		{2, pr.DailyType2, pr.DailyGoal2, pr.DailyProg2},
+		{3, pr.DailyType3, pr.DailyGoal3, pr.DailyProg3},
+	}
 	profilesMu.Unlock()
 	markProfilesDirty()
 
-	r.pushEvent(Event{Kind: EventDailyAssign, A: p.num, B: g1, C: (uint32(t1) << 16) | uint32(p1), D: 1})
-	r.pushEvent(Event{Kind: EventDailyAssign, A: p.num, B: g2, C: (uint32(t2) << 16) | uint32(p2), D: 2})
+	for _, s := range slots {
+		r.pushEvent(Event{Kind: EventDailyAssign, A: p.num, B: s.goal, C: (uint32(s.t) << 16) | uint32(s.prog), D: s.slot})
+	}
 }
 
-func (r *Room) maybeUnlockAchievement(p *Player, pr *Profile, achv uint8) {
+// checkAchievementsLocked unlocks every achievement whose profile counter has
+// reached its threshold and returns how many were newly unlocked. The caller
+// must pay out the rewards AFTER releasing profilesMu (addStyle takes it).
+// Caller holds profilesMu.
+func (r *Room) checkAchievementsLocked(p *Player, pr *Profile) int {
 	if p == nil || pr == nil {
+		return 0
+	}
+	n := 0
+	for _, ru := range achvRules {
+		bit := uint32(1) << uint32(ru.code)
+		if pr.AchvMask&bit != 0 {
+			continue
+		}
+		if ru.get(pr) < ru.need {
+			continue
+		}
+		pr.AchvMask |= bit
+		r.pushEvent(Event{Kind: EventAchievement, A: p.num, D: ru.code})
+		n++
+	}
+	return n
+}
+
+// grantAchievementRewards pays out unlocks found by checkAchievementsLocked.
+// Must be called without profilesMu held.
+func (r *Room) grantAchievementRewards(p *Player, count int) {
+	for i := 0; i < count; i++ {
+		r.addStyle(p, StyleAchvReward, StyleAchievement)
+	}
+}
+
+// grantDailyRewards pays out completed daily slots, scaled by the login streak.
+// Must be called without profilesMu held. dailyRewardDepth keeps the payout
+// from feeding the "earn Style" daily back into itself (see addStyle).
+func (r *Room) grantDailyRewards(p *Player, count int) {
+	if p == nil || count <= 0 {
 		return
 	}
-	bit := uint32(1) << uint32(achv)
-	if pr.AchvMask&bit != 0 {
+	mult := float32(1.0)
+	if !p.bot {
+		if pr := profileForKey(p.profileKey); pr != nil {
+			profilesMu.Lock()
+			mult = dailyStreakMultLocked(pr)
+			profilesMu.Unlock()
+		}
+	}
+	reward := uint16(float32(StyleDailyReward)*mult + 0.5)
+	if p.dailyRewardDepth < ^uint8(0) {
+		p.dailyRewardDepth++
+	}
+	for i := 0; i < count; i++ {
+		r.addStyle(p, reward, StyleDaily)
+		r.awardPoints(p.num, 14, PointsDaily)
+	}
+	if p.dailyRewardDepth > 0 {
+		p.dailyRewardDepth--
+	}
+}
+
+// grantFirstWinBonus pays the once-per-day "first win" bonus (E7).
+func (r *Room) grantFirstWinBonus(p *Player) {
+	if p == nil || p.bot {
 		return
 	}
-	pr.AchvMask |= bit
-	r.pushEvent(Event{Kind: EventAchievement, A: p.num, D: achv})
+	pr := profileForKey(p.profileKey)
+	if pr == nil {
+		return
+	}
+	today := dayStampNow()
+	profilesMu.Lock()
+	eligible := pr.FirstWinDay != today
+	if eligible {
+		pr.FirstWinDay = today
+	}
+	profilesMu.Unlock()
+	if !eligible {
+		return
+	}
+	markProfilesDirty()
+	r.addStyle(p, StyleFirstWinBonus, StyleWin)
 }
 
 func (r *Room) addDailyProgress(p *Player, kind uint8, inc uint16) {
@@ -376,10 +516,7 @@ func (r *Room) addDailyProgress(p *Player, kind uint8, inc uint16) {
 	rewardCount := r.addDailyProgressLocked(p, pr, kind, inc)
 	profilesMu.Unlock()
 	markProfilesDirty()
-	for i := 0; i < rewardCount; i++ {
-		r.addStyle(p, 18, StyleDaily)
-		r.awardPoints(p.num, 14, PointsDaily)
-	}
+	r.grantDailyRewards(p, rewardCount)
 }
 
 func (r *Room) addDailyProgressLocked(p *Player, pr *Profile, kind uint8, inc uint16) int {
@@ -411,6 +548,7 @@ func (r *Room) addDailyProgressLocked(p *Player, pr *Profile, kind uint8, inc ui
 	}
 	apply(1, pr.DailyType1, &pr.DailyGoal1, &pr.DailyProg1)
 	apply(2, pr.DailyType2, &pr.DailyGoal2, &pr.DailyProg2)
+	apply(3, pr.DailyType3, &pr.DailyGoal3, &pr.DailyProg3)
 	return rewardCount
 }
 
@@ -451,13 +589,67 @@ const (
 )
 
 const (
-	StyleKill     = 1
-	StyleRevenge  = 2
-	StyleBounty   = 3
-	StyleContract = 4
-	StyleDaily    = 5
-	StyleWin      = 6
-	StyleTop5     = 7
+	StyleKill        = 1
+	StyleRevenge     = 2
+	StyleBounty      = 3
+	StyleContract    = 4
+	StyleDaily       = 5
+	StyleWin         = 6
+	StyleTop5        = 7
+	StyleCapture     = 8
+	StyleAchievement = 9
+)
+
+// StyleReasonCount sizes the per-match breakdown arrays (matchResult.Sb): the
+// highest reason code plus one.
+const StyleReasonCount = 10
+
+// Per-match Style budgets and rates.
+const (
+	StyleCaptureCellsPer = 40  // cells captured per 1 Style
+	StyleCaptureMatchCap = 25  // E2: max Style from captures per match
+	StyleKillMatchCap    = 100 // E4: max Style from kills (incl. streaks) per match
+
+	StyleKillHuman   = 14
+	StyleKillBot     = 5
+	StyleKillBotLate = 2 // after BotKillFullRateCount bot kills in one match
+	BotKillFullRate  = 10
+
+	StyleContractReward = 20 // E5
+	StyleDailyReward    = 45 // E7
+	StyleAchvReward     = 50 // E8
+	StyleFirstWinBonus  = 50 // E7
+	StyleBountySurvive  = 30 // E11
+	PointsBountySurvive = 20
+
+	// E3: placement rewards use the absolute place among every participant.
+	StylePlace1  = 40
+	StylePlace23 = 25
+	StylePlace45 = 15
+
+	// E13: soft daily income ceiling; everything past it pays 40%.
+	StyleDaySoftCap    = 600
+	StyleOverCapNumer  = 2
+	StyleOverCapDenom  = 5
+	MaxContractsMatch  = 4 // E5
+	StyleAddMaxDepth   = 4 // E12: hard bound on addStyle re-entrancy
+	SpawnGraceTicks    = 15
+	KillStreakWindow   = 150 // F9
+	BountyWindowTicks  = 700
+	BountyCooldown     = 400 // E11
+	BountyCooldownLate = 150 // F4: the final phase re-arms the bounty faster
+)
+
+// F4: a match runs through three phases derived from r.tick-r.matchStartTick.
+const (
+	PhaseExpansion = 0 // 0:00-1:30  more pickups, bounty disabled
+	PhaseConflict  = 1 // 1:30-3:30  baseline
+	PhaseFinal     = 2 // 3:30-5:00  double capture points, faster bounty
+)
+
+const (
+	PhaseExpansionEndTick = 900
+	PhaseConflictEndTick  = 2100
 )
 
 const (
@@ -484,13 +676,63 @@ const (
 	DailyStyle   = 4
 )
 
+// Achievement codes. They index bits of Profile.AchvMask (uint32), so the
+// highest usable code is 31. Codes 1-5 are the original set and must not move.
 const (
 	AchvKills10    = 1
 	AchvBounty3    = 2
 	AchvContracts3 = 3
 	AchvStyle200   = 4
 	AchvRevenge3   = 5
+
+	AchvKills100     = 6
+	AchvKills1000    = 7
+	AchvContracts25  = 8
+	AchvContracts100 = 9
+	AchvCapture1k    = 10
+	AchvCapture10k   = 11
+	AchvCapture100k  = 12
+	AchvBounty15     = 13
+	AchvRevenge15    = 14
+	AchvStyle2000    = 15
+	AchvStyle10000   = 16
+	AchvPickups25    = 17
+	AchvPickups250   = 18
+	AchvStreak3      = 19
+	AchvStreak7      = 20
+	AchvStreak30     = 21
 )
+
+// achvRule binds an achievement code to a profile counter and its threshold.
+type achvRule struct {
+	code uint8
+	need uint32
+	get  func(pr *Profile) uint32
+}
+
+var achvRules = []achvRule{
+	{AchvKills10, 10, func(pr *Profile) uint32 { return pr.TotalKills }},
+	{AchvKills100, 100, func(pr *Profile) uint32 { return pr.TotalKills }},
+	{AchvKills1000, 1000, func(pr *Profile) uint32 { return pr.TotalKills }},
+	{AchvContracts3, 3, func(pr *Profile) uint32 { return pr.TotalContracts }},
+	{AchvContracts25, 25, func(pr *Profile) uint32 { return pr.TotalContracts }},
+	{AchvContracts100, 100, func(pr *Profile) uint32 { return pr.TotalContracts }},
+	{AchvCapture1k, 1000, func(pr *Profile) uint32 { return pr.TotalCapture }},
+	{AchvCapture10k, 10000, func(pr *Profile) uint32 { return pr.TotalCapture }},
+	{AchvCapture100k, 100000, func(pr *Profile) uint32 { return pr.TotalCapture }},
+	{AchvBounty3, 3, func(pr *Profile) uint32 { return pr.TotalBounty }},
+	{AchvBounty15, 15, func(pr *Profile) uint32 { return pr.TotalBounty }},
+	{AchvRevenge3, 3, func(pr *Profile) uint32 { return pr.TotalRevenge }},
+	{AchvRevenge15, 15, func(pr *Profile) uint32 { return pr.TotalRevenge }},
+	{AchvStyle200, 200, func(pr *Profile) uint32 { return pr.TotalStyleGained }},
+	{AchvStyle2000, 2000, func(pr *Profile) uint32 { return pr.TotalStyleGained }},
+	{AchvStyle10000, 10000, func(pr *Profile) uint32 { return pr.TotalStyleGained }},
+	{AchvPickups25, 25, func(pr *Profile) uint32 { return pr.TotalPickups }},
+	{AchvPickups250, 250, func(pr *Profile) uint32 { return pr.TotalPickups }},
+	{AchvStreak3, 3, func(pr *Profile) uint32 { return pr.StreakDays }},
+	{AchvStreak7, 7, func(pr *Profile) uint32 { return pr.StreakDays }},
+	{AchvStreak30, 30, func(pr *Profile) uint32 { return pr.StreakDays }},
+}
 
 const (
 	MutatorNone          = 0
@@ -589,6 +831,8 @@ type Room struct {
 
 	bountyTarget uint16
 	bountyUntil  uint32
+	// E11: no new bounty may be assigned before this tick.
+	bountyCooldownUntil uint32
 
 	mutatorType  uint8
 	mutatorUntil uint32
@@ -612,7 +856,7 @@ type Room struct {
 	matchKills       map[uint16]uint16
 	matchDeaths      map[uint16]uint16
 	matchStyleEarned map[uint16]uint32
-	matchStyleBy     map[uint16][8]uint16
+	matchStyleBy     map[uint16][StyleReasonCount]uint16
 	matchPointsBy    map[uint16][8]uint16
 	matchContractsBy map[uint16][4]uint16
 	matchEndSentSeq  uint32
@@ -644,22 +888,28 @@ type Room struct {
 }
 
 type matchResult struct {
-	N     uint16    `json:"n"`
-	Nm    string    `json:"nm"`
-	Bot   bool      `json:"bot"`
-	P     uint16    `json:"p"`
-	Cells uint16    `json:"cells"`
-	K     uint16    `json:"k"`
-	Fr    uint8     `json:"fr"`
-	Place uint16    `json:"place"`
-	Ct    uint8     `json:"ct"`
-	Cp    uint16    `json:"cp"`
-	Cg    uint16    `json:"cg"`
-	Cu    uint32    `json:"cu"`
-	Cd    [4]uint16 `json:"cd"`
-	Se    uint16    `json:"se"`
-	Sb    [8]uint16 `json:"sb"`
-	Pb    [8]uint16 `json:"pb"`
+	N     uint16 `json:"n"`
+	Nm    string `json:"nm"`
+	Bot   bool   `json:"bot"`
+	P     uint16 `json:"p"`
+	Cells uint16 `json:"cells"`
+	// Pk is the peak territory held during the match, Avg the time-weighted
+	// average. Cells alone is a snapshot at the final tick and reads as 0 for
+	// anyone who died late (F3).
+	Pk    uint16                   `json:"pk"`
+	Avg   uint16                   `json:"avg"`
+	K     uint16                   `json:"k"`
+	D     uint16                   `json:"d"`
+	Fr    uint8                    `json:"fr"`
+	Place uint16                   `json:"place"`
+	Ct    uint8                    `json:"ct"`
+	Cp    uint16                   `json:"cp"`
+	Cg    uint16                   `json:"cg"`
+	Cu    uint32                   `json:"cu"`
+	Cd    [4]uint16                `json:"cd"`
+	Se    uint16                   `json:"se"`
+	Sb    [StyleReasonCount]uint16 `json:"sb"`
+	Pb    [8]uint16                `json:"pb"`
 }
 
 type KnownName struct {
@@ -740,6 +990,23 @@ type Player struct {
 	speedLockUntil uint32
 	bonusBudget    uint16
 
+	// F2: short post-respawn immunity. Cleared early once the player leaves
+	// their own territory so it cannot be used as a battering ram.
+	spawnGraceUntil uint32
+
+	// Per-match counters, all reset in resetMatchLocked.
+	peakCells         uint16 // F3: best territory held
+	cellTicks         uint32 // F3: integral of territory over ticks
+	styleCaptureMatch uint16 // E2: Style already paid for captures
+	styleKillMatch    uint16 // E4: Style already paid for kills
+	botKillsMatch     uint16 // E4: bot kills, drives the diminishing rate
+	contractsDone     uint16 // E5: contracts completed
+
+	// E12: re-entrancy guards for addStyle. styleDepth bounds recursion,
+	// dailyRewardDepth marks Style that is itself a daily payout.
+	styleDepth       uint8
+	dailyRewardDepth uint8
+
 	lastKiller     uint16
 	lastKilledTick uint32
 
@@ -776,6 +1043,21 @@ type Profile struct {
 	DailyType2 uint8  `json:"dailyType2"`
 	DailyGoal2 uint16 `json:"dailyGoal2"`
 	DailyProg2 uint16 `json:"dailyProg2"`
+
+	DailyType3 uint8  `json:"dailyType3"`
+	DailyGoal3 uint16 `json:"dailyGoal3"`
+	DailyProg3 uint16 `json:"dailyProg3"`
+
+	// E7: login streak. Old files load with zeros, ensureProfileDailyLocked
+	// seeds them on the first day rollover.
+	StreakDays    uint32 `json:"streakDays"`
+	StreakLastDay int64  `json:"streakLastDay"`
+	// E7: day stamp of the last "first win of the day" bonus.
+	FirstWinDay int64 `json:"firstWinDay"`
+
+	// E13: soft daily income ceiling.
+	DayIncome    uint32 `json:"dayIncome"`
+	DayIncomeDay int64  `json:"dayIncomeDay"`
 
 	TotalKills       uint32 `json:"totalKills"`
 	TotalPickups     uint32 `json:"totalPickups"`
@@ -828,7 +1110,7 @@ func ensureProfileCosmeticsLocked(pr *Profile) {
 	}
 
 	clamp := func(v uint8) uint8 {
-		if v > 4 {
+		if v > CosmeticsMaxID {
 			return 0
 		}
 		return v
@@ -2167,7 +2449,7 @@ func newRoom(hub *Hub, id int, limit int) *Room {
 		matchKills:       make(map[uint16]uint16),
 		matchDeaths:      make(map[uint16]uint16),
 		matchStyleEarned: make(map[uint16]uint32),
-		matchStyleBy:     make(map[uint16][8]uint16),
+		matchStyleBy:     make(map[uint16][StyleReasonCount]uint16),
 		matchPointsBy:    make(map[uint16][8]uint16),
 		matchContractsBy: make(map[uint16][4]uint16),
 		matchEndSentSeq:  0,
@@ -2207,13 +2489,24 @@ func (r *Room) buildMatchResultsLocked() []matchResult {
 				se = uint16(v)
 			}
 		}
+		avg := uint16(0)
+		if elapsed := r.matchElapsed(); elapsed > 0 {
+			v := p.cellTicks / elapsed
+			if v > uint32(^uint16(0)) {
+				v = uint32(^uint16(0))
+			}
+			avg = uint16(v)
+		}
 		res = append(res, matchResult{
 			N:     num,
 			Nm:    name,
 			Bot:   p.bot,
 			P:     r.points[num],
 			Cells: r.scores[num],
+			Pk:    p.peakCells,
+			Avg:   avg,
 			K:     r.matchKills[num],
+			D:     r.matchDeaths[num],
 			Fr:    p.cosFrame,
 			Ct:    p.contractType,
 			Cp:    p.contractProgress,
@@ -2272,6 +2565,7 @@ func (r *Room) resetMatchLocked() {
 
 	r.bountyTarget = 0
 	r.bountyUntil = 0
+	r.bountyCooldownUntil = 0
 	r.mutatorType = MutatorNone
 	r.mutatorUntil = 0
 	r.powerUps = r.powerUps[:0]
@@ -2314,6 +2608,18 @@ func (r *Room) resetMatchLocked() {
 		if p.owned != nil {
 			p.owned = p.owned[:0]
 		}
+		// Per-match state. respawnPlayer deliberately keeps the contract (F1),
+		// so a new match has to clear it here.
+		p.contractType = ContractNone
+		p.contractGoal = 0
+		p.contractProgress = 0
+		p.contractUntil = 0
+		p.contractsDone = 0
+		p.peakCells = 0
+		p.cellTicks = 0
+		p.styleCaptureMatch = 0
+		p.styleKillMatch = 0
+		p.botKillsMatch = 0
 		r.respawnPlayer(p)
 		r.ensureContract(p)
 	}
@@ -2362,6 +2668,64 @@ func (r *Room) pushEvent(e Event) {
 	r.events = append(r.events, e)
 }
 
+// matchElapsed is the number of ticks since the current match started, capped
+// at the match length so the intermission does not dilute per-tick averages.
+func (r *Room) matchElapsed() uint32 {
+	if r.tick < r.matchStartTick {
+		return 0
+	}
+	el := r.tick - r.matchStartTick
+	if r.matchEndTick > r.matchStartTick {
+		if full := r.matchEndTick - r.matchStartTick; el > full {
+			el = full
+		}
+	}
+	return el
+}
+
+// matchPhase derives the match arc phase from the elapsed match time (F4).
+func (r *Room) matchPhase() uint8 {
+	el := r.matchElapsed()
+	switch {
+	case el < PhaseExpansionEndTick:
+		return PhaseExpansion
+	case el < PhaseConflictEndTick:
+		return PhaseConflict
+	default:
+		return PhaseFinal
+	}
+}
+
+// hasSpawnGrace reports whether the player is still inside the post-respawn
+// immunity window (F2).
+func (r *Room) hasSpawnGrace(p *Player) bool {
+	return p != nil && p.spawnGraceUntil != 0 && r.tick < p.spawnGraceUntil
+}
+
+// clearSpawnGrace drops the immunity, used when the player leaves home.
+func (r *Room) clearSpawnGrace(p *Player) {
+	if p != nil {
+		p.spawnGraceUntil = 0
+	}
+}
+
+// playerShieldBits packs the defensive state into the single "shield" byte of
+// the ROI player record: bit0 = shield pickup, bit1 = spawn grace. The record
+// size must stay at 21 bytes, so the flags share one byte.
+func (r *Room) playerShieldBits(p *Player) uint8 {
+	v := uint8(0)
+	if p == nil {
+		return 0
+	}
+	if p.shield > 0 {
+		v |= 1
+	}
+	if r.hasSpawnGrace(p) {
+		v |= 2
+	}
+	return v
+}
+
 func (r *Room) contractName(t uint8) string {
 	switch t {
 	case ContractKills:
@@ -2375,8 +2739,40 @@ func (r *Room) contractName(t uint8) string {
 	}
 }
 
+// Contract goals ramp with the number of contracts already completed in the
+// match, so the 4th one is not as trivial as the 1st (E5).
+var (
+	contractKillGoals    = [MaxContractsMatch]uint16{3, 5, 8, 12}
+	contractPickupGoals  = [MaxContractsMatch]uint16{2, 3, 4, 5}
+	contractCaptureGoals = [MaxContractsMatch]uint16{180, 260, 360, 500}
+)
+
+func contractGoalFor(ct uint8, done uint16) uint16 {
+	idx := int(done)
+	if idx >= MaxContractsMatch {
+		idx = MaxContractsMatch - 1
+	}
+	switch ct {
+	case ContractKills:
+		return contractKillGoals[idx]
+	case ContractPickups:
+		return contractPickupGoals[idx]
+	case ContractCapture:
+		return contractCaptureGoals[idx]
+	}
+	return 0
+}
+
 func (r *Room) assignContract(p *Player) {
 	if p == nil {
+		return
+	}
+	// E5: a match hands out at most MaxContractsMatch completed contracts.
+	if p.contractsDone >= MaxContractsMatch {
+		p.contractType = ContractNone
+		p.contractGoal = 0
+		p.contractProgress = 0
+		p.contractUntil = 0
 		return
 	}
 	ct := uint8(ContractKills)
@@ -2388,17 +2784,9 @@ func (r *Room) assignContract(p *Player) {
 	} else {
 		ct = ContractCapture
 	}
-	goal := uint16(3)
-	switch ct {
-	case ContractKills:
-		goal = 3
-	case ContractPickups:
-		goal = 2
-	case ContractCapture:
-		goal = 180
-	}
+	goal := contractGoalFor(ct, p.contractsDone)
 	if r.mutatorType == MutatorPowerSurge && ct == ContractPickups {
-		goal = 3
+		goal++
 	}
 	until := r.tick + 2400
 	p.contractType = ct
@@ -2410,6 +2798,9 @@ func (r *Room) assignContract(p *Player) {
 
 func (r *Room) ensureContract(p *Player) {
 	if p == nil {
+		return
+	}
+	if p.contractsDone >= MaxContractsMatch {
 		return
 	}
 	if p.contractType == ContractNone || p.contractGoal == 0 {
@@ -2425,9 +2816,22 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 	if p == nil || delta == 0 {
 		return
 	}
+	// E12: two independent brakes on the addStyle -> daily -> addStyle loop.
+	// styleDepth is a hard bound on re-entrancy, dailyRewardDepth marks Style
+	// that is itself a daily payout. Daily progress is only fed by a top-level,
+	// non-daily-payout grant, so no single edit can reopen the cycle.
+	if p.styleDepth >= StyleAddMaxDepth {
+		log.Printf("style_recursion_guard room=%d player=%d reason=%d", r.id, p.num, reason)
+		return
+	}
+	p.styleDepth++
+	defer func() { p.styleDepth-- }()
+	allowDailyProgress := p.styleDepth == 1 && p.dailyRewardDepth == 0
+
 	// The profile is the single source of truth for the balance: never write
 	// Player.style back into it, only apply atomic deltas and refresh the cache.
 	rewardCount := 0
+	achvCount := 0
 	var pr *Profile
 	if !p.bot {
 		pr = profileForKey(p.profileKey)
@@ -2440,6 +2844,11 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 			profilesMu.Unlock()
 			return
 		}
+		granted = styleDayIncomeGrantLocked(pr, granted)
+		if granted == 0 {
+			profilesMu.Unlock()
+			return
+		}
 		delta = granted
 		addProfileStyleLocked(pr, uint32(delta))
 		if pr.TotalStyleGained < ^uint32(0)-uint32(delta) {
@@ -2447,10 +2856,10 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 		} else {
 			pr.TotalStyleGained = ^uint32(0)
 		}
-		rewardCount = r.addDailyProgressLocked(p, pr, DailyStyle, delta)
-		if pr.TotalStyleGained >= 200 {
-			r.maybeUnlockAchievement(p, pr, AchvStyle200)
+		if allowDailyProgress {
+			rewardCount = r.addDailyProgressLocked(p, pr, DailyStyle, delta)
 		}
+		achvCount = r.checkAchievementsLocked(p, pr)
 		pr.LastSeen = time.Now().Unix()
 		p.style = pr.StyleBalance
 		profilesMu.Unlock()
@@ -2461,7 +2870,7 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 		p.style = ^uint32(0)
 	}
 
-	if reason <= StyleTop5 {
+	if reason > 0 && int(reason) < StyleReasonCount {
 		if r.matchStyleEarned[p.num] < ^uint32(0)-uint32(delta) {
 			r.matchStyleEarned[p.num] += uint32(delta)
 		} else {
@@ -2477,10 +2886,25 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 		r.matchStyleBy[p.num] = v
 	}
 	r.pushEvent(Event{Kind: EventStyle, A: p.num, B: delta, C: p.style, D: reason})
-	for i := 0; i < rewardCount; i++ {
-		r.addStyle(p, 18, StyleDaily)
-		r.awardPoints(p.num, 14, PointsDaily)
+	r.grantDailyRewards(p, rewardCount)
+	r.grantAchievementRewards(p, achvCount)
+}
+
+// addStyleCapped grants Style while respecting a per-match budget counter.
+// Returns the amount actually granted.
+func (r *Room) addStyleCapped(p *Player, delta uint16, reason uint8, spent *uint16, budget uint16) uint16 {
+	if p == nil || delta == 0 || spent == nil {
+		return 0
 	}
+	if *spent >= budget {
+		return 0
+	}
+	if room := budget - *spent; delta > room {
+		delta = room
+	}
+	*spent += delta
+	r.addStyle(p, delta, reason)
+	return delta
 }
 
 func (r *Room) addContractProgress(p *Player, inc uint16) {
@@ -2512,7 +2936,10 @@ func (r *Room) addContractProgress(p *Player, inc uint16) {
 			}
 			r.matchContractsBy[p.num] = v
 		}
-		r.addStyle(p, 25, StyleContract)
+		if p.contractsDone < ^uint16(0) {
+			p.contractsDone++
+		}
+		r.addStyle(p, StyleContractReward, StyleContract)
 		r.awardPoints(p.num, 16, PointsContract)
 		if !p.bot {
 			pr := profileForKey(p.profileKey)
@@ -2522,13 +2949,13 @@ func (r *Room) addContractProgress(p *Player, inc uint16) {
 				if pr.TotalContracts < ^uint32(0) {
 					pr.TotalContracts++
 				}
-				if pr.TotalContracts >= 3 {
-					r.maybeUnlockAchievement(p, pr, AchvContracts3)
-				}
+				achvCount := r.checkAchievementsLocked(p, pr)
 				profilesMu.Unlock()
 				markProfilesDirty()
+				r.grantAchievementRewards(p, achvCount)
 			}
 		}
+		// assignContract itself clears the slot once the match limit is hit.
 		r.assignContract(p)
 	}
 }
@@ -2631,51 +3058,71 @@ func (r *Room) maybeUpdateMutator() {
 		r.mutatorUntil = 0
 		r.metaDirty = true
 	}
-	if r.mutatorType == MutatorNone && r.tick%900 == 0 {
-		pick := uint8(1 + r.rng.Intn(2))
-		r.mutatorType = pick
-		r.mutatorUntil = r.tick + 320
-		r.pushEvent(Event{Kind: EventMutatorStart, D: r.mutatorType, C: r.mutatorUntil})
-		r.metaDirty = true
+	// F8: the schedule is relative to the match, not the room. A room cycle is
+	// MatchDuration+Intermission ticks, so a room-relative phase drifted every
+	// match and windows that landed in the intermission were lost entirely.
+	if r.mutatorType == MutatorNone {
+		el := r.matchElapsed()
+		if el == 600 || el == 1500 || el == 2400 {
+			pick := uint8(1 + r.rng.Intn(2))
+			r.mutatorType = pick
+			r.mutatorUntil = r.tick + 240
+			r.pushEvent(Event{Kind: EventMutatorStart, D: r.mutatorType, C: r.mutatorUntil})
+			r.metaDirty = true
+		}
 	}
 }
 
+// clearBountyLocked drops the current bounty and starts the re-arm cooldown.
+func (r *Room) clearBounty() {
+	r.bountyTarget = 0
+	r.bountyUntil = 0
+	cd := uint32(BountyCooldown)
+	if r.matchPhase() == PhaseFinal {
+		cd = BountyCooldownLate
+	}
+	r.bountyCooldownUntil = r.tick + cd
+	r.metaDirty = true
+}
+
 func (r *Room) maybeUpdateBounty() {
+	// E11: surviving the whole window is now worth something. Without it the
+	// only lone human in a room was permanently marked and could never profit.
 	if r.bountyUntil != 0 && r.tick >= r.bountyUntil {
-		r.bountyTarget = 0
-		r.bountyUntil = 0
-		r.metaDirty = true
+		// No EventBountyClaim here: nobody claimed it. The client sees the
+		// window close via the header (bountyTarget = 0) and the Style event.
+		if t := r.players[r.bountyTarget]; t != nil && t.alive {
+			r.addStyle(t, StyleBountySurvive, StyleBounty)
+			r.awardPoints(t.num, PointsBountySurvive, PointsBounty)
+		}
+		r.clearBounty()
 	}
 	if r.bountyTarget != 0 {
 		t := r.players[r.bountyTarget]
 		if t == nil || !t.alive {
-			r.bountyTarget = 0
-			r.bountyUntil = 0
-			r.metaDirty = true
+			r.clearBounty()
 		}
 	}
+	// F4: the expansion phase is bounty free, the final phase re-arms faster
+	// (shorter cooldown, see clearBounty).
+	if r.matchPhase() == PhaseExpansion {
+		return
+	}
+	if r.bountyCooldownUntil != 0 && r.tick < r.bountyCooldownUntil {
+		return
+	}
 	if r.bountyTarget == 0 {
+		// E11: bots are ordinary candidates now, not a fallback.
 		cands := make([]uint16, 0, len(r.players))
 		for _, p := range r.players {
 			if p == nil || !p.alive {
 				continue
 			}
-			if p.bot {
-				continue
-			}
 			cands = append(cands, p.num)
-		}
-		if len(cands) == 0 {
-			for _, p := range r.players {
-				if p == nil || !p.alive {
-					continue
-				}
-				cands = append(cands, p.num)
-			}
 		}
 		if len(cands) > 0 {
 			r.bountyTarget = cands[r.rng.Intn(len(cands))]
-			r.bountyUntil = r.tick + 700
+			r.bountyUntil = r.tick + BountyWindowTicks
 			r.pushEvent(Event{Kind: EventBountyAssign, A: r.bountyTarget, C: r.bountyUntil})
 			r.metaDirty = true
 		}
@@ -2705,6 +3152,13 @@ func (r *Room) maybeUpdatePowerUps() {
 	chance := float32(0.35)
 	if r.mutatorType == MutatorPowerSurge {
 		chance = 0.75
+	}
+	// F4: the expansion phase seeds the map faster.
+	if r.matchPhase() == PhaseExpansion {
+		chance *= 1.5
+		if chance > 1.0 {
+			chance = 1.0
+		}
 	}
 	if r.rng.Float32() > chance {
 		return
@@ -3390,7 +3844,13 @@ func (r *Room) setGrid(i int, owner uint16) {
 		}
 	}
 	if owner != 0 {
-		r.scores[owner] = r.scores[owner] + 1
+		v := r.scores[owner] + 1
+		r.scores[owner] = v
+		// F3: remember the high-water mark, the final-tick snapshot alone is a
+		// bad summary of a match.
+		if o := r.players[owner]; o != nil && v > o.peakCells {
+			o.peakCells = v
+		}
 		r.addOwnedCell(owner, i)
 	}
 }
@@ -3774,6 +4234,12 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 	if p == nil || !p.alive {
 		return
 	}
+	// F2: last line of defence for the post-respawn grace. Only kills inflicted
+	// by another player are absorbed; walls and the player's own trail stay
+	// lethal, otherwise a graced snake could get stuck driving into a wall.
+	if r.hasSpawnGrace(p) && (killer != 0 || reason == "trail_cut" || reason == "head_on") {
+		return
+	}
 	if r.matchDeaths != nil {
 		r.matchDeaths[num] = r.matchDeaths[num] + 1
 	}
@@ -3898,11 +4364,16 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 	p.killStreak = 0
 	p.lastKillTick = 0
 	p.shield = 0
+	p.spawnGraceUntil = 0
 	p.speedUntil = 0
 	p.speedLockUntil = 0
 	p.bonusBudget = BonusBudgetMax
 	p.lastKiller = killer
 	p.lastKilledTick = r.tick
+	// F1: the contract survives death; dying costs time, so give some back.
+	if p.contractUntil != 0 {
+		p.contractUntil += 100
+	}
 	if p.bot {
 		p.respawnAt = r.tick + uint32(BotRespawnDelayTicks+r.rng.Intn(5))
 	}
@@ -3919,18 +4390,14 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 						pr.TotalKills++
 					}
 					rewardCount := r.addDailyProgressLocked(k, pr, DailyKills, 1)
-					if pr.TotalKills >= 10 {
-						r.maybeUnlockAchievement(k, pr, AchvKills10)
-					}
+					achvCount := r.checkAchievementsLocked(k, pr)
 					profilesMu.Unlock()
 					markProfilesDirty()
-					for i := 0; i < rewardCount; i++ {
-						r.addStyle(k, 18, StyleDaily)
-						r.awardPoints(k.num, 14, PointsDaily)
-					}
+					r.grantDailyRewards(k, rewardCount)
+					r.grantAchievementRewards(k, achvCount)
 				}
 			}
-			if k.lastKillTick != 0 && r.tick-k.lastKillTick <= 80 {
+			if k.lastKillTick != 0 && r.tick-k.lastKillTick <= KillStreakWindow {
 				if k.killStreak < 255 {
 					k.killStreak++
 				}
@@ -3939,7 +4406,20 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 			}
 			k.lastKillTick = r.tick
 			r.pushEvent(Event{Kind: EventStreak, A: killer, D: k.killStreak})
-			r.addStyle(k, 10, StyleKill)
+			// E4: a bot respawns in about a second, so it cannot be worth as
+			// much as a human, and the rate decays once the killer farms them.
+			gain := uint16(StyleKillHuman)
+			if p.bot {
+				if k.botKillsMatch < ^uint16(0) {
+					k.botKillsMatch++
+				}
+				if k.botKillsMatch > BotKillFullRate {
+					gain = StyleKillBotLate
+				} else {
+					gain = StyleKillBot
+				}
+			}
+			r.addStyleCapped(k, gain, StyleKill, &k.styleKillMatch, StyleKillMatchCap)
 			r.awardPoints(k.num, 18, PointsKill)
 			if k.lastKiller != 0 && k.lastKiller == num && k.lastKilledTick != 0 && r.tick-k.lastKilledTick <= 900 {
 				r.pushEvent(Event{Kind: EventRevenge, A: killer, B: num})
@@ -3953,21 +4433,29 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 						if pr.TotalRevenge < ^uint32(0) {
 							pr.TotalRevenge++
 						}
-						if pr.TotalRevenge >= 3 {
-							r.maybeUnlockAchievement(k, pr, AchvRevenge3)
-						}
+						achvCount := r.checkAchievementsLocked(k, pr)
 						profilesMu.Unlock()
 						markProfilesDirty()
+						r.grantAchievementRewards(k, achvCount)
 					}
 				}
 				k.lastKiller = 0
 				k.lastKilledTick = 0
 			}
-			if k.alive && k.killStreak == 3 {
-				r.bonusTerritory(k.num, k.x, k.y, 1)
-			}
-			if k.alive && k.killStreak == 5 {
-				r.bonusTerritory(k.num, k.x, k.y, 2)
+			// F9: streaks are worth noticing now — bigger radius, real Style,
+			// and the ladder keeps going past x5.
+			if k.alive {
+				switch k.killStreak {
+				case 3:
+					r.bonusTerritory(k.num, k.x, k.y, 2)
+					r.addStyleCapped(k, 15, StyleKill, &k.styleKillMatch, StyleKillMatchCap)
+				case 5:
+					r.bonusTerritory(k.num, k.x, k.y, 3)
+					r.addStyleCapped(k, 30, StyleKill, &k.styleKillMatch, StyleKillMatchCap)
+				case 7:
+					r.bonusTerritory(k.num, k.x, k.y, 4)
+					r.addStyleCapped(k, 50, StyleKill, &k.styleKillMatch, StyleKillMatchCap)
+				}
 			}
 			if k.contractType == ContractKills {
 				r.addContractProgress(k, 1)
@@ -3988,18 +4476,15 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 					if pr.TotalBounty < ^uint32(0) {
 						pr.TotalBounty++
 					}
-					if pr.TotalBounty >= 3 {
-						r.maybeUnlockAchievement(k, pr, AchvBounty3)
-					}
+					achvCount := r.checkAchievementsLocked(k, pr)
 					profilesMu.Unlock()
 					markProfilesDirty()
+					r.grantAchievementRewards(k, achvCount)
 				}
 			}
 		}
 		r.pushEvent(Event{Kind: EventBountyClaim, A: killer, B: num})
-		r.bountyTarget = 0
-		r.bountyUntil = 0
-		r.metaDirty = true
+		r.clearBounty()
 	}
 	x := uint16(0)
 	y := uint16(0)
@@ -4062,10 +4547,13 @@ func (r *Room) respawnPlayer(p *Player) {
 	p.speedUntil = 0
 	p.lastKiller = 0
 	p.lastKilledTick = 0
-	p.contractType = ContractNone
-	p.contractGoal = 0
-	p.contractProgress = 0
-	p.contractUntil = 0
+	// F2: a fresh 3x3 spawn in the middle of 14 bots needs a moment to breathe.
+	// The grace is dropped as soon as the player leaves their own territory
+	// (see applyMove), so it cannot be ridden into someone else's trail.
+	p.spawnGraceUntil = r.tick + SpawnGraceTicks
+	// F1: the contract deliberately survives respawn. With bots killing a
+	// player every 20-45s a "3 kills" contract was otherwise unreachable.
+	// resetMatchLocked clears it explicitly when a new match starts.
 	r.claimSpawnTerritory(p.num, x, y)
 	r.forceFullSnapshot = true
 }
@@ -6049,6 +6537,20 @@ func (r *Room) capture(playerNum uint16) {
 		}
 		if !p.bot {
 			r.addDailyProgress(p, DailyCapture, uint16(trailLen))
+			// TotalCapture was declared but never fed; the capture achievements
+			// need it.
+			if pr := profileForKey(p.profileKey); pr != nil && trailLen > 0 {
+				profilesMu.Lock()
+				if pr.TotalCapture < ^uint32(0)-uint32(trailLen) {
+					pr.TotalCapture += uint32(trailLen)
+				} else {
+					pr.TotalCapture = ^uint32(0)
+				}
+				achvCount := r.checkAchievementsLocked(p, pr)
+				profilesMu.Unlock()
+				markProfilesDirty()
+				r.grantAchievementRewards(p, achvCount)
+			}
 		}
 		ownedAfter := len(p.owned)
 		if ownedAfter > ownedBefore {
@@ -6060,20 +6562,34 @@ func (r *Room) capture(playerNum uint16) {
 				y = uint16(p.y)
 			}
 			r.pushEvent(Event{Kind: EventCapture, A: p.num, X: x, Y: y, C: uint32(delta), D: p.cosCaptureFx})
-			pts := uint16(delta / 4)
-			if pts < 3 {
-				pts = 3
-			}
-			if pts > 60 {
-				pts = 60
+			// E9: sqrt curve instead of delta/4 with a cap of 60. A 1000 cell
+			// loop is nine seconds of lethal risk and must beat a 240 cell one.
+			ptsF := 1.6 * math.Sqrt(float64(delta))
+			maxPts := 100.0
+			if r.matchPhase() == PhaseFinal {
+				// F4: the endgame pays double for territory.
+				ptsF *= 2
+				maxPts *= 2
 			}
 			if r.mutatorType == MutatorDoubleCapture {
-				pts = uint16(float32(pts) * 1.25)
-				if pts > 80 {
-					pts = 80
-				}
+				ptsF *= 1.25
+				maxPts *= 1.3
 			}
-			r.awardPoints(p.num, pts, PointsCapture)
+			if ptsF > maxPts {
+				ptsF = maxPts
+			}
+			if ptsF < 3 {
+				ptsF = 3
+			}
+			r.awardPoints(p.num, uint16(ptsF), PointsCapture)
+
+			// E2: territory finally feeds the meta. Without this the optimal
+			// strategy was to ignore the map and farm bot tails.
+			gain := uint16(delta / StyleCaptureCellsPer)
+			if gain == 0 {
+				gain = 1
+			}
+			r.addStyleCapped(p, gain, StyleCapture, &p.styleCaptureMatch, StyleCaptureMatchCap)
 		}
 		if r.mutatorType == MutatorDoubleCapture {
 			r.bonusTerritory(playerNum, p.x, p.y, 1)
@@ -6220,6 +6736,8 @@ func (r *Room) resolveHeadOnCollisions(alive []*Player) {
 				hy = i / W
 			}
 			for _, n := range nums {
+				// F2: killPlayerWithReason absorbs the hit for anyone still
+				// inside their spawn grace; the others still die.
 				r.killPlayerWithReason(n, 0, "head_on", i, hx, hy)
 			}
 		}
@@ -6380,12 +6898,11 @@ func (r *Room) applyMove(p *Player) {
 						pr.TotalPickups++
 					}
 					rewardCount := r.addDailyProgressLocked(p, pr, DailyPickups, 1)
+					achvCount := r.checkAchievementsLocked(p, pr)
 					profilesMu.Unlock()
 					markProfilesDirty()
-					for i := 0; i < rewardCount; i++ {
-						r.addStyle(p, 18, StyleDaily)
-						r.awardPoints(p.num, 14, PointsDaily)
-					}
+					r.grantDailyRewards(p, rewardCount)
+					r.grantAchievementRewards(p, achvCount)
 				}
 			}
 		}
@@ -6397,7 +6914,10 @@ func (r *Room) applyMove(p *Player) {
 			return
 		}
 		if victim := r.players[t]; victim != nil {
-			if victim.shield > 0 {
+			switch {
+			case r.hasSpawnGrace(victim):
+				// F2: the cut is absorbed by the grace, the shield is untouched.
+			case victim.shield > 0:
 				victim.shield = 0
 				x := uint16(0)
 				y := uint16(0)
@@ -6406,7 +6926,7 @@ func (r *Room) applyMove(p *Player) {
 					y = uint16(victim.y)
 				}
 				r.pushEvent(Event{Kind: EventPowerupUse, A: victim.num, D: PowerupShield, X: x, Y: y})
-			} else {
+			default:
 				r.killPlayerWithReason(t, p.num, "trail_cut", i, p.x, p.y)
 			}
 		}
@@ -6414,6 +6934,9 @@ func (r *Room) applyMove(p *Player) {
 
 	owns := r.gridOwner[i] == p.num
 	if !owns {
+		// F2: stepping outside home ends the grace, so it cannot be used as a
+		// battering ram.
+		r.clearSpawnGrace(p)
 		if r.trailOwner[i] != p.num {
 			r.setTrail(i, p.num)
 			p.trail = append(p.trail, i)
@@ -6452,24 +6975,26 @@ func (r *Room) step() {
 		r.matchResetAt = tickNow + MatchIntermissionTicks
 		if r.matchEndSentSeq != r.matchSeq {
 			res := r.buildMatchResultsLocked()
-			placedHumans := 0
+			// E3: rewards follow the ABSOLUTE place among every participant,
+			// bots included. Ranking humans only made the single human in a
+			// room a guaranteed "winner" no matter how badly they played.
+			// Only humans are paid; bots have nothing to spend Style on.
 			for _, mr := range res {
-				if mr.Bot {
+				if mr.Bot || mr.Place > 5 {
 					continue
 				}
 				p := r.players[mr.N]
 				if p == nil {
 					continue
 				}
-				placedHumans++
-				if placedHumans <= 5 {
-					r.addStyle(p, 15, StyleTop5)
-					if placedHumans == 1 {
-						r.addStyle(p, 30, StyleWin)
-					}
-				}
-				if placedHumans >= 5 {
-					break
+				switch {
+				case mr.Place == 1:
+					r.addStyle(p, StylePlace1, StyleWin)
+					r.grantFirstWinBonus(p)
+				case mr.Place <= 3:
+					r.addStyle(p, StylePlace23, StyleTop5)
+				default:
+					r.addStyle(p, StylePlace45, StyleTop5)
 				}
 			}
 			matchEndPayload = map[string]any{
@@ -6554,6 +7079,15 @@ func (r *Room) step() {
 		}
 	}
 	r.tmpAlive = alive
+
+	// F3: integrate held territory over time so the summary can show an
+	// average, not just the final-tick snapshot.
+	for _, p := range r.players {
+		if p == nil {
+			continue
+		}
+		p.cellTicks += uint32(r.scores[p.num])
+	}
 
 	for _, p := range alive {
 		if p == nil {
@@ -6925,7 +7459,7 @@ func (r *Room) buildROIPooledFast(rx, ry, rw, rh int, sinceTick uint32, players 
 		out = appendU16LE(out, r.scores[p.num])
 		out = appendU16LE(out, r.points[p.num])
 		out = appendU16LE(out, p.hue)
-		out = append(out, p.shield)
+		out = append(out, r.playerShieldBits(p))
 		if p.bot {
 			out = append(out, 1)
 		} else {
@@ -6997,7 +7531,7 @@ func (r *Room) buildROIPooledScan(rx, ry, rw, rh int, full bool, sinceTick uint3
 		out = appendU16LE(out, r.scores[p.num])
 		out = appendU16LE(out, r.points[p.num])
 		out = appendU16LE(out, p.hue)
-		out = append(out, p.shield)
+		out = append(out, r.playerShieldBits(p))
 		if p.bot {
 			out = append(out, 1)
 		} else {
@@ -7181,7 +7715,7 @@ func (r *Room) buildROIBinary(rx, ry, rw, rh int, full bool, sinceTick uint32, p
 		pushU16(r.scores[p.num])
 		pushU16(r.points[p.num])
 		pushU16(p.hue)
-		pushU8(p.shield)
+		pushU8(r.playerShieldBits(p))
 		if p.bot {
 			pushU8(1)
 		} else {
@@ -7274,7 +7808,7 @@ func (r *Room) buildStateBinary(full bool) []byte {
 		o += 2
 		binary.LittleEndian.PutUint16(out[o:], p.hue)
 		o += 2
-		out[o] = p.shield
+		out[o] = r.playerShieldBits(p)
 		o++
 		if p.bot {
 			out[o] = 1

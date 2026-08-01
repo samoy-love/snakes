@@ -11,3 +11,14 @@ Thumbs.db
 *.dylib
 *.out
 *.test
+
+# Данные рантайма: профили игроков (PROFILES_PATH)
+data/
+
+# Локальная конфигурация с секретами (шаблон — .env.example)
+.env
+
+# Скомпилированные бинари и артефакты сборки
+snakes
+snakes.exe
+dist/

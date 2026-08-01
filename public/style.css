@@ -55,10 +55,11 @@ html, body {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
  }
 
+ /* H19: кнопка языка живёт в футере карточки меню, а не поверх её угла.
+    Позиционирование задаёт .menuFooterActions, здесь остаётся только z-слой
+    на случай, если элемент когда-нибудь снова окажется вне карточки. */
  .langToggleGlobal {
-  position: fixed;
-  top: calc(12px + var(--sa-top));
-  right: calc(12px + var(--sa-right));
+  position: relative;
   z-index: var(--z-lang);
  }
 
@@ -113,6 +114,17 @@ html, body {
    --z-modal2: 65;
    --z-toasts-top: 70;
    --z-lang: 1000;
+   /* Слои «сочности»: вспышка поверх HUD и чата, но ниже оверлеев (50) */
+   --z-fx: 16;
+   --z-banner: 22;
+   /* Лестница редкости. Цвет живёт ТОЛЬКО в UI магазина, но не в самом предмете */
+   --tier-base: #6b7280;
+   --tier-common: #8fa3b8;
+   --tier-rare: #35c4f0;
+   --tier-epic: #a855f7;
+   --tier-legendary: #f5a524;
+   --tier-mythic: #ff3d71;
+   --gold: #f5c542;
    --sa-top: env(safe-area-inset-top, 0px);
    --sa-right: env(safe-area-inset-right, 0px);
    --sa-bottom: env(safe-area-inset-bottom, 0px);
@@ -259,6 +271,185 @@ html, body {
 
  .menuHeader {
    margin-bottom: 14px;
+ }
+
+ /* --- H15. Счётчик онлайна в шапке меню ------------------------------------
+    Цифру пишет client.js в #menuOnlineCount (та же, что считает updateRoomsStats). */
+ .menuHeaderTop {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   flex-wrap: wrap;
+   gap: 8px;
+ }
+
+ .menuOnline {
+   display: inline-flex;
+   align-items: baseline;
+   gap: 7px;
+   padding: 4px 12px;
+   margin-bottom: 10px;
+   border-radius: 999px;
+   border: 1px solid color-mix(in srgb, #34d399 42%, var(--border2));
+   background: linear-gradient(135deg, rgba(52, 211, 153, 0.16), rgba(0, 0, 0, 0.22));
+   font-size: var(--fs-12);
+   color: var(--muted);
+   white-space: nowrap;
+ }
+
+ .menuOnlineDot {
+   width: 8px;
+   height: 8px;
+   border-radius: 999px;
+   background: #34d399;
+   box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+   align-self: center;
+   flex: 0 0 auto;
+   animation: onlinePulse 2.2s ease-out infinite;
+ }
+
+ @keyframes onlinePulse {
+   0% {
+     box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55);
+   }
+   70% {
+     box-shadow: 0 0 0 7px rgba(52, 211, 153, 0);
+   }
+   100% {
+     box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+   }
+ }
+
+ .menuOnlineCount {
+   font-size: var(--fs-16);
+   font-weight: 900;
+   font-variant-numeric: tabular-nums;
+   color: rgba(255, 255, 255, 0.96);
+ }
+
+ .menuOnlineLabel {
+   font-weight: 700;
+ }
+
+ /* --- H8. Три шага правил — постоянно, а не одноразовым онбордингом --------- */
+ .menuHowTo {
+   counter-reset: howto;
+   list-style: none;
+   margin: 0;
+   padding: var(--pad-md);
+   display: grid;
+   gap: 8px;
+   border-radius: var(--r-tab);
+   border: 1px solid color-mix(in srgb, var(--accent2) 22%, var(--border2));
+   background: linear-gradient(180deg, rgba(96, 165, 250, 0.08), rgba(0, 0, 0, 0.16));
+ }
+
+ .menuHowToStep {
+   display: grid;
+   grid-template-columns: auto auto 1fr;
+   align-items: center;
+   gap: 9px;
+   font-size: var(--fs-13);
+   font-weight: 700;
+   line-height: 1.25;
+   color: rgba(255, 255, 255, 0.92);
+ }
+
+ .menuHowToStep::before {
+   counter-increment: howto;
+   content: counter(howto);
+   width: 20px;
+   height: 20px;
+   border-radius: 999px;
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   font-size: var(--fs-11);
+   font-weight: 900;
+   font-variant-numeric: tabular-nums;
+   color: rgba(255, 255, 255, 0.96);
+   border: 1px solid color-mix(in srgb, var(--accent2) 45%, var(--border2));
+   background: rgba(96, 165, 250, 0.18);
+   flex: 0 0 auto;
+ }
+
+ .menuHowToIcon {
+   font-size: var(--fs-14);
+   line-height: 1;
+ }
+
+ .menuHowToIcon img.emoji {
+   width: 16px;
+   height: 16px;
+ }
+
+ .menuHowToText {
+   min-width: 0;
+ }
+
+ /* --- H6. Панель комнат — закрытый аккордеон ------------------------------- */
+ .roomsDetails > .roomsDetailsSummary {
+   list-style: none;
+   cursor: pointer;
+   user-select: none;
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   min-height: var(--control-h);
+   margin: calc(var(--pad-lg) * -1);
+   padding: var(--pad-lg);
+   border-radius: var(--r-lg);
+ }
+
+ .roomsDetails > .roomsDetailsSummary::-webkit-details-marker {
+   display: none;
+ }
+
+ .roomsDetails[open] > .roomsDetailsSummary {
+   margin-bottom: 0;
+   border-bottom: 1px solid var(--border2);
+   border-radius: var(--r-lg) var(--r-lg) 0 0;
+ }
+
+ .roomsDetailsHint {
+   font-size: var(--fs-12);
+   color: var(--muted2);
+   font-weight: 700;
+   min-width: 0;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+ }
+
+ .roomsDetailsChevron {
+   margin-left: auto;
+   flex: 0 0 auto;
+   color: var(--muted);
+   transition: transform 140ms ease;
+ }
+
+ .roomsDetails[open] > .roomsDetailsSummary .roomsDetailsChevron {
+   transform: rotate(180deg);
+ }
+
+ .roomsDetailsBody {
+   margin-top: var(--pad-lg);
+ }
+
+ /* Заголовок переехал в <summary>, в шапке остались только действия */
+ .roomsHeaderActionsOnly {
+   justify-content: flex-start;
+ }
+
+ /* --- H19. Футер карточки меню --------------------------------------------- */
+ .menuFooterActions {
+   display: flex;
+   align-items: center;
+   justify-content: flex-end;
+   gap: var(--pad-md);
+   margin-top: var(--pad-lg);
+   padding-top: var(--pad-md);
+   border-top: 1px solid var(--border2);
  }
 
  .menuGrid {
@@ -546,6 +737,43 @@ html, body {
    min-height: 36px;
  }
 
+ /* H14: список скроллится и на десктопе — иначе карточка растёт и «Играть» уезжает */
+ #roomsList {
+   max-height: min(340px, 40dvh);
+   overflow: auto;
+   -webkit-overflow-scrolling: touch;
+ }
+
+ /* H9: скелетон-строка размером с .roomRow — client.js рисует её на время загрузки */
+ .roomsSkeleton {
+   display: grid;
+   gap: 6px;
+ }
+
+ .roomsSkeletonRow {
+   display: grid;
+   gap: 8px;
+   padding: 10px;
+   min-height: var(--control-h);
+   border-radius: var(--r-md);
+   border: 1px solid rgba(255, 255, 255, 0.08);
+   background: rgba(0, 0, 0, 0.14);
+ }
+
+ .roomsSkeletonRow .skeletonLine {
+   height: 13px;
+ }
+
+ .roomsSkeletonRow .skeletonLine.isTitle {
+   width: 56%;
+ }
+
+ .roomsSkeletonRow .skeletonLine.isSub {
+   height: 11px;
+   width: 82%;
+   opacity: 0.7;
+ }
+
  .menuPanelTitle {
    font-weight: 800;
    font-size: var(--fs-14);
@@ -620,8 +848,10 @@ html, body {
    flex-wrap: wrap;
  }
 
+ /* C16: компактная высота задаётся переменной, а не селектором (0,2,0), —
+    мобильный/тач-контекст поднимает её до 44px без гонки специфичностей. */
  .cosmeticsFilters .btnGhost {
-   min-height: 36px;
+   min-height: var(--filter-btn-h, 36px);
  }
 
  .cosmeticsFilters .btnGhost.isActive {
@@ -701,6 +931,7 @@ html, body {
  }
 
  .cosmeticsItemPreview {
+   position: relative;
    width: 44px;
    height: 44px;
    border-radius: 12px;
@@ -724,6 +955,8 @@ html, body {
  .cosmeticsItemLeft {
    display: grid;
    gap: 2px;
+   /* C10: без этого grid-колонка не даёт ellipsis работать и карточка разъезжается */
+   min-width: 0;
  }
 
  .cosmeticsItemTitle {
@@ -759,6 +992,234 @@ html, body {
 
  .cosmeticsItemSub.isBlocked {
    color: rgba(255, 140, 200, 0.92);
+ }
+
+/* ==========================================================================
+   D11. Лестница редкости в магазине.
+   Цвет тира живёт ТОЛЬКО здесь — в полоске карточки, бейдже и цвете цены.
+   В самом предмете (превью, канвас) он не появляется: иначе игрок читает
+   «фиолетовый = дорогой», а не «предмет интересный».
+   client.js вешает модификатор тира и на .cosmeticsItem, и на .tierBadge.
+   ========================================================================== */
+
+ .tierBase {
+   --tier-color: var(--tier-base);
+ }
+ .tierCommon {
+   --tier-color: var(--tier-common);
+ }
+ .tierRare {
+   --tier-color: var(--tier-rare);
+ }
+ .tierEpic {
+   --tier-color: var(--tier-epic);
+ }
+ .tierLegendary {
+   --tier-color: var(--tier-legendary);
+ }
+ .tierMythic {
+   --tier-color: var(--tier-mythic);
+ }
+
+ .tierBadge {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   flex: 0 0 auto;
+   /* .cosmeticsItemLeft — grid, поэтому без justify-self бейдж растянется на строку */
+   justify-self: start;
+   width: fit-content;
+   padding: 1px 7px;
+   border-radius: 999px;
+   font-size: var(--fs-11);
+   font-weight: 900;
+   letter-spacing: 0.4px;
+   text-transform: uppercase;
+   line-height: 1.6;
+   white-space: nowrap;
+   color: var(--tier-color, var(--tier-base));
+   border: 1px solid color-mix(in srgb, var(--tier-color, var(--tier-base)) 55%, transparent);
+   background: color-mix(in srgb, var(--tier-color, var(--tier-base)) 16%, rgba(0, 0, 0, 0.35));
+ }
+
+ /* Разделители групп тиров в списке (текст вставляет client.js) */
+ .tierDivider {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   margin: 8px 2px 0;
+   font-size: var(--fs-11);
+   font-weight: 900;
+   letter-spacing: 0.4px;
+   text-transform: uppercase;
+   color: var(--tier-color, var(--muted2));
+ }
+
+ .tierDivider::after {
+   content: '';
+   flex: 1;
+   height: 1px;
+   background: linear-gradient(90deg, color-mix(in srgb, var(--tier-color, var(--border)) 50%, transparent), transparent);
+ }
+
+ .tierDivider:first-child {
+   margin-top: 0;
+ }
+
+ /* Шапка категории: «Куплено 3 / 8 · до конца ветки 1355 ✨» */
+ .cosmeticsCatSummary {
+   display: flex;
+   align-items: center;
+   flex-wrap: wrap;
+   gap: 6px 10px;
+   padding: 7px 10px;
+   border-radius: var(--r-md);
+   border: 1px solid var(--border2);
+   background: rgba(0, 0, 0, 0.20);
+   font-size: var(--fs-12);
+   font-weight: 700;
+   color: var(--muted);
+   font-variant-numeric: tabular-nums;
+ }
+
+ .cosmeticsCatSummary b,
+ .cosmeticsCatSummary .num {
+   color: rgba(255, 255, 255, 0.92);
+   font-weight: 900;
+ }
+
+ /* --- Полоса тира и цвет цены ---------------------------------------------- */
+ .cosmeticsItem {
+   position: relative;
+   border-left-width: 4px;
+   border-left-color: var(--tier-color, rgba(255, 255, 255, 0.10));
+ }
+
+ .cosmeticsItem .cosmeticsPrice .num {
+   color: var(--tier-color, rgba(255, 255, 255, 0.88));
+ }
+
+ /* Legendary: внутреннее свечение карточки (background-image, чтобы не
+    конфликтовать с box-shadow состояний .isSelected/.isEquipped) */
+ .cosmeticsItem.tierLegendary {
+   background-image: radial-gradient(130% 120% at 0% 50%, color-mix(in srgb, var(--tier-legendary) 18%, transparent), transparent 62%);
+ }
+
+ /* Mythic: анимированная градиентная рамка (переиспользует @keyframes shimmer)
+    + «дыхание» 6с */
+ .cosmeticsItem.tierMythic {
+   border-color: transparent;
+   animation: tierBreathe 6s ease-in-out infinite;
+ }
+
+ .cosmeticsItem.tierMythic::before {
+   content: '';
+   position: absolute;
+   /* растягиваем на область рамки (1px сверху/справа/снизу, 4px — полоса тира) */
+   inset: -1px -1px -1px -4px;
+   border-radius: inherit;
+   padding: 1px 1px 1px 4px;
+   background: linear-gradient(90deg, var(--tier-mythic), var(--tier-epic), var(--tier-legendary), var(--tier-mythic));
+   background-size: 220% 100%;
+   animation: shimmer 2600ms linear infinite;
+   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+   -webkit-mask-composite: xor;
+   mask-composite: exclude;
+   pointer-events: none;
+ }
+
+ @keyframes tierBreathe {
+   0%,
+   100% {
+     filter: brightness(1);
+   }
+   50% {
+     filter: brightness(1.14);
+   }
+ }
+
+ /* --- Три состояния карточки ------------------------------------------------
+    Порядок важен: .isEquipped объявлен последним и перебивает .isOwned. */
+ .cosmeticsItem.isLocked {
+   background-color: rgba(0, 0, 0, 0.26);
+ }
+
+ .cosmeticsItem.isLocked .cosmeticsItemTitle {
+   color: rgba(255, 255, 255, 0.80);
+ }
+
+ /* Превью НЕ глушим в серость: именно оно — мотивация купить */
+ .cosmeticsItem.isLocked .cosmeticsItemPreview::after {
+   content: '🔒';
+   position: absolute;
+   right: 1px;
+   bottom: 0;
+   padding: 1px 3px;
+   border-radius: 6px;
+   font-size: 10px;
+   line-height: 1.2;
+   background: rgba(0, 0, 0, 0.66);
+   color: rgba(255, 255, 255, 0.94);
+   pointer-events: none;
+ }
+
+ .cosmeticsItem.isOwned {
+   background-color: rgba(52, 211, 153, 0.07);
+   border-top-color: rgba(52, 211, 153, 0.22);
+   border-right-color: rgba(52, 211, 153, 0.22);
+   border-bottom-color: rgba(52, 211, 153, 0.22);
+ }
+
+ .cosmeticsItem.isOwned .cosmeticsItemTitle::before {
+   content: '✓ ';
+   color: #34d399;
+   font-weight: 900;
+ }
+
+ .cosmeticsItem.isEquipped {
+   background-color: rgba(96, 165, 250, 0.14);
+   border-top-color: color-mix(in srgb, var(--accent2) 62%, transparent);
+   border-right-color: color-mix(in srgb, var(--accent2) 62%, transparent);
+   border-bottom-color: color-mix(in srgb, var(--accent2) 62%, transparent);
+   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent2) 26%, transparent);
+ }
+
+ .cosmeticsItem.isEquipped .cosmeticsItemTitle::before {
+   content: '★ ';
+   color: var(--accent2);
+   font-weight: 900;
+ }
+
+ /* --- Прогресс до покупки на заблокированном товаре ------------------------- */
+ .cosmeticsItemProgress {
+   position: relative;
+   height: 5px;
+   margin-top: 5px;
+   border-radius: 999px;
+   border: 1px solid rgba(255, 255, 255, 0.08);
+   background: rgba(0, 0, 0, 0.30);
+   overflow: hidden;
+ }
+
+ /* Ширину заливки client.js задаёт инлайном на единственном дочернем элементе */
+ .cosmeticsItemProgress > * {
+   display: block;
+   height: 100%;
+   width: 0%;
+   max-width: 100%;
+   border-radius: 999px;
+   background: linear-gradient(90deg, color-mix(in srgb, var(--tier-color, var(--accent2)) 85%, transparent), color-mix(in srgb, var(--tier-color, var(--accent2)) 35%, transparent));
+   transition: width 260ms ease;
+ }
+
+ /* --- Контракт п.4: подсветка числа во время count-up ----------------------- */
+ .counting {
+   display: inline-block;
+   color: var(--gold);
+   text-shadow: 0 0 10px color-mix(in srgb, var(--gold) 55%, transparent), 0 0 2px color-mix(in srgb, var(--gold) 70%, transparent);
+   transform: scale(1.08);
+   transition: transform 140ms ease, text-shadow 140ms ease, color 140ms ease;
  }
 
  .cosmeticsPreviewWrap {
@@ -839,7 +1300,22 @@ html, body {
    min-width: 0;
  }
 
- .menuPanelBody input:focus-visible {
+ /* Пресет эффектов (#fxPresetSelect) и любые другие select в панелях настроек */
+ .menuPanelBody select {
+   flex: 1;
+   min-width: 0;
+   padding: var(--pad-sm) var(--pad-md);
+   border-radius: var(--r-md);
+   border: 1px solid var(--border);
+   background: var(--panel2);
+   color: var(--text);
+   outline: none;
+   min-height: var(--control-h);
+   cursor: pointer;
+ }
+
+ .menuPanelBody input:focus-visible,
+ .menuPanelBody select:focus-visible {
    border-color: var(--focus);
    box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
  }
@@ -1052,6 +1528,10 @@ html, body {
    }
 
    /* C16: тач-цели не меньше 44px (в т.ч. фильтры/вкладки магазина и вторичные кнопки) */
+   .cosmeticsFilters {
+     --filter-btn-h: 44px;
+   }
+
    .btnPrimary,
    .btnGhost,
    .btnSecondary,
@@ -1795,6 +2275,171 @@ html, body {
   height: 100dvh;
  }
 
+/* ==========================================================================
+   Слои «сочности». Разметку создаёт index.html, содержимое и классы .isOn —
+   client.js. Все три слоя не перехватывают клики.
+   ========================================================================== */
+
+ /* Контракт п.1: полноэкранные вспышки. background задаёт JS инлайном. */
+ #fxFlash {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-fx);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  will-change: opacity;
+ }
+
+ #fxFlash.isOn {
+  opacity: 1;
+ }
+
+ /* Контракт п.2: боевой чип (киллы + комбо) слева-снизу, над очередью тостов. */
+ #hudCombo {
+  position: fixed;
+  left: calc(12px + var(--sa-left));
+  bottom: calc(12px + var(--sa-bottom));
+  z-index: var(--z-toasts);
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border2));
+  background: linear-gradient(135deg, rgba(255, 45, 85, 0.26), rgba(0, 0, 0, 0.52));
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(10px);
+  font-size: var(--fs-13);
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  filter: var(--hud-filter);
+ }
+
+ #hudCombo.isOn {
+  display: inline-flex;
+  animation: comboPop 220ms cubic-bezier(0.16, 1.6, 0.3, 1) both;
+ }
+
+ @keyframes comboPop {
+  0% {
+   opacity: 0;
+   transform: scale(0.82);
+  }
+  60% {
+   transform: scale(1.06);
+  }
+  100% {
+   opacity: 1;
+   transform: scale(1);
+  }
+ }
+
+ .hudComboIcon {
+  font-size: var(--fs-14);
+  line-height: 1;
+ }
+
+ .hudComboValue {
+  font-size: var(--fs-16);
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.98);
+ }
+
+ .hudComboLabel {
+  font-size: var(--fs-11);
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted2);
+ }
+
+ /* Пока чип виден, очередь тостов уезжает выше, чтобы не накладываться */
+ body:has(#hudCombo.isOn) #eventToasts {
+  bottom: calc(12px + var(--sa-bottom) + 46px);
+ }
+
+ /* Контракт п.3: центральный слой крупных событий, отдельно от очереди тостов. */
+ #bigBanner {
+  position: fixed;
+  left: 50%;
+  top: 34%;
+  transform: translate(-50%, -50%);
+  z-index: var(--z-banner);
+  display: none;
+  max-width: min(760px, calc(100vw - 32px));
+  text-align: center;
+  line-height: var(--lh-tight);
+  /* color и text-shadow наследуются вниз — на них работают модификаторы */
+  color: rgba(255, 255, 255, 0.98);
+  text-shadow: 0 0 22px rgba(255, 255, 255, 0.30), 0 6px 26px rgba(0, 0, 0, 0.70);
+  pointer-events: none;
+ }
+
+ /* Структура, которую собирает client.js: .bigBannerInner > иконка, заголовок, подпись */
+ .bigBannerInner {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+ }
+
+ .bigBannerIcon {
+  font-size: clamp(30px, 7vw, 56px);
+  line-height: 1;
+ }
+
+ .bigBannerIcon img.emoji {
+  width: clamp(30px, 7vw, 56px);
+  height: clamp(30px, 7vw, 56px);
+ }
+
+ .bigBannerTitle {
+  font-size: clamp(26px, 6vw, 52px);
+  font-weight: 900;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  line-height: var(--lh-tight);
+ }
+
+ #bigBanner.isOn {
+  display: block;
+  animation: bannerIn 420ms cubic-bezier(0.16, 1.5, 0.3, 1) both;
+ }
+
+ @keyframes bannerIn {
+  0% {
+   opacity: 0;
+   transform: translate(-50%, -50%) scale(1.6);
+  }
+  100% {
+   opacity: 1;
+   transform: translate(-50%, -50%) scale(1);
+  }
+ }
+
+ #bigBanner.bannerJackpot {
+  color: var(--gold);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--gold) 62%, transparent), 0 6px 26px rgba(0, 0, 0, 0.72);
+ }
+
+ #bigBanner.bannerDanger {
+  color: rgba(255, 138, 176, 0.98);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 62%, transparent), 0 6px 26px rgba(0, 0, 0, 0.72);
+ }
+
+ .bigBannerSub {
+  display: block;
+  margin-top: 6px;
+  font-size: var(--fs-14);
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: none;
+  color: var(--muted);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+ }
+
  #hud {
   position: fixed;
   left: calc(12px + var(--sa-left));
@@ -1814,14 +2459,46 @@ html, body {
   -webkit-overflow-scrolling: touch;
  }
 
+ /* I7: во время матча левый HUD — компактный ряд иконок с автоскрытием.
+    Лучший угол экрана не должен занимать заголовок игры и название комнаты. */
  body.inGame #hud:not(.lbPinned) {
   min-width: 0;
   width: auto;
-  padding: var(--pad-md);
+  padding: 6px;
+  border-color: color-mix(in srgb, var(--border) 45%, transparent);
+  background: color-mix(in srgb, rgba(0, 0, 0, 0.40) 70%, transparent);
+  box-shadow: none;
+  opacity: 0.42;
+  transition: opacity 160ms ease, box-shadow 160ms ease, background 160ms ease;
+ }
+
+ body.inGame #hud:not(.lbPinned):hover,
+ body.inGame #hud:not(.lbPinned):focus-within {
+  opacity: 1;
+  background: linear-gradient(135deg, rgba(255, 45, 85, 0.10), rgba(0, 0, 0, 0.40));
+  box-shadow: var(--shadow-float-strong);
  }
 
  body.inGame #hud:not(.lbPinned) .hudTop {
   margin-bottom: 0;
+  flex-wrap: nowrap;
+  gap: 6px;
+ }
+
+ body.inGame #hud:not(.lbPinned) .hudActions {
+  flex-wrap: nowrap;
+  gap: 6px;
+ }
+
+ /* Заголовок «Змейки» во время матча не нужен, название комнаты — сильно ужато */
+ body.inGame #hud:not(.lbPinned) #title {
+  display: none;
+ }
+
+ body.inGame #hud:not(.lbPinned) #roomInfo {
+  font-size: var(--fs-11);
+  opacity: 0.6;
+  max-width: 108px;
  }
 
  body.inGame #hud:not(.lbPinned) .hudMid,
@@ -2218,12 +2895,10 @@ html, body {
   margin-top: 8px;
  }
 
+ /* I12: позиционирование отсюда удалено — killfeed живёт в #rightSidebar,
+    и правило `#rightSidebar #killfeed { position: relative }` его полностью
+    перекрывало. Осталась только раскладка содержимого. */
  #killfeed {
-   position: fixed;
-   right: calc(12px + var(--sa-right));
-   top: calc(334px + var(--sa-top));
-   z-index: var(--z-killfeed);
-   width: 220px;
    display: grid;
    gap: 6px;
    pointer-events: none;
@@ -2251,13 +2926,57 @@ html, body {
   pointer-events: none;
  }
 
+ /* I8: на мобильном камера центрирует игрока, поэтому верхние по центру тосты
+    висели прямо над головой змейки. Уводим их вниз, над чатом, и оставляем два. */
  @media (max-width: 720px) {
   #eventToasts {
-   left: 50%;
-   top: calc(12px + var(--sa-top) + 120px);
-   bottom: auto;
-   transform: translateX(-50%);
-   width: min(520px, calc(100vw - 24px));
+   left: calc(8px + var(--sa-left));
+   right: calc(8px + var(--sa-right));
+   top: auto;
+   bottom: calc(8px + var(--sa-bottom) + 52px);
+   transform: none;
+   width: auto;
+   gap: 6px;
+   justify-items: stretch;
+  }
+
+  /* тосты добавляются через prepend — свежие идут первыми */
+  #eventToasts > .eventToast:nth-child(n + 3) {
+   display: none;
+  }
+
+  .eventToast {
+   padding: var(--pad-sm) var(--pad-md);
+   gap: 8px;
+   border-radius: var(--r-md);
+  }
+
+  .eventToastIcon {
+   width: 26px;
+   height: 26px;
+   font-size: 14px;
+   flex: 0 0 auto;
+  }
+
+  .eventToastText {
+   font-size: var(--fs-12);
+  }
+
+  .eventToastSub {
+   font-size: var(--fs-11);
+  }
+
+  /* Боевой чип — в тот же нижний стек, тосты идут над ним */
+  #hudCombo {
+   left: calc(8px + var(--sa-left));
+   bottom: calc(8px + var(--sa-bottom));
+   padding: 4px 10px;
+   font-size: var(--fs-12);
+  }
+
+  /* Развёрнутый чат занимает до 40dvh — поднимаем стек над ним */
+  body:has(#chat:not(.collapsed)) #eventToasts {
+   bottom: calc(8px + var(--sa-bottom) + 40dvh + 8px);
   }
  }
 
@@ -3002,18 +3721,101 @@ img.emoji {
   height: 20px;
 }
 
+ /* ==========================================================================
+    I1. Мобильная раскладка HUD.
+    Было: #hud (min-width 180) слева и центрированный #topHud (359px на 375px)
+    физически накладывались, #topHud с z-index 13 накрывал выход и настройки,
+    правая панель 200px съедала 53% ширины. Стало — три непересекающиеся зоны:
+      строка 1 слева  — ряд иконок #hud,
+      строка 1 справа — только миникарта (до 520px её нет вовсе),
+      строка 2        — однострочный #topHud во всю оставшуюся ширину,
+      низ             — тосты и свёрнутый в кнопку чат.
+    ========================================================================== */
  @media (max-width: 720px) {
+   /* --- строка 1, слева: только иконки --- */
    #hud {
      left: calc(8px + var(--sa-left));
      top: calc(8px + var(--sa-top));
-     min-width: 180px;
-     max-width: min(340px, calc(100vw - 16px - var(--sa-left) - var(--sa-right)));
+     min-width: 0;
+     width: auto;
+     padding: 4px;
+     max-width: calc(100vw - 16px - var(--sa-left) - var(--sa-right));
+     max-height: none;
+     overflow: visible;
    }
 
+   body.inGame #hud:not(.lbPinned) {
+     padding: 4px;
+     border-color: transparent;
+     background: transparent;
+     backdrop-filter: none;
+     box-shadow: none;
+     /* на тач-устройстве нет hover — держим читаемыми, но ненавязчивыми */
+     opacity: 0.86;
+   }
+
+   body.inGame #hud:not(.lbPinned) .hudBrand {
+     display: none;
+   }
+
+   .hudActions {
+     flex-wrap: nowrap;
+     gap: 6px;
+   }
+
+   /* единая высота 44px: #leaveBtn ниже уже поднят до 44, остальные держим в ряд */
+   .hudActions .iconBtn {
+     width: 44px;
+     height: 44px;
+     min-width: 44px;
+     min-height: 44px;
+     background: color-mix(in srgb, var(--panel) 88%, transparent);
+     backdrop-filter: blur(10px);
+     box-shadow: var(--shadow-float);
+   }
+
+   /* --- строка 2: #topHud прижат влево и однострочный.
+      Смещение = 8 (отступ) + 54 (высота ряда иконок) + 6 (зазор). --- */
    #topHud {
-     top: calc(8px + var(--sa-top));
-     width: min(520px, calc(100vw - 16px - var(--sa-left) - var(--sa-right)));
-     padding: 9px 10px;
+     left: calc(8px + var(--sa-left));
+     right: auto;
+     top: calc(8px + var(--sa-top) + 60px);
+     transform: none;
+     width: auto;
+     max-width: calc(100vw - 16px - var(--sa-left) - var(--sa-right) - 158px);
+     padding: 6px 10px;
+   }
+
+   .topHudRow {
+     grid-template-columns: auto 1fr;
+     align-items: center;
+     column-gap: 10px;
+     row-gap: 0;
+   }
+
+   .topHudValue {
+     font-size: var(--fs-16);
+   }
+
+   .topHudRight {
+     grid-template-columns: auto auto;
+     align-items: center;
+     gap: 0 8px;
+   }
+
+   .topHudTime {
+     grid-column: auto;
+     font-size: var(--fs-12);
+   }
+
+   /* длинный текст контракта в одну строку не помещается — он есть в правой панели */
+   .topHudContract {
+     display: none;
+   }
+
+   .topHudBar {
+     margin-top: 5px;
+     height: 4px;
    }
 
    #metaHud {
@@ -3031,6 +3833,26 @@ img.emoji {
 
    #roomInfo {
      margin-bottom: 6px;
+   }
+
+   /* --- низ: чат сворачивается в компактную кнопку --- */
+   #chat.collapsed {
+     left: auto;
+     right: calc(8px + var(--sa-right));
+     width: auto;
+     max-width: 60vw;
+     border-radius: 999px;
+   }
+
+   #chat.collapsed #chatHeader {
+     border-bottom: none;
+     padding: 0 14px;
+     gap: 8px;
+   }
+
+   /* в свёрнутой «кнопке» остаются только заголовок и счётчик непрочитанных */
+   #chat.collapsed .chatHeaderStatus {
+     display: none;
    }
 
    #chat {
@@ -3089,11 +3911,16 @@ img.emoji {
      color: var(--text);
    }
 
+   /* --- строка 1, справа: от правой панели остаётся только миникарта --- */
    #rightSidebar {
      right: calc(8px + var(--sa-right));
      top: calc(8px + var(--sa-top));
-     width: 200px;
+     width: 150px;
      gap: 8px;
+   }
+
+   #rightInfo {
+     display: none;
    }
 
    #perf {
@@ -3107,8 +3934,12 @@ img.emoji {
    #minimap {
      width: auto;
      max-width: 100%;
-     height: 110px;
+     height: 96px;
      margin: 0 auto;
+   }
+
+   .minimapLegend {
+     display: none;
    }
 
    .deathOverlay {
@@ -3124,6 +3955,59 @@ img.emoji {
    #minimap {
      display: none;
    }
+
+   /* I1: миникарты здесь нет, а больше в правой панели ничего не осталось —
+      убираем её целиком и отдаём ширину игровому полю. */
+   #rightSidebar {
+     display: none;
+   }
+
+   #topHud {
+     max-width: calc(100vw - 16px - var(--sa-left) - var(--sa-right));
+   }
+
+   /* --- C10. Карточка товара на 375px -------------------------------------
+      flex без wrap + grid без min-width разъезжались: 44px превью, заголовок,
+      цена и кнопка не помещались в ~270px. */
+   .cosmeticsItem {
+     flex-wrap: wrap;
+     row-gap: 8px;
+   }
+
+   /* flex-basis: 0 — иначе длинный заголовок задаёт базу шире доступной
+      ширины и левая часть срывается под превью, теряя строку по высоте */
+   .cosmeticsItemLeft {
+     min-width: 0;
+     flex: 1 1 0;
+   }
+
+   .cosmeticsItemTitle,
+   .cosmeticsItemSub {
+     min-width: 0;
+     overflow: hidden;
+     text-overflow: ellipsis;
+     white-space: nowrap;
+   }
+
+   .cosmeticsItemRight {
+     flex: 1 0 100%;
+     justify-content: space-between;
+     gap: 10px;
+   }
+
+   .cosmeticsItemRight > button {
+     flex: 1;
+     min-height: 48px;
+   }
+
+   .cosmeticsPrice {
+     flex: 0 0 auto;
+     white-space: nowrap;
+   }
+
+   .menuHowToStep {
+     font-size: var(--fs-12);
+   }
  }
 
  @media (max-height: 520px) {
@@ -3134,6 +4018,38 @@ img.emoji {
  }
 
  @media (pointer: coarse) {
+   /* --- C16. Тач-цели в меню и магазине ------------------------------------
+      Раньше блок покрывал только экран смерти: на планшете (>720px, но тач)
+      фильтры магазина оставались 36px, вкладки — 34px. */
+   .cosmeticsFilters {
+     --filter-btn-h: 44px;
+   }
+
+   .overlay button,
+   .overlay summary,
+   .overlay select,
+   .overlay input:not([type='checkbox']):not([type='range']),
+   .overlay .btnPrimary,
+   .overlay .btnSecondary,
+   .overlay .btnGhost,
+   .overlay .cosmeticsTabBtn,
+   .overlay .roomRow,
+   .overlay .roomRowJoin {
+     min-height: 44px;
+   }
+
+   .overlay .iconBtn {
+     width: 44px;
+     height: 44px;
+     min-width: 44px;
+     min-height: 44px;
+   }
+
+   /* кнопка очистки поиска абсолютна внутри инпута — освобождаем ей место */
+   .overlay .roomsSearchWrap input {
+     padding-right: 52px;
+   }
+
    .deathOverlay {
      padding: calc(var(--pad-lg) + var(--sa-top)) calc(var(--pad-lg) + var(--sa-right)) calc(var(--pad-lg) + var(--sa-bottom)) calc(var(--pad-lg) + var(--sa-left));
    }
@@ -3318,8 +4234,33 @@ img.emoji {
   .eventToastBig,
   .eventToast.bump,
   .metaRowUrgent,
-  .lb-enter {
+  .lb-enter,
+  /* Новые анимации релизной волны: блок точечный, поэтому перечисляем явно */
+  .menuOnlineDot,
+  #hudCombo.isOn,
+  #bigBanner.isOn,
+  .cosmeticsItem.tierMythic,
+  .cosmeticsItem.tierMythic::before,
+  .roomsSkeletonRow .skeletonLine {
     animation: none;
+  }
+
+  /* Оставляем видимыми, но без «влёта» и без пульсации */
+  #bigBanner.isOn {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  #fxFlash,
+  .cosmeticsItemProgress > *,
+  .roomsDetailsChevron,
+  body.inGame #hud:not(.lbPinned) {
+    transition: none;
+  }
+
+  .counting {
+    transform: none;
+    transition: none;
   }
 }
 
