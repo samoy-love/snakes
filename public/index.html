@@ -20,11 +20,11 @@
       🇷🇺
     </button>
 
-    <div id="menuOverlay" class="overlay">
+    <div id="menuOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="menuOverlayTitle">
       <div class="card">
         <div class="menuHeader">
           <div class="overlayKicker" data-i18n="menu.kicker">Онлайн • быстрый матч</div>
-          <div class="overlayTitle" data-i18n="game.title">Змейки</div>
+          <div id="menuOverlayTitle" class="overlayTitle" data-i18n="game.title">Змейки</div>
           <div class="overlaySub" data-i18n="menu.subtitle">Захватывайте территорию, избегайте следов и побеждайте</div>
         </div>
 
@@ -38,9 +38,9 @@
                 <button id="menuNameRandomBtn" class="iconBtn" type="button" aria-label="Случайный ник" data-i18n-aria-label="menu.nick_random_aria">🎲</button>
               </div>
               <div id="menuNameError" class="fieldError" aria-live="polite"></div>
-              <div class="menuActions">
-                <button id="playBtn" class="btnPrimary" data-i18n="menu.play">Играть</button>
-                <button id="cosmeticsMenuBtn" class="btnSecondary" type="button" data-i18n="menu.cosmetics">Косметика</button>
+              <div class="menuActions menuActionsStacked">
+                <button id="playBtn" class="btnPrimary btnPlay" data-i18n="menu.play">Играть</button>
+                <button id="cosmeticsMenuBtn" class="btnSecondary btnMenuSecondary" type="button" data-i18n="menu.cosmetics">Косметика</button>
               </div>
               <div id="menuOnboarding" class="menuOnboarding hidden">
                 <div class="menuOnboardingTitle" data-i18n="menu.controls_title"></div>
@@ -90,11 +90,11 @@
       </div>
     </div>
 
-    <div id="cosmeticsOverlay" class="overlay hidden">
+    <div id="cosmeticsOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cosmeticsOverlayTitle">
       <div class="card">
         <div class="menuHeader">
           <div class="overlayKicker" data-i18n="cosmetics.kicker">Магазин • гардероб</div>
-          <div class="overlayTitle" data-i18n="menu.cosmetics">Косметика</div>
+          <div id="cosmeticsOverlayTitle" class="overlayTitle" data-i18n="menu.cosmetics">Косметика</div>
           <div class="overlaySub" data-i18n="cosmetics.subtitle">Покупайте за Стиль и экипируйте — видят все</div>
         </div>
 
@@ -102,7 +102,7 @@
           <div class="menuPanel">
             <div class="menuPanelHeader">
               <div class="menuPanelTitle cosmeticsStyleTitle">
-                <span data-i18n="cosmetics.style">Стиль</span>: <span id="cosmeticsStyle">0</span>
+                <span data-i18n="cosmetics.style">Стиль</span>: <span id="cosmeticsStyle" aria-live="polite" aria-atomic="true">0</span>
                 <button
                   id="cosmeticsStyleInfoBtn"
                   class="iconBtn"
@@ -120,6 +120,8 @@
               </div>
             </div>
 
+            <div id="cosmeticsStatus" class="cosmeticsStatus" role="status" aria-live="polite"></div>
+
             <div class="cosmeticsStoreBar">
               <div class="cosmeticsFilters" role="tablist" aria-label="" data-i18n-aria-label="cosmetics.filters_aria">
                 <button id="cosmeticsFilterAll" class="btnGhost" type="button" data-i18n="cosmetics.filter_all"></button>
@@ -131,7 +133,7 @@
             <div id="cosmeticsEarnStyle" class="cosmeticsEarnStyle"></div>
 
             <div id="cosmeticsTabs" class="cosmeticsTabs" role="tablist" aria-label="Категории косметики" data-i18n-aria-label="cosmetics.categories_aria"></div>
-            <div id="cosmeticsItems" class="cosmeticsItems" aria-live="polite"></div>
+            <div id="cosmeticsItems" class="cosmeticsItems"></div>
           </div>
 
           <div class="menuPanel">
@@ -191,11 +193,11 @@
 
     <div id="eventToasts"></div>
 
-    <div id="settingsOverlay" class="overlay hidden">
+    <div id="settingsOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settingsOverlayTitle">
       <div class="card">
         <div class="menuHeader">
           <div class="overlayKicker" data-i18n="settings.kicker">Настройки</div>
-          <div class="overlayTitle" data-i18n="settings.title">Игровые</div>
+          <div id="settingsOverlayTitle" class="overlayTitle" data-i18n="settings.title">Игровые</div>
           <div class="overlaySub" data-i18n="settings.subtitle">Визуальные эффекты, интерфейс и звук</div>
         </div>
 

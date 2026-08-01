@@ -72,6 +72,9 @@ const (
 
 const (
 	MaxClientWSMsgBytes = 16 * 1024
+	// Max time enqueue() may block on a full client queue before the client
+	// is dropped. Keep small: broadcasts run on the room tick goroutine.
+	SendBackpressureTimeout = 100 * time.Millisecond
 )
 
 var allowedWSOrigins = map[string]struct{}{
@@ -342,6 +345,7 @@ func (r *Room) sendDailyStateToPlayer(p *Player) {
 	g2 := pr.DailyGoal2
 	p2 := pr.DailyProg2
 	profilesMu.Unlock()
+	markProfilesDirty()
 
 	r.pushEvent(Event{Kind: EventDailyAssign, A: p.num, B: g1, C: (uint32(t1) << 16) | uint32(p1), D: 1})
 	r.pushEvent(Event{Kind: EventDailyAssign, A: p.num, B: g2, C: (uint32(t2) << 16) | uint32(p2), D: 2})
@@ -371,6 +375,7 @@ func (r *Room) addDailyProgress(p *Player, kind uint8, inc uint16) {
 	r.ensureProfileDailyLocked(pr)
 	rewardCount := r.addDailyProgressLocked(p, pr, kind, inc)
 	profilesMu.Unlock()
+	markProfilesDirty()
 	for i := 0; i < rewardCount; i++ {
 		r.addStyle(p, 18, StyleDaily)
 		r.awardPoints(p.num, 14, PointsDaily)
@@ -762,37 +767,44 @@ type Player struct {
 }
 
 type Profile struct {
-	Day int64
+	Day int64 `json:"day"`
 
-	DailyType1 uint8
-	DailyGoal1 uint16
-	DailyProg1 uint16
+	DailyType1 uint8  `json:"dailyType1"`
+	DailyGoal1 uint16 `json:"dailyGoal1"`
+	DailyProg1 uint16 `json:"dailyProg1"`
 
-	DailyType2 uint8
-	DailyGoal2 uint16
-	DailyProg2 uint16
+	DailyType2 uint8  `json:"dailyType2"`
+	DailyGoal2 uint16 `json:"dailyGoal2"`
+	DailyProg2 uint16 `json:"dailyProg2"`
 
-	TotalKills       uint32
-	TotalPickups     uint32
-	TotalCapture     uint32
-	TotalBounty      uint32
-	TotalContracts   uint32
-	TotalRevenge     uint32
-	TotalStyleGained uint32
-	StyleBalance     uint32
+	TotalKills       uint32 `json:"totalKills"`
+	TotalPickups     uint32 `json:"totalPickups"`
+	TotalCapture     uint32 `json:"totalCapture"`
+	TotalBounty      uint32 `json:"totalBounty"`
+	TotalContracts   uint32 `json:"totalContracts"`
+	TotalRevenge     uint32 `json:"totalRevenge"`
+	TotalStyleGained uint32 `json:"totalStyleGained"`
+	StyleBalance     uint32 `json:"styleBalance"`
 
-	CosInvCaptureFx uint8
-	CosInvHead      uint8
-	CosInvSeg       uint8
-	CosInvNameplate uint8
-	CosInvFrame     uint8
-	CosEqCaptureFx  uint8
-	CosEqHead       uint8
-	CosEqSeg        uint8
-	CosEqNameplate  uint8
-	CosEqFrame      uint8
+	CosInvCaptureFx uint8 `json:"cosInvCaptureFx"`
+	CosInvHead      uint8 `json:"cosInvHead"`
+	CosInvSeg       uint8 `json:"cosInvSeg"`
+	CosInvNameplate uint8 `json:"cosInvNameplate"`
+	CosInvFrame     uint8 `json:"cosInvFrame"`
+	CosEqCaptureFx  uint8 `json:"cosEqCaptureFx"`
+	CosEqHead       uint8 `json:"cosEqHead"`
+	CosEqSeg        uint8 `json:"cosEqSeg"`
+	CosEqNameplate  uint8 `json:"cosEqNameplate"`
+	CosEqFrame      uint8 `json:"cosEqFrame"`
 
-	AchvMask uint32
+	AchvMask uint32 `json:"achvMask"`
+
+	LastSeen int64 `json:"lastSeen"`
+
+	// Sliding one-minute income window, runtime only.
+	styleWindowStart  int64
+	styleWindowGained uint32
+	styleWindowLogged bool
 }
 
 func ensureProfileCosmeticsLocked(pr *Profile) {
@@ -859,8 +871,9 @@ func profileForKey(key string) *Profile {
 	defer profilesMu.Unlock()
 	p := profiles[key]
 	if p == nil {
-		p = &Profile{}
+		p = &Profile{LastSeen: time.Now().Unix()}
 		profiles[key] = p
+		markProfilesDirty()
 	}
 	return p
 }
@@ -1038,7 +1051,7 @@ func (c *Client) closeWith(code websocket.StatusCode, reason string) {
 	if c.closed.Swap(true) {
 		return
 	}
-	log.Printf("ws_close ip=%q pid=%q code=%d reason=%q", c.ip, c.pid, code, reason)
+	log.Printf("ws_close ip=%q pid=%q code=%d reason=%q", c.ip, shortPID(c.pid), code, reason)
 	metrics.wsActive.Add(-1)
 	c.leaveRoom(context.Background())
 	close(c.sendCh)
@@ -1105,7 +1118,8 @@ func (c *Client) enqueue(msgType websocket.MessageType, b []byte, pd *pooledData
 		return true
 	default:
 	}
-	t := time.NewTimer(3 * time.Second)
+	// Bounded wait: a single slow client must never stall a room tick.
+	t := time.NewTimer(SendBackpressureTimeout)
 	defer func() {
 		if !t.Stop() {
 			select {
@@ -1119,7 +1133,11 @@ func (c *Client) enqueue(msgType websocket.MessageType, b []byte, pd *pooledData
 		return true
 	case <-t.C:
 	}
+	metrics.wsDropped.Add(1)
 	decPooledRef(pd)
+	// Drop the laggard instead of blocking everyone else. Async because the
+	// caller may hold room locks that close() needs.
+	go c.closeWith(websocket.StatusPolicyViolation, "send_backpressure")
 	return false
 }
 
@@ -1837,18 +1855,10 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	if pr := profileForKey(pl.profileKey); pr != nil {
 		profilesMu.Lock()
 		ensureProfileCosmeticsLocked(pr)
-		pl.style = pr.StyleBalance
-		pl.cosInvCaptureFx = pr.CosInvCaptureFx
-		pl.cosInvHead = pr.CosInvHead
-		pl.cosInvSeg = pr.CosInvSeg
-		pl.cosInvNameplate = pr.CosInvNameplate
-		pl.cosInvFrame = pr.CosInvFrame
-		pl.cosCaptureFx = pr.CosEqCaptureFx
-		pl.cosHead = pr.CosEqHead
-		pl.cosSeg = pr.CosEqSeg
-		pl.cosNameplate = pr.CosEqNameplate
-		pl.cosFrame = pr.CosEqFrame
+		pr.LastSeen = time.Now().Unix()
+		applyProfileCosmeticsToPlayerLocked(pl, pr)
 		profilesMu.Unlock()
+		markProfilesDirty()
 	}
 
 	rm.players[pnum] = pl
@@ -2415,6 +2425,42 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 	if p == nil || delta == 0 {
 		return
 	}
+	// The profile is the single source of truth for the balance: never write
+	// Player.style back into it, only apply atomic deltas and refresh the cache.
+	rewardCount := 0
+	var pr *Profile
+	if !p.bot {
+		pr = profileForKey(p.profileKey)
+	}
+	if pr != nil {
+		profilesMu.Lock()
+		r.ensureProfileDailyLocked(pr)
+		granted := styleIncomeGrantLocked(pr, p.profileKey, delta)
+		if granted == 0 {
+			profilesMu.Unlock()
+			return
+		}
+		delta = granted
+		addProfileStyleLocked(pr, uint32(delta))
+		if pr.TotalStyleGained < ^uint32(0)-uint32(delta) {
+			pr.TotalStyleGained += uint32(delta)
+		} else {
+			pr.TotalStyleGained = ^uint32(0)
+		}
+		rewardCount = r.addDailyProgressLocked(p, pr, DailyStyle, delta)
+		if pr.TotalStyleGained >= 200 {
+			r.maybeUnlockAchievement(p, pr, AchvStyle200)
+		}
+		pr.LastSeen = time.Now().Unix()
+		p.style = pr.StyleBalance
+		profilesMu.Unlock()
+		markProfilesDirty()
+	} else if p.style < ^uint32(0)-uint32(delta) {
+		p.style += uint32(delta)
+	} else {
+		p.style = ^uint32(0)
+	}
+
 	if reason <= StyleTop5 {
 		if r.matchStyleEarned[p.num] < ^uint32(0)-uint32(delta) {
 			r.matchStyleEarned[p.num] += uint32(delta)
@@ -2430,32 +2476,7 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 		}
 		r.matchStyleBy[p.num] = v
 	}
-	if p.style < ^uint32(0)-uint32(delta) {
-		p.style += uint32(delta)
-	} else {
-		p.style = ^uint32(0)
-	}
 	r.pushEvent(Event{Kind: EventStyle, A: p.num, B: delta, C: p.style, D: reason})
-	if p.bot {
-		return
-	}
-	pr := profileForKey(p.profileKey)
-	if pr == nil {
-		return
-	}
-	profilesMu.Lock()
-	r.ensureProfileDailyLocked(pr)
-	pr.StyleBalance = p.style
-	if pr.TotalStyleGained < ^uint32(0)-uint32(delta) {
-		pr.TotalStyleGained += uint32(delta)
-	} else {
-		pr.TotalStyleGained = ^uint32(0)
-	}
-	rewardCount := r.addDailyProgressLocked(p, pr, DailyStyle, delta)
-	if pr.TotalStyleGained >= 200 {
-		r.maybeUnlockAchievement(p, pr, AchvStyle200)
-	}
-	profilesMu.Unlock()
 	for i := 0; i < rewardCount; i++ {
 		r.addStyle(p, 18, StyleDaily)
 		r.awardPoints(p.num, 14, PointsDaily)
@@ -2505,6 +2526,7 @@ func (r *Room) addContractProgress(p *Player, inc uint16) {
 					r.maybeUnlockAchievement(p, pr, AchvContracts3)
 				}
 				profilesMu.Unlock()
+				markProfilesDirty()
 			}
 		}
 		r.assignContract(p)
@@ -3901,6 +3923,7 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 						r.maybeUnlockAchievement(k, pr, AchvKills10)
 					}
 					profilesMu.Unlock()
+					markProfilesDirty()
 					for i := 0; i < rewardCount; i++ {
 						r.addStyle(k, 18, StyleDaily)
 						r.awardPoints(k.num, 14, PointsDaily)
@@ -3934,6 +3957,7 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 							r.maybeUnlockAchievement(k, pr, AchvRevenge3)
 						}
 						profilesMu.Unlock()
+						markProfilesDirty()
 					}
 				}
 				k.lastKiller = 0
@@ -3968,6 +3992,7 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 						r.maybeUnlockAchievement(k, pr, AchvBounty3)
 					}
 					profilesMu.Unlock()
+					markProfilesDirty()
 				}
 			}
 		}
@@ -6356,6 +6381,7 @@ func (r *Room) applyMove(p *Player) {
 					}
 					rewardCount := r.addDailyProgressLocked(p, pr, DailyPickups, 1)
 					profilesMu.Unlock()
+					markProfilesDirty()
 					for i := 0; i < rewardCount; i++ {
 						r.addStyle(p, 18, StyleDaily)
 						r.awardPoints(p.num, 14, PointsDaily)
@@ -6491,7 +6517,11 @@ func (r *Room) step() {
 				if rm != r || pl == nil {
 					continue
 				}
-				c.sendJSON(context.Background(), "cosmetics", cosmeticsStatePayload(pl))
+				// pl fields are guarded by r.mu: build the payload under the lock.
+				r.mu.Lock()
+				payload := cosmeticsStatePayload(pl)
+				r.mu.Unlock()
+				c.sendJSON(context.Background(), "cosmetics", payload)
 			}
 		}
 		if matchEndPayload != nil {

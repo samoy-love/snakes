@@ -258,6 +258,15 @@ const I18N = {
     'cosmetics.err_invalid_cat': 'Некорректная категория',
     'cosmetics.err_not_owned': 'Сначала купите предмет',
     'cosmetics.err_not_enough_style': 'Недостаточно стиля',
+    'cosmetics.err_unavailable': 'Магазин временно недоступен',
+    'cosmetics.not_enough_short': 'Не хватает',
+    'cosmetics.item_owned_unconfirmed': 'Куплено (не подтверждено)',
+    'cosmetics.unconfirmed_hint': 'Данные не подтверждены сервером. Покупка будет доступна после подключения.',
+    'cosmetics.no_connection': 'Нет связи с сервером — покупки недоступны',
+    'cosmetics.op_pending': 'Отправляем запрос…',
+    'cosmetics.op_timeout': 'Сервер не ответил, попробуйте ещё раз',
+    'cosmetics.bought_prefix': 'Куплено',
+    'cosmetics.desired_not_applied': 'Не удалось надеть сохранённый предмет: его нет на аккаунте',
 
     'perf.room': 'Комната',
     'perf.fps': 'FPS',
@@ -355,6 +364,19 @@ const I18N = {
     'cosmetics.err_invalid_cat': 'Invalid category',
     'cosmetics.err_not_owned': 'Buy it first',
     'cosmetics.err_not_enough_style': 'Not enough Style',
+    'cosmetics.err_unavailable': 'Shop temporarily unavailable',
+    'cosmetics.buy': 'Buy',
+    'cosmetics.equip': 'Equip',
+    'cosmetics.item_owned': 'Owned',
+    'cosmetics.item_not_owned': 'Not owned',
+    'cosmetics.not_enough_short': 'Need',
+    'cosmetics.item_owned_unconfirmed': 'Owned (unconfirmed)',
+    'cosmetics.unconfirmed_hint': 'Not confirmed by the server yet. Purchases unlock once connected.',
+    'cosmetics.no_connection': 'No server connection — purchases unavailable',
+    'cosmetics.op_pending': 'Sending request…',
+    'cosmetics.op_timeout': 'Server did not respond, please try again',
+    'cosmetics.bought_prefix': 'Purchased',
+    'cosmetics.desired_not_applied': 'Could not equip the saved item: it is not on your account',
     'cosmetics.style_hint': 'Earn ✨ from kills, contracts and tasks. Press ⓘ for details.',
     'cosmetics.offline_hint': 'Cosmetics data will sync after you enter a match.',
 
@@ -752,8 +774,32 @@ function getLangDefault() {
 
 let lang = getLangDefault();
 
+// Legacy local-only id. It is NOT sent to the server anymore (A1: signed tokens).
 const PROFILE_ID_KEY = 'snakes_profile_id_v1';
 let profileId = '';
+
+const PROFILE_TOKEN_KEY = 'snakes_profile_token_v1';
+let profileToken = '';
+
+function getProfileToken() {
+  if (profileToken) return profileToken;
+  try {
+    const cached = localStorage.getItem(PROFILE_TOKEN_KEY);
+    if (cached && typeof cached === 'string' && cached.length >= 8 && cached.length <= 1024) {
+      profileToken = cached;
+    }
+  } catch {}
+  return profileToken;
+}
+
+function setProfileToken(tok) {
+  const s = typeof tok === 'string' ? tok.trim() : '';
+  if (!s || s.length > 1024) return;
+  profileToken = s;
+  try {
+    localStorage.setItem(PROFILE_TOKEN_KEY, s);
+  } catch {}
+}
 
 function ensureProfileId() {
   if (profileId) return profileId;
@@ -1422,7 +1468,15 @@ function drawSegPreview(ctx2, segId, cx, cy, cell, baseC) {
 }
 
 function wsSend(type, data) {
-  net.send(type, data);
+  return net.send(type, data) !== false;
+}
+
+function wsIsConnected() {
+  try {
+    return net?.isConnected?.() === true;
+  } catch {
+    return false;
+  }
 }
 
 function wsStatusSuffix() {
@@ -1904,6 +1958,9 @@ let cosmeticsPrices = null;
 let cosmeticsPreviewRaf = 0;
 
 let cosmeticsPreviewLastAt = 0;
+
+let pendingCosmeticsOp = null;
+let cosmeticsOpTimer = 0;
 
 const COSMETICS_CACHE_KEY = 'snakes_cosmetics_cache_v1';
 const COSMETICS_DESIRED_KEY = 'snakes_cosmetics_desired_v1';
@@ -2611,7 +2668,19 @@ function onError(d) {
               ? t('cosmetics.err_not_owned')
               : code === 'cosmetics_not_enough_style'
                 ? t('cosmetics.err_not_enough_style')
+                : code === 'cosmetics_unavailable'
+                  ? t('cosmetics.err_unavailable')
         : t('common.error');
+
+  // C1/C4: shop errors must land inside the overlay — toasts are hidden while it is open.
+  if (code.startsWith('cosmetics_')) {
+    cosmeticsOpClear();
+    if (cosmeticsOpen) {
+      setCosmeticsStatus(msg, 'error');
+      syncCosmeticsUi();
+      return;
+    }
+  }
 
   addToast('⚠', msg, null);
 }
@@ -2905,8 +2974,10 @@ function renderTopHud() {
 net = createNetModule({
   t,
   wsQuery: () => {
-    const pid = ensureProfileId();
-    return `pid=${encodeURIComponent(pid)}`;
+    // A1: identity is a signed token issued by the server. No token yet -> no param at all.
+    const tok = getProfileToken();
+    if (!tok) return '';
+    return `t=${encodeURIComponent(tok)}`;
   },
   onBytesIn: (n) => {
     bytesInTotal += Number(n) || 0;
@@ -2941,6 +3012,8 @@ net = createNetModule({
   },
   onTextMsg: (t, d) => {
     if (t === 'hello') {
+      // A1: the server re-issues the profile token on every connect.
+      if (typeof d?.token === 'string') setProfileToken(d.token);
       if (typeof d?.roomLimit === 'number') roomLimit = d.roomLimit;
       if (d?.cosmeticsPrices && typeof d.cosmeticsPrices === 'object') {
         cosmeticsPrices = d.cosmeticsPrices;
@@ -5056,6 +5129,9 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
+  // C6: never steer the snake while an overlay is on top of the game.
+  if (overlayManager.getTop()) return;
+
   const ae = document.activeElement;
   if (ae && (ae === nameInput || chat.contains(ae))) return;
   if (e.code === 'ArrowUp' || e.code === 'KeyW') setDir('up');
@@ -5212,6 +5288,16 @@ function onInit(msg) {
 }
 
 function onCosmetics(msg) {
+  // C4: remember the previous inventory so we can detect what was just bought.
+  const prevInv = {
+    capturefx: Number(youCosInvCaptureFx) || 0,
+    head: Number(youCosInvHead) || 0,
+    seg: Number(youCosInvSeg) || 0,
+    nameplate: Number(youCosInvNameplate) || 0,
+    frame: Number(youCosInvFrame) || 0
+  };
+  const hadServerState = cosmeticsSource === 'server';
+
   const st = Number(msg?.style);
   if (Number.isFinite(st)) youStyle = Math.max(0, st);
 
@@ -5231,6 +5317,46 @@ function onCosmetics(msg) {
   youCosEqFrame = Number(msg?.eqFrame) || 0;
 
   cosmeticsCacheSave();
+
+  // C4: report the purchase that just landed.
+  const pending = pendingCosmeticsOp;
+  cosmeticsOpClear();
+
+  if (hadServerState) {
+    const nextInv = {
+      capturefx: Number(youCosInvCaptureFx) || 0,
+      head: Number(youCosInvHead) || 0,
+      seg: Number(youCosInvSeg) || 0,
+      nameplate: Number(youCosInvNameplate) || 0,
+      frame: Number(youCosInvFrame) || 0
+    };
+    let boughtCat = '';
+    let boughtId = -1;
+    for (const cat of Object.keys(nextInv)) {
+      const added = nextInv[cat] & ~prevInv[cat];
+      if (!added) continue;
+      for (let id = 0; id < 5; id++) {
+        if (added & (1 << id)) {
+          boughtCat = cat;
+          boughtId = id;
+          break;
+        }
+      }
+      if (boughtCat) break;
+    }
+    if (!boughtCat && pending) {
+      // Server confirmed but nothing new appeared (already owned).
+      boughtCat = '';
+    }
+    if (boughtCat) {
+      const txt = `${t('cosmetics.bought_prefix')}: ${cosmeticsLabel(boughtCat)} — ${cosmeticsVariantName(boughtCat, boughtId)}`;
+      setCosmeticsStatus(txt, 'success');
+      addToast('✨', txt, null);
+      playBeep(880, 150, 0.9);
+    } else if (pending) {
+      setCosmeticsStatus('', '');
+    }
+  }
 
   cosmeticsApplyDesiredServer();
 
@@ -5274,25 +5400,96 @@ function cosmeticsSetDesiredEq(cat, id) {
 }
 
 function cosmeticsApplyDesiredServer() {
-  if (!(roomId != null && you != null && you !== 0 && cosmeticsSource === 'server')) return;
+  if (cosmeticsSource !== 'server') return;
   const d = cosmeticsDesiredLoad();
   if (!d) return;
 
-  const apply = (cat, desiredId, invMask, currentEq) => {
+  const failed = [];
+  const kept = {};
+
+  const apply = (cat, desiredId, invMask, currentEq, keyName) => {
+    if (desiredId === undefined || desiredId === null) return;
     const want = Math.max(0, Math.min(4, Number(desiredId) || 0));
     if (want === Math.max(0, Math.min(4, Number(currentEq) || 0))) return;
     const bit = 1 << want;
-    if ((Number(invMask) & bit) === 0) return;
-    wsSend('cosmeticsEquip', { cat, id: want });
+    if ((Number(invMask) & bit) === 0) {
+      // C9: the cache promised an item the account does not have — say so out loud.
+      failed.push(`${cosmeticsLabel(cat)} — ${cosmeticsVariantName(cat, want)}`);
+      return;
+    }
+    if (!wsSend('cosmeticsEquip', { cat, id: want })) kept[keyName] = want;
   };
 
-  apply('capturefx', d.eqCaptureFx, youCosInvCaptureFx, youCosEqCaptureFx);
-  apply('head', d.eqHead, youCosInvHead, youCosEqHead);
-  apply('seg', d.eqSeg, youCosInvSeg, youCosEqSeg);
-  apply('nameplate', d.eqNameplate, youCosInvNameplate, youCosEqNameplate);
-  apply('frame', d.eqFrame, youCosInvFrame, youCosEqFrame);
+  apply('capturefx', d.eqCaptureFx, youCosInvCaptureFx, youCosEqCaptureFx, 'eqCaptureFx');
+  apply('head', d.eqHead, youCosInvHead, youCosEqHead, 'eqHead');
+  apply('seg', d.eqSeg, youCosInvSeg, youCosEqSeg, 'eqSeg');
+  apply('nameplate', d.eqNameplate, youCosInvNameplate, youCosEqNameplate, 'eqNameplate');
+  apply('frame', d.eqFrame, youCosInvFrame, youCosEqFrame, 'eqFrame');
 
-  cosmeticsDesiredSave(null);
+  if (failed.length) {
+    setCosmeticsStatus(`${t('cosmetics.desired_not_applied')}: ${failed.join(', ')}`, 'error');
+  }
+
+  // Keep only what could not be sent; drop everything that was applied or is impossible.
+  cosmeticsDesiredSave(Object.keys(kept).length ? kept : null);
+}
+
+// C1: shop feedback goes into a dedicated in-overlay line (#cosmeticsStatus),
+// because body.overlayActive hides #eventToasts. Falls back to a toast if the
+// element is not present in the markup.
+function setCosmeticsStatus(text, kind) {
+  const msg = String(text || '').trim();
+  const k = String(kind || '');
+  let el = null;
+  try {
+    el = document.getElementById('cosmeticsStatus');
+  } catch {}
+  if (!el) {
+    if (msg) addToast(k === 'error' ? '⚠' : k === 'success' ? '✅' : 'ℹ', msg, null);
+    return;
+  }
+  try {
+    el.textContent = msg;
+    el.classList.toggle('isError', k === 'error');
+    el.classList.toggle('isSuccess', k === 'success');
+    el.classList.toggle('isInfo', k === 'info');
+    el.classList.toggle('hidden', !msg);
+    el.setAttribute('role', k === 'error' ? 'alert' : 'status');
+    el.setAttribute('aria-live', k === 'error' ? 'assertive' : 'polite');
+  } catch {}
+}
+
+// C4: one in-flight shop operation at a time, with a hard timeout.
+function cosmeticsOpBegin(cat, id) {
+  pendingCosmeticsOp = { cat: String(cat || ''), id: Number(id) || 0, at: Date.now() };
+  if (cosmeticsOpTimer) {
+    try {
+      clearTimeout(cosmeticsOpTimer);
+    } catch {}
+    cosmeticsOpTimer = 0;
+  }
+  cosmeticsOpTimer = setTimeout(() => {
+    cosmeticsOpTimer = 0;
+    if (!pendingCosmeticsOp) return;
+    pendingCosmeticsOp = null;
+    setCosmeticsStatus(t('cosmetics.op_timeout'), 'error');
+    syncCosmeticsUi();
+  }, 5000);
+}
+
+function cosmeticsOpClear() {
+  pendingCosmeticsOp = null;
+  if (cosmeticsOpTimer) {
+    try {
+      clearTimeout(cosmeticsOpTimer);
+    } catch {}
+    cosmeticsOpTimer = 0;
+  }
+}
+
+function cosmeticsOpIsPending(cat, id) {
+  if (!pendingCosmeticsOp) return false;
+  return pendingCosmeticsOp.cat === cat && Number(pendingCosmeticsOp.id) === Number(id);
 }
 
 function showCosmeticsOverlay() {
@@ -5303,6 +5500,13 @@ function showCosmeticsOverlay() {
   cosmeticsOpen = true;
   cosmeticsOverlay.classList.remove('hidden');
   overlayManager.open('cosmetics');
+  cosmeticsOpClear();
+  // C13: open the preview on the item that is actually equipped.
+  const eq0 = cosmeticsEqForCat(cosmeticsCat);
+  cosmeticsSelId = Number.isFinite(Number(eq0)) ? Number(eq0) : 0;
+  setCosmeticsStatus('', '');
+  if (!wsIsConnected()) setCosmeticsStatus(t('cosmetics.no_connection'), 'info');
+  else if (cosmeticsSource !== 'server') setCosmeticsStatus(t('cosmetics.unconfirmed_hint'), 'info');
   syncOverlayUiState();
   syncCosmeticsUi();
   overlayManager.focusDefault('cosmetics');
@@ -5313,6 +5517,8 @@ function hideCosmeticsOverlay() {
   cosmeticsOpen = false;
   cosmeticsOverlay.classList.add('hidden');
   overlayManager.close('cosmetics');
+  cosmeticsOpClear();
+  setCosmeticsStatus('', '');
   syncOverlayUiState();
   if (cosmeticsPreviewRaf) {
     try {
@@ -5408,18 +5614,32 @@ function cosmeticsSetFilter(next) {
   syncCosmeticsUi();
 }
 
-function cosmeticsFormatCost(price, balance) {
+// C15: only the price here — the balance already lives in the shop header.
+function cosmeticsFormatCost(price) {
   const p = Math.max(0, Number(price) || 0);
-  const b = Math.max(0, Math.floor(Number(balance) || 0));
   const pTxt = escapeHtml(fmtInt(p));
-  const bTxt = escapeHtml(fmtInt(b));
   const unit = escapeHtml(t('cosmetics.style_points'));
-  const you = escapeHtml(t('cosmetics.balance_you'));
-  return `<span class="num">${pTxt}</span> ${unit} <span class="sep">•</span> ${you} <span class="num">${bTxt}</span>`;
+  return `<span class="num">${pTxt}</span> ${unit}`;
+}
+
+// C7: keep the shop in sync whenever the currency balance changes.
+function setYouStyle(v) {
+  const next = Math.max(0, Math.floor(Number(v) || 0));
+  if (next === youStyle) return;
+  youStyle = next;
+  try {
+    cosmeticsCacheSave();
+  } catch {}
+  if (cosmeticsOpen) {
+    try {
+      syncCosmeticsUi();
+    } catch {}
+  }
 }
 
 function cosmeticsGetStateObject() {
   return {
+    style: Math.max(0, Math.floor(Number(youStyle) || 0)),
     invCaptureFx: Number(youCosInvCaptureFx) || 0,
     invHead: Number(youCosInvHead) || 0,
     invSeg: Number(youCosInvSeg) || 0,
@@ -5435,6 +5655,9 @@ function cosmeticsGetStateObject() {
 
 function cosmeticsApplyStateObject(s) {
   if (!s || typeof s !== 'object') return;
+  // C3: the balance is part of the cache, otherwise the shop always shows 0 before a match.
+  const st = Number(s.style);
+  if (Number.isFinite(st)) youStyle = Math.max(0, Math.floor(st));
   youCosInvCaptureFx = Number(s.invCaptureFx) || 0;
   youCosInvHead = Number(s.invHead) || 0;
   youCosInvSeg = Number(s.invSeg) || 0;
@@ -5487,12 +5710,15 @@ function cosmeticsEnsureLocalReady() {
   cosmeticsLoaded = true;
 }
 
+// C2: purchases work outside a room (profile-scoped on the server), so `started`
+// must not gate the shop. What we do need is a live socket and server-confirmed state.
 function cosmeticsServerReady() {
-  return started && roomId != null && you != null && you !== 0 && cosmeticsSource === 'server';
+  return wsIsConnected() && cosmeticsSource === 'server';
 }
 
 function cosmeticsBuyLocal(cat, id) {
-  addToast('⚠', t('cosmetics.offline_hint'), null);
+  // C1/C2: no server -> explain why the purchase cannot go through, inside the overlay.
+  setCosmeticsStatus(wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection'), 'error');
 }
 
 function cosmeticsEquipLocal(cat, id) {
@@ -5654,6 +5880,9 @@ function syncCosmeticsUi() {
     const mask = cosmeticsMaskForCat(cosmeticsCat);
     const eq = cosmeticsEqForCat(cosmeticsCat);
     const price = cosmeticsPrice(cosmeticsCat);
+    // C9: until the server confirms the inventory, everything we show is provisional.
+    const confirmed = cosmeticsSource === 'server';
+    const online = wsIsConnected();
     const items = [];
     for (let id = 0; id < 5; id++) {
       const owned = bitHas(mask, id);
@@ -5690,6 +5919,9 @@ function syncCosmeticsUi() {
       if (!owned && missing > 0) {
         sub.textContent = `${t('cosmetics.missing_prefix')} ${fmtInt(missing)} ${t('cosmetics.style_points')}`;
         sub.classList.add('isBlocked');
+      } else if (owned && !confirmed) {
+        sub.textContent = t('cosmetics.item_owned_unconfirmed');
+        sub.classList.add('isUnconfirmed');
       } else {
         sub.textContent = equipped ? t('cosmetics.item_equipped') : owned ? t('cosmetics.item_owned') : t('cosmetics.item_not_owned');
       }
@@ -5701,31 +5933,72 @@ function syncCosmeticsUi() {
       if (!owned) {
         const pr = document.createElement('div');
         pr.className = 'cosmeticsPrice';
-        pr.innerHTML = cosmeticsFormatCost(price, youStyle || 0);
+        setSafeHtml(pr, cosmeticsFormatCost(price));
         right.appendChild(pr);
+
+        const cat = cosmeticsCat;
+        const pending = cosmeticsOpIsPending(cat, id);
+        const poor = (youStyle || 0) < price;
+
         const buy = document.createElement('button');
         buy.type = 'button';
-        buy.disabled = (youStyle || 0) < price;
-        buy.className = buy.disabled ? 'btnSecondary' : 'btnPrimary';
-        buy.textContent = buy.disabled ? t('cosmetics.not_enough') : t('cosmetics.buy');
+        // C2/C9: buying needs a live socket and server-confirmed state.
+        buy.disabled = poor || pending || !online || !confirmed || !!pendingCosmeticsOp;
+        buy.className = buy.disabled && !pending ? 'btnSecondary' : 'btnPrimary';
+        // C14: show exactly how much is missing.
+        buy.textContent = poor ? `${t('cosmetics.not_enough_short')} ${fmtInt(missing)} ✨` : t('cosmetics.buy');
+        if (pending) buy.classList.add('isLoading');
+        if (!online) buy.title = t('cosmetics.no_connection');
+        else if (!confirmed) buy.title = t('cosmetics.unconfirmed_hint');
+
         buy.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (cosmeticsServerReady()) wsSend('cosmeticsBuy', { cat: cosmeticsCat, id });
-          else cosmeticsBuyLocal(cosmeticsCat, id);
+          if (pendingCosmeticsOp) return;
+          if (!cosmeticsServerReady()) {
+            setCosmeticsStatus(wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection'), 'error');
+            cosmeticsBuyLocal(cat, id);
+            return;
+          }
+          // C4: lock the button until the server answers (or we time out).
+          buy.disabled = true;
+          buy.classList.add('isLoading');
+          cosmeticsOpBegin(cat, id);
+          setCosmeticsStatus(t('cosmetics.op_pending'), 'info');
+          // C5: a silently dropped send must not leave a dead spinner.
+          if (!wsSend('cosmeticsBuy', { cat, id })) {
+            cosmeticsOpClear();
+            setCosmeticsStatus(t('cosmetics.no_connection'), 'error');
+            syncCosmeticsUi();
+          }
         });
         right.appendChild(buy);
       } else {
         const eqBtn = document.createElement('button');
         eqBtn.type = 'button';
+        const cat = cosmeticsCat;
+        const doEquip = (wantId) => {
+          if (!cosmeticsServerReady()) {
+            cosmeticsEquipLocal(cat, wantId);
+            setCosmeticsStatus(wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection'), 'info');
+            return;
+          }
+          // C5: react to a dropped send instead of pretending it worked.
+          if (!wsSend('cosmeticsEquip', { cat, id: wantId })) {
+            cosmeticsEquipLocal(cat, wantId);
+            setCosmeticsStatus(t('cosmetics.no_connection'), 'error');
+          } else {
+            cosmeticsSetDesiredEq(cat, wantId);
+          }
+        };
+
         if (equipped && id !== 0) {
           eqBtn.className = 'btnSecondary';
           eqBtn.textContent = t('cosmetics.remove');
           eqBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (cosmeticsServerReady()) wsSend('cosmeticsEquip', { cat: cosmeticsCat, id: 0 });
-            else cosmeticsEquipLocal(cosmeticsCat, 0);
+            doEquip(0);
           });
         } else {
           eqBtn.className = equipped ? 'btnGhost' : 'btnPrimary';
@@ -5734,8 +6007,7 @@ function syncCosmeticsUi() {
           eqBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (cosmeticsServerReady()) wsSend('cosmeticsEquip', { cat: cosmeticsCat, id });
-            else cosmeticsEquipLocal(cosmeticsCat, id);
+            doEquip(id);
           });
         }
         right.appendChild(eqBtn);
@@ -6506,6 +6778,7 @@ const EN = {
     buffs: 'Buffs',
     contract: 'Contract',
     daily: 'Daily',
+    contractComplete: 'Contract completed',
     dailyComplete: 'Daily completed',
     achievement: 'Achievement',
     style: 'Style'
@@ -6558,6 +6831,7 @@ const RU = {
     buffs: 'Эффекты',
     contract: 'Контракт',
     daily: 'Задание',
+    contractComplete: 'Контракт выполнен',
     dailyComplete: 'Задание выполнено',
     achievement: 'Достижение',
     style: 'Стиль'
@@ -7742,6 +8016,23 @@ function handleStateBinary(buf) {
         if (!need(2 + 1)) return;
         const pid = dv.getUint16(o, true);
         o += 2;
+        const type = dv.getUint8(o);
+        o += 1;
+        const pn = nameById.get(pid) || String(pid);
+        pushEventFeed(`${pn} — ${infoPack().labels.contractComplete}: ${contractLabel(type) || type}`, 'Contract');
+        if (pid === you) {
+          youContractProgress = youContractGoal;
+          bumpMatchTabBadge();
+          addToast('✅', `${infoPack().labels.contractComplete}: ${contractLabel(type) || type}`, 'big', infoDesc(infoPack().contracts, type, ''), { tab: 'match', key: `contract_complete_${type}` });
+          playBeep(900, 170, 1);
+        }
+        renderKillfeed();
+        continue;
+      }
+
+      if (kind === 13) {
+        if (!need(2 + 2 + 4 + 1)) return;
+        const pid = dv.getUint16(o, true);
         o += 2;
         const delta = dv.getUint16(o, true);
         o += 2;
@@ -7753,7 +8044,7 @@ function handleStateBinary(buf) {
         pushEventFeed(`${pn} +${delta} ${t('cosmetics.style_points')} (${styleLabel(reason)})`, 'Style');
         if (pid === you) {
           if (delta > 0) matchStyleEarned += delta;
-          youStyle = total;
+          setYouStyle(total);
           bumpMatchTabBadge();
           if (delta >= 20) {
             if (styleToastTimer) {
@@ -7962,6 +8253,9 @@ function handleStateBinary(buf) {
         continue;
       }
 
+      try {
+        console.warn('unknown event kind', kind);
+      } catch {}
       break;
     }
 

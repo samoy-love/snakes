@@ -26,6 +26,11 @@ func main() {
 		}
 	}
 
+	initProfileSecret()
+	loadProfiles()
+	autosaveStop := make(chan struct{})
+	startProfilesAutosave(autosaveStop)
+
 	hub := &Hub{rooms: make(map[int]*Room), nextRoomID: 1, roomLimit: roomLimit}
 
 	mux := http.NewServeMux()
@@ -80,6 +85,9 @@ func main() {
 		rm.close()
 	}
 	hub.mu.Unlock()
+
+	close(autosaveStop)
+	flushProfiles(true)
 }
 
 func mustCwd() string {

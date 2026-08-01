@@ -31,8 +31,12 @@ export function createNetModule(opts) {
     return base + `?${s}`;
   }
 
+  function isConnected() {
+    return !!ws && ws.readyState === WebSocket.OPEN;
+  }
+
   function send(type, data) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!isConnected()) return false;
     const payload = JSON.stringify({ type, data });
     try {
       if (typeof onBytesOut === 'function') onBytesOut(textEncoder.encode(payload).length);
@@ -43,7 +47,9 @@ export function createNetModule(opts) {
       try {
         console.error('ws_send_error', e);
       } catch {}
+      return false;
     }
+    return true;
   }
 
   function statusSuffix() {
@@ -198,6 +204,7 @@ export function createNetModule(opts) {
 
   return {
     send,
+    isConnected,
     connect,
     statusSuffix
   };

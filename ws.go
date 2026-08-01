@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"net"
 	"net/http"
@@ -16,22 +17,37 @@ import (
 	"nhooyr.io/websocket"
 )
 
+// requestClientIP resolves the peer address used for rate limiting and logs
+// only. X-Forwarded-For is honoured only when the immediate peer is a trusted
+// proxy, and then the rightmost untrusted hop wins: everything to its left is
+// attacker controlled and must not be believed.
 func requestClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = strings.TrimSpace(r.RemoteAddr)
 	}
-	if host == "127.0.0.1" || host == "::1" {
-		xff := r.Header.Get("X-Forwarded-For")
-		if xff != "" {
-			parts := strings.Split(xff, ",")
-			if len(parts) > 0 {
-				ip := strings.TrimSpace(parts[0])
-				if ip != "" {
-					return ip
-				}
-			}
+	host = strings.TrimSpace(host)
+	if !isTrustedProxy(host) {
+		return host
+	}
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff == "" {
+		return host
+	}
+	parts := strings.Split(xff, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		ip := strings.TrimSpace(parts[i])
+		if ip == "" {
+			continue
 		}
+		if net.ParseIP(ip) == nil {
+			// Malformed chain: stop trusting it entirely.
+			return host
+		}
+		if isTrustedProxy(ip) {
+			continue
+		}
+		return ip
 	}
 	return host
 }
@@ -118,7 +134,10 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.SetReadLimit(MaxClientWSMsgBytes)
-	client := &Client{conn: c, sendCh: make(chan outbound, 256), ip: requestClientIP(r)}
+	// Signed identity: the legacy ?pid= parameter is never trusted, only ?t=.
+	pid, token := resolveProfileToken(r.URL.Query().Get("t"))
+	client := &Client{conn: c, sendCh: make(chan outbound, 256), ip: requestClientIP(r), pid: pid}
+	touchProfileLastSeen(pid)
 	client.name.Store("Игрок")
 	metrics.wsConnections.Add(1)
 	metrics.wsActive.Add(1)
@@ -126,7 +145,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 	defer client.close()
 
-	client.sendJSON(r.Context(), "hello", map[string]any{"w": W, "h": H, "tickMs": TickMS, "roomLimit": hub.roomLimit})
+	client.sendJSON(r.Context(), "hello", map[string]any{"w": W, "h": H, "tickMs": TickMS, "roomLimit": hub.roomLimit, "token": token})
 	client.sendRooms(r.Context(), hub)
 
 	for {
@@ -165,6 +184,22 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				rate, burst = 30, 60
 			case "rttPing":
 				rate, burst = 2, 4
+			case "setName":
+				rate, burst = 1, 2
+			case "leave":
+				rate, burst = 1, 3
+			case "respawn":
+				rate, burst = 2, 4
+			case "cosmeticsBuy":
+				rate, burst = 2, 4
+			case "cosmeticsEquip":
+				rate, burst = 3, 6
+			default:
+				// Unknown types are limited too, so junk cannot be spammed.
+				// One shared bucket, otherwise random type names would each
+				// get a fresh burst and grow the bucket map.
+				key = client.ip + "|<unknown>"
+				rate, burst = 5, 10
 			}
 			if rate > 0 && !wsIPLimiter.allow(key, rate, burst) {
 				client.closeWith(websocket.StatusPolicyViolation, "rate_limited")
@@ -301,13 +336,6 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			rm.mu.Unlock()
 			rm.broadcastJSON(context.Background(), "matchStart", payload)
 		case "cosmeticsBuy":
-			client.mu.Lock()
-			rm := client.room
-			pl := client.player
-			client.mu.Unlock()
-			if rm == nil || pl == nil {
-				continue
-			}
 			var p struct {
 				Cat string `json:"cat"`
 				ID  uint8  `json:"id"`
@@ -321,97 +349,78 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_invalid_id"})
 				continue
 			}
-			var price uint16
-			switch cat {
-			case "capturefx":
-				price = 60
-			case "head":
-				price = 50
-			case "seg":
-				price = 40
-			case "nameplate":
-				price = 35
-			case "frame":
-				price = 30
-			default:
+			price, okCat := cosmeticsPriceForCat(cat)
+			if !okCat {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_invalid_cat"})
 				continue
 			}
+			client.mu.Lock()
+			rm := client.room
+			pl := client.player
+			client.mu.Unlock()
+			pid := client.profileKey()
+			pr := profileForKey(pid)
+			if pr == nil {
+				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_unavailable"})
+				continue
+			}
 			bit := uint8(1) << id
-			rm.mu.Lock()
-			// already owned?
-			owned := false
-			switch cat {
-			case "capturefx":
-				owned = (pl.cosInvCaptureFx & bit) != 0
-			case "head":
-				owned = (pl.cosInvHead & bit) != 0
-			case "seg":
-				owned = (pl.cosInvSeg & bit) != 0
-			case "nameplate":
-				owned = (pl.cosInvNameplate & bit) != 0
-			case "frame":
-				owned = (pl.cosInvFrame & bit) != 0
+
+			// Ownership check, debit and grant happen in one critical section
+			// over the profile. Lock order stays rm.mu -> profilesMu.
+			if rm != nil {
+				rm.mu.Lock()
 			}
-			if owned {
-				rm.mu.Unlock()
-				client.sendJSON(r.Context(), "cosmetics", cosmeticsStatePayload(pl))
-				continue
+			profilesMu.Lock()
+			ensureProfileCosmeticsLocked(pr)
+			inv := profileCosInvLocked(pr, cat)
+			var payload map[string]any
+			errMsg := ""
+			bought := false
+			balBefore := pr.StyleBalance
+			balAfter := pr.StyleBalance
+			switch {
+			case inv == nil:
+				errMsg = "cosmetics_invalid_cat"
+			case (*inv & bit) != 0:
+				// Idempotent: already owned, report the current state.
+			case pr.StyleBalance < uint32(price):
+				errMsg = "cosmetics_not_enough_style"
+			default:
+				pr.StyleBalance -= uint32(price)
+				*inv |= bit
+				profileSetEquippedLocked(pr, cat, id)
+				pr.LastSeen = time.Now().Unix()
+				balAfter = pr.StyleBalance
+				bought = true
 			}
-			if pl.style < uint32(price) {
-				rm.mu.Unlock()
-				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_not_enough_style"})
-				continue
-			}
-			pl.style -= uint32(price)
-			switch cat {
-			case "capturefx":
-				pl.cosInvCaptureFx |= bit
-				pl.cosCaptureFx = id
-			case "head":
-				pl.cosInvHead |= bit
-				pl.cosHead = id
-			case "seg":
-				pl.cosInvSeg |= bit
-				pl.cosSeg = id
-			case "nameplate":
-				pl.cosInvNameplate |= bit
-				pl.cosNameplate = id
-			case "frame":
-				pl.cosInvFrame |= bit
-				pl.cosFrame = id
-			}
-			if !pl.bot {
-				pr := profileForKey(pl.profileKey)
-				if pr != nil {
-					profilesMu.Lock()
-					ensureProfileCosmeticsLocked(pr)
-					pr.StyleBalance = pl.style
-					pr.CosInvCaptureFx = pl.cosInvCaptureFx
-					pr.CosInvHead = pl.cosInvHead
-					pr.CosInvSeg = pl.cosInvSeg
-					pr.CosInvNameplate = pl.cosInvNameplate
-					pr.CosInvFrame = pl.cosInvFrame
-					pr.CosEqCaptureFx = pl.cosCaptureFx
-					pr.CosEqHead = pl.cosHead
-					pr.CosEqSeg = pl.cosSeg
-					pr.CosEqNameplate = pl.cosNameplate
-					pr.CosEqFrame = pl.cosFrame
-					profilesMu.Unlock()
+			if errMsg == "" {
+				// Player is a read-only cache refreshed from the profile.
+				// Only safe to touch while rm.mu is held.
+				if rm != nil {
+					applyProfileCosmeticsToPlayerLocked(pl, pr)
 				}
+				payload = cosmeticsStatePayloadFromProfile(pr)
 			}
-			// equip changes are in player record, so force snapshot for quick propagation
-			rm.forceFullSnapshot = true
-			rm.mu.Unlock()
-			client.sendJSON(r.Context(), "cosmetics", cosmeticsStatePayload(pl))
+			profilesMu.Unlock()
+			if rm != nil {
+				if bought {
+					// equip changes live in the player record, force a snapshot
+					rm.forceFullSnapshot = true
+				}
+				rm.mu.Unlock()
+			}
+			if errMsg != "" {
+				client.sendJSON(r.Context(), "error", map[string]any{"message": errMsg})
+				continue
+			}
+			if bought {
+				markProfilesDirty()
+				log.Printf("cosmetics_txn pid=%q cat=%q id=%d price=%d balance_before=%d balance_after=%d",
+					shortPID(pid), cat, id, price, balBefore, balAfter)
+			}
+			client.sendJSON(r.Context(), "cosmetics", payload)
 		case "cosmeticsEquip":
-			client.mu.Lock()
-			rm := client.room
-			pl := client.player
-			client.mu.Unlock()
-			if rm == nil || pl == nil {
-				continue
-			}
 			var p struct {
 				Cat string `json:"cat"`
 				ID  uint8  `json:"id"`
@@ -425,61 +434,54 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_invalid_id"})
 				continue
 			}
-			bit := uint8(1) << id
-			rm.mu.Lock()
-			owned := false
-			switch cat {
-			case "capturefx":
-				owned = (pl.cosInvCaptureFx & bit) != 0
-				if owned {
-					pl.cosCaptureFx = id
-				}
-			case "head":
-				owned = (pl.cosInvHead & bit) != 0
-				if owned {
-					pl.cosHead = id
-				}
-			case "seg":
-				owned = (pl.cosInvSeg & bit) != 0
-				if owned {
-					pl.cosSeg = id
-				}
-			case "nameplate":
-				owned = (pl.cosInvNameplate & bit) != 0
-				if owned {
-					pl.cosNameplate = id
-				}
-			case "frame":
-				owned = (pl.cosInvFrame & bit) != 0
-				if owned {
-					pl.cosFrame = id
-				}
-			default:
-				rm.mu.Unlock()
+			if _, okCat := cosmeticsPriceForCat(cat); !okCat {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_invalid_cat"})
 				continue
+			}
+			client.mu.Lock()
+			rm := client.room
+			pl := client.player
+			client.mu.Unlock()
+			pid := client.profileKey()
+			pr := profileForKey(pid)
+			if pr == nil {
+				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_unavailable"})
+				continue
+			}
+			bit := uint8(1) << id
+
+			if rm != nil {
+				rm.mu.Lock()
+			}
+			profilesMu.Lock()
+			ensureProfileCosmeticsLocked(pr)
+			inv := profileCosInvLocked(pr, cat)
+			owned := inv != nil && (*inv&bit) != 0
+			var payload map[string]any
+			balance := pr.StyleBalance
+			if owned {
+				profileSetEquippedLocked(pr, cat, id)
+				pr.LastSeen = time.Now().Unix()
+				if rm != nil {
+					applyProfileCosmeticsToPlayerLocked(pl, pr)
+				}
+				payload = cosmeticsStatePayloadFromProfile(pr)
+			}
+			profilesMu.Unlock()
+			if rm != nil {
+				if owned {
+					rm.forceFullSnapshot = true
+				}
+				rm.mu.Unlock()
 			}
 			if !owned {
-				rm.mu.Unlock()
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_not_owned"})
 				continue
 			}
-			if !pl.bot {
-				pr := profileForKey(pl.profileKey)
-				if pr != nil {
-					profilesMu.Lock()
-					ensureProfileCosmeticsLocked(pr)
-					pr.CosEqCaptureFx = pl.cosCaptureFx
-					pr.CosEqHead = pl.cosHead
-					pr.CosEqSeg = pl.cosSeg
-					pr.CosEqNameplate = pl.cosNameplate
-					pr.CosEqFrame = pl.cosFrame
-					profilesMu.Unlock()
-				}
-			}
-			rm.forceFullSnapshot = true
-			rm.mu.Unlock()
-			client.sendJSON(r.Context(), "cosmetics", cosmeticsStatePayload(pl))
+			markProfilesDirty()
+			log.Printf("cosmetics_txn pid=%q cat=%q id=%d price=%d balance_before=%d balance_after=%d",
+				shortPID(pid), "equip:"+cat, id, 0, balance, balance)
+			client.sendJSON(r.Context(), "cosmetics", payload)
 		case "input":
 			var p struct {
 				Dir string `json:"dir"`
