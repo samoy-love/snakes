@@ -2553,18 +2553,35 @@ function sanitizeRoomTitleClient(title) {
 function updateMenuNameUi() {
   if (!menuNameInput) return;
   const v = normalizeMenuNickInput(menuNameInput.value);
+  // Пустое поле — не ошибка: при старте ник подставляется автоматически.
+  // Иначе новый игрок видит красную ошибку и заблокированный «Играть» ещё
+  // до того, как что-либо сделал.
+  const empty = !v.raw;
   let errKey = '';
-  if (!v.raw) errKey = 'menu.nick_error_required';
-  else if (v.hasBadChars) errKey = 'menu.nick_error_chars';
-  else if (!v.value) errKey = 'menu.nick_error_required';
-  else if (v.value.length < 2) errKey = 'menu.nick_error_length';
+  if (!empty) {
+    if (v.hasBadChars) errKey = 'menu.nick_error_chars';
+    else if (!v.value) errKey = 'menu.nick_error_required';
+    else if (v.value.length < 2) errKey = 'menu.nick_error_length';
+  }
 
   const ok = !errKey;
+  // «Играть» блокируется только при реально некорректном вводе, но не пустым полем.
   if (playBtn) playBtn.disabled = !ok;
   try {
     menuNameInput.setAttribute('aria-invalid', ok ? 'false' : 'true');
   } catch {}
   if (menuNameError) menuNameError.textContent = ok ? '' : t(errKey);
+}
+
+// Гарантирует непустой ник перед стартом: пустое поле заполняется случайным.
+function ensureNickBeforePlay() {
+  if (!menuNameInput) return true;
+  const v = normalizeMenuNickInput(menuNameInput.value);
+  if (!v.raw) {
+    menuNameInput.value = randomNickValue();
+    updateMenuNameUi();
+  }
+  return !playBtn || !playBtn.disabled;
 }
 
 function randomNickValue() {
@@ -3878,6 +3895,8 @@ function updateRoomsUi() {
 }
 
 playBtn?.addEventListener('click', () => {
+  // Пустой ник не должен быть барьером: подставляем случайный и стартуем.
+  ensureNickBeforePlay();
   const nm = submitNameFromInput(menuNameInput);
   if (!nm) {
     updateMenuNameUi();
@@ -3901,7 +3920,11 @@ joinRoomBtn?.addEventListener('click', () => {
 });
 
 menuNameInput?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') e.preventDefault();
+  if (e.key !== 'Enter') return;
+  // H5: Enter в поле ника запускает игру — привычный для жанра паттерн.
+  // Раньше нажатие просто гасилось, и клавиатурный путь «ввёл ник → Enter» не работал.
+  e.preventDefault();
+  playBtn?.click();
 });
 
 menuNameInput?.addEventListener('input', () => {
