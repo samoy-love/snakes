@@ -67,3 +67,63 @@ jobs:
             node --check "$f" || status=1
           done
           exit $status
+
+  docker:
+    name: Docker image smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t snakes:ci .
+
+      # Ровно те проверки, что прогоняются руками на локальном стенде:
+      # healthz/readyz, статика из public/ (её отсутствие в образе — классическая
+      # ошибка, при которой контейнер стартует, но отдаёт 404 на всё), metrics
+      # и запись профилей непривилегированным пользователем.
+      - name: Run container
+        run: |
+          docker run -d --name snakes-ci -p 3000:3000 \
+            -e PROFILE_SECRET=ci-secret \
+            -e WS_ORIGINS=http://127.0.0.1:3000 \
+            snakes:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/healthz >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+
+      - name: HTTP endpoints
+        run: |
+          status=0
+          for p in /healthz /readyz / /client.js /style.css /metrics; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000$p")
+            echo "$p -> $code"
+            [ "$code" = "200" ] || status=1
+          done
+          exit $status
+
+      - name: HEALTHCHECK reports healthy
+        run: |
+          for i in $(seq 1 30); do
+            s=$(docker inspect --format='{{.State.Health.Status}}' snakes-ci)
+            echo "health=$s"
+            [ "$s" = "healthy" ] && exit 0
+            [ "$s" = "unhealthy" ] && { docker logs snakes-ci; exit 1; }
+            sleep 2
+          done
+          echo "::error::healthcheck never became healthy"
+          docker logs snakes-ci
+          exit 1
+
+      - name: Profiles dir is writable by the runtime user
+        run: |
+          docker exec snakes-ci sh -c 'touch /app/data/.ci-write-probe && rm /app/data/.ci-write-probe'
+
+      - name: Container logs
+        if: always()
+        run: docker logs snakes-ci || true
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f snakes-ci || true

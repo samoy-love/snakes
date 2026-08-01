@@ -34,9 +34,18 @@ services:
       # Без секрета прогресс игроков не переживает рестарт (см. .env.example).
       PROFILE_SECRET: ${PROFILE_SECRET:?PROFILE_SECRET must be set in .env - otherwise all player progress is lost on every restart}
       PROFILES_PATH: ${PROFILES_PATH:-/app/data/profiles.json}
-      # Подсети docker обязаны быть в списке, иначе X-Forwarded-For от nginx
-      # не принимается и rate-limit считает всех игроков одним клиентом.
-      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1/8,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+      # Подсеть docker-сети обязана быть в списке, иначе X-Forwarded-For от
+      # nginx не принимается и rate-limit считает всех игроков одним клиентом.
+      #
+      # Список НАМЕРЕННО узкий — только сеть snakes_net (её subnet закреплён
+      # ниже) плюс loopback. Раньше здесь стояли все диапазоны RFC1918
+      # (10/8, 172.16/12, 192.168/16). requestClientIP() в ws.go идёт по цепочке
+      # X-Forwarded-For справа налево и пропускает всё, что считается доверенным
+      # прокси; при широком списке IP игрока из локальной сети (192.168.x.x)
+      # тоже попадал в «доверенные», цепочка исчерпывалась и функция возвращала
+      # адрес самого nginx. В логах это видно как ip="172.18.0.3" для всех
+      # подключений, а rate-limit складывал всех игроков LAN в одну корзину.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1/8,::1,172.28.0.0/16}
       BOT_DEATH_SNAP: ${BOT_DEATH_SNAP:-}
     volumes:
       - snakes_data:/app/data
@@ -67,12 +76,26 @@ services:
       # Статика раздаётся напрямую nginx-ом, минуя Go-процесс.
       # Тот же каталог лежит и внутри образа game (сервер умеет отдавать его сам).
       - ./public:/var/www/snakes:ro
+    # Проверяем именно проксирование: /healthz идёт через nginx в game.
+    # wget есть в busybox образа nginx:alpine, ставить ничего не нужно.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
     networks:
       - snakes_net
 
 networks:
   snakes_net:
     driver: bridge
+    # Subnet закреплён явно, чтобы TRUSTED_PROXIES можно было сузить до одной
+    # сети вместо всех диапазонов RFC1918. Если 172.28.0.0/16 занят другой
+    # сетью на машине, поменяйте здесь и в TRUSTED_PROXIES одновременно.
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
 
 volumes:
   snakes_data:

@@ -336,6 +336,12 @@ const I18N = {
     'match.first_skin': 'До первого скина',
     'match.first_skin_sub': 'Копи ✨ Стиль и открой первый предмет в магазине',
 
+    'cosmetics.where_frame': 'Рамка строки — в таблице лидеров и в итогах матча',
+    'cosmetics.where_nameplate': 'Плашка ника — под вашей головой на поле, её видят все',
+    'cosmetics.where_head': 'Силуэт головы — на поле и на миникарте, в бою и в превью',
+    'cosmetics.where_seg': 'Стиль следа — виден, пока вы вне своей территории',
+    'cosmetics.where_capturefx': 'Вспышка захвата — в момент, когда след замыкается в зону',
+
     'cosmetics.tier_base': 'База',
     'cosmetics.tier_common': 'Обычный',
     'cosmetics.tier_rare': 'Редкий',
@@ -669,6 +675,12 @@ const I18N = {
     'match.deaths': 'Deaths',
     'match.first_skin': 'To your first skin',
     'match.first_skin_sub': 'Bank ✨ Style and unlock your first shop item',
+
+    'cosmetics.where_frame': 'Row frame — in the leaderboard and the match results',
+    'cosmetics.where_nameplate': 'Name plate — under your head on the field, visible to everyone',
+    'cosmetics.where_head': 'Head silhouette — on the field and the minimap, in every fight',
+    'cosmetics.where_seg': 'Trail style — visible while you are outside your own territory',
+    'cosmetics.where_capturefx': 'Capture burst — the moment your trail closes into territory',
 
     'cosmetics.tier_base': 'Base',
     'cosmetics.tier_common': 'Common',
@@ -1102,449 +1114,802 @@ function setMinimapPixel(i) {
   data[di + 3] = 255;
 }
 
+/* ==========================================================================
+   КОСМЕТИКА: ЕДИНЫЙ ИСТОЧНИК ПРАВДЫ
+   --------------------------------------------------------------------------
+   На каждую категорию — ровно ОДНА функция отрисовки. Её вызывает и игровой
+   цикл draw(), и мини-иконка карточки магазина, и большое превью. Отличаются
+   вызовы только параметрами (размер клетки, alpha, фаза анимации, направление).
+   Поэтому расхождение «в магазине одно, в игре другое» структурно невозможно.
+
+   Правило палитры: цвет редкости живёт ТОЛЬКО в UI магазина (полоска карточки,
+   бейдж тира, цена). Сам предмет красится цветом игрока и различается
+   СТРУКТУРОЙ и ДВИЖЕНИЕМ. Исключение — capturefx 5..7: у них своя палитра.
+   ========================================================================== */
+
+const COS_FONT = 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial';
+
+function cosClampId(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(7, n | 0));
+}
+
+// Кэш градиентов «Плазмы». Ключ — цвет + размер клетки, хранилище привязано к
+// конкретному контексту (градиент нельзя переносить между канвасами).
+// Без кэша createLinearGradient звался бы на каждую клетку следа каждый кадр.
+const cosGradCache = new WeakMap();
+
+function cosCachedGradient(ctx, key, make) {
+  let m = cosGradCache.get(ctx);
+  if (!m) {
+    m = new Map();
+    cosGradCache.set(ctx, m);
+  }
+  let g = m.get(key);
+  if (g) return g;
+  g = make();
+  if (m.size > 48) m.clear();
+  m.set(key, g);
+  return g;
+}
+
+/* --- SEG: одна клетка следа ------------------------------------------------
+   px,py — левый верхний угол клетки; cell — сторона клетки в пикселях.
+   seed — стабильное число клетки (в игре из x,y), timeMs — время для анимации.
+   Вызывается для каждой клетки следа каждый кадр: внутри нет аллокаций,
+   единственный градиент кэшируется. */
+function drawSegTile(ctx, px, py, cell, hsl, segId, seed, alpha, timeMs) {
+  const a = Math.max(0, Math.min(1, Number(alpha)));
+  if (!(a > 0.02)) return;
+  const id = cosClampId(segId);
+  const rgb = hslToRgb(hsl);
+  const now = Number(timeMs) || 0;
+  const s = Number(seed) || 0;
+
+  const x = px + 1;
+  const y = py + 1;
+  const w = Math.max(1, cell - 2);
+  const h = Math.max(1, cell - 2);
+  const r = rgb[0];
+  const g = rgb[1];
+  const b = rgb[2];
+
+  if (id === 1) {
+    // Неон: заливка + свечение наружу.
+    ctx.save();
+    ctx.shadowColor = hsl;
+    ctx.shadowBlur = Math.max(6, cell * 0.55);
+    ctx.fillStyle = `rgba(${r},${g},${b},${a})`;
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
+    return;
+  }
+
+  if (id === 2) {
+    // Полосы: диагональная штриховка поверх заливки.
+    ctx.save();
+    ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.92})`;
+    ctx.fillRect(x, y, w, h);
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+    ctx.globalAlpha = 0.45;
+    ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+    ctx.lineWidth = Math.max(2, cell * 0.10);
+    const step = Math.max(4, (cell * 0.55) | 0);
+    for (let k = -cell; k <= cell * 2; k += step) {
+      ctx.beginPath();
+      ctx.moveTo(px + k, py - 2);
+      ctx.lineTo(px + k + cell, py + cell + 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+
+  if (id === 3) {
+    // Плазма: диагональный градиент + бегущая волна яркости.
+    const key = `p|${r},${g},${b}|${cell | 0}`;
+    const grad = cosCachedGradient(ctx, key, () => {
+      const gg = ctx.createLinearGradient(0, 0, cell, cell);
+      gg.addColorStop(0, `rgb(${r},${g},${b})`);
+      gg.addColorStop(0.5, 'rgba(255,255,255,0.55)');
+      gg.addColorStop(1, 'rgba(0,0,0,0.85)');
+      return gg;
+    });
+    const wv = 0.5 + 0.5 * Math.sin(now * 0.004 + s * 0.35);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.globalAlpha = a * (0.72 + 0.28 * wv);
+    ctx.fillStyle = grad;
+    ctx.fillRect(1, 1, w, h);
+    ctx.restore();
+    return;
+  }
+
+  if (id === 4) {
+    // Искры: заливка + одна белая искра, прыгающая по клетке.
+    // Старая формула `h % (cell - 8)` при cell=9 давала `% 1` — искра всегда
+    // в одной точке и мерцания не было вовсе. Считаем позицию долей стороны.
+    ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.92})`;
+    ctx.fillRect(x, y, w, h);
+    const hsh = (((s * 73856093) >>> 0) ^ (((now / 90) | 0) * 19349663)) >>> 0;
+    const sz = Math.max(1.5, cell * 0.18);
+    const sx = x + (w - sz) * ((hsh & 1023) / 1023);
+    const sy = y + (h - sz) * (((hsh >>> 10) & 1023) / 1023);
+    ctx.fillStyle = `rgba(255,255,255,${(0.90 * a).toFixed(3)})`;
+    ctx.fillRect(sx, sy, sz, sz);
+    return;
+  }
+
+  if (id === 5) {
+    // Схема: тёмная подложка, яркие дорожки крестом и бегущий вдоль хвоста
+    // импульс — узел вспыхивает белым, волна идёт от головы к хвосту.
+    ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.34})`;
+    ctx.fillRect(x, y, w, h);
+    const tw = Math.max(1, Math.round(cell * 0.24));
+    ctx.fillStyle = `rgba(${r},${g},${b},${a})`;
+    ctx.fillRect(x, y + (h - tw) / 2, w, tw);
+    ctx.fillRect(x + (w - tw) / 2, y, tw, h * 0.5);
+    const ph = (((s - ((now / 90) | 0)) % 6) + 6) % 6;
+    if (ph === 0) {
+      ctx.fillStyle = `rgba(255,255,255,${(0.92 * a).toFixed(3)})`;
+      const nr = Math.max(1.4, cell * 0.20);
+      ctx.fillRect(x + w / 2 - nr, y + h / 2 - nr, nr * 2, nr * 2);
+    }
+    return;
+  }
+
+  if (id === 6) {
+    // Мозаика: четыре плитки со швом — шахматка читается даже на 7px.
+    const hw = Math.max(1, (w - 1) / 2);
+    const hh = Math.max(1, (h - 1) / 2);
+    ctx.fillStyle = `rgba(${r},${g},${b},${a})`;
+    ctx.fillRect(x, y, hw, hh);
+    ctx.fillRect(x + hw + 1, y + hh + 1, hw, hh);
+    ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.42})`;
+    ctx.fillRect(x + hw + 1, y, hw, hh);
+    ctx.fillRect(x, y + hh + 1, hw, hh);
+    return;
+  }
+
+  if (id === 7) {
+    // Бездна: тёмная дыра в яркой рамке — единственный «полый» след.
+    const lw = Math.max(1.5, cell * 0.20);
+    ctx.fillStyle = `rgba(4,6,10,${(0.72 * a).toFixed(3)})`;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = `rgba(${r},${g},${b},${a})`;
+    ctx.lineWidth = lw;
+    ctx.strokeRect(x + lw / 2, y + lw / 2, Math.max(0.5, w - lw), Math.max(0.5, h - lw));
+    return;
+  }
+
+  // 0 — Классика.
+  ctx.fillStyle = `rgba(${r},${g},${b},${a})`;
+  ctx.fillRect(x, y, w, h);
+}
+
+/* --- HEAD: голова змейки ---------------------------------------------------
+   cx,cy — центр клетки; dirX,dirY — вектор движения (асимметричные силуэты
+   разворачиваются по нему). Поверх головы игра рисует кольца щита (~0.46-0.50
+   клетки) и скорости (~0.60-0.64), поэтому декоративные кольца головы держим
+   строго внутри 0.44. */
+function drawHead(ctx, cx, cy, cell, hsl, headId, dirX, dirY, timeMs) {
+  const id = cosClampId(headId);
+  let dx = Number(dirX);
+  let dy = Number(dirY);
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) {
+    dx = 1;
+    dy = 0;
+  }
+  const ang = Math.atan2(dy, dx);
+  const now = Number(timeMs) || 0;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(1, cell * 0.07);
+  ctx.fillStyle = hsl;
+  ctx.strokeStyle = 'rgba(0,0,0,0.40)';
+
+  if (id === 1) {
+    // Ромб: вытянут по ходу движения.
+    ctx.rotate(ang);
+    const r = cell * 0.46;
+    ctx.beginPath();
+    ctx.moveTo(r, 0);
+    ctx.lineTo(0, -r * 0.66);
+    ctx.lineTo(-r, 0);
+    ctx.lineTo(0, r * 0.66);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else if (id === 2) {
+    // Куб: намеренно самый мелкий и «жёсткий» силуэт.
+    const r = cell * 0.29;
+    ctx.beginPath();
+    ctx.rect(-r, -r, r * 2, r * 2);
+    ctx.fill();
+    ctx.stroke();
+  } else if (id === 3) {
+    // Кольцо: единственный силуэт с дыркой — опознаётся мгновенно.
+    const ro = cell * 0.42;
+    const ri = cell * 0.21;
+    ctx.beginPath();
+    ctx.arc(0, 0, ro, 0, Math.PI * 2, false);
+    ctx.arc(0, 0, ri, 0, Math.PI * 2, true);
+    ctx.fill('evenodd');
+    ctx.beginPath();
+    ctx.arc(0, 0, ro, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (id === 4) {
+    // Щит: плоская корма, острый лоб по ходу движения.
+    ctx.rotate(ang);
+    const r = cell * 0.42;
+    ctx.beginPath();
+    ctx.moveTo(r, 0);
+    ctx.lineTo(r * 0.24, -r * 0.80);
+    ctx.lineTo(-r * 0.78, -r * 0.66);
+    ctx.lineTo(-r * 0.78, r * 0.66);
+    ctx.lineTo(r * 0.24, r * 0.80);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else if (id === 5) {
+    // Стрела: самый крупный и самый асимметричный силуэт.
+    ctx.rotate(ang);
+    const r = cell * 0.46;
+    ctx.beginPath();
+    ctx.moveTo(r, 0);
+    ctx.lineTo(-r * 0.62, -r * 0.78);
+    ctx.lineTo(-r * 0.28, 0);
+    ctx.lineTo(-r * 0.62, r * 0.78);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else if (id === 6) {
+    // Затмение: единственная тёмная голова в игре, узнаётся по яркому ободку.
+    const r = cell * 0.37;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(6,8,12,0.95)';
+    ctx.fill();
+    ctx.strokeStyle = hsl;
+    ctx.lineWidth = Math.max(1.5, cell * 0.13);
+    ctx.stroke();
+  } else if (id === 7) {
+    // Звезда: пятилучевой силуэт, медленно вращается.
+    ctx.rotate(ang * 0.35 + now * 0.0006);
+    const ro = cell * 0.44;
+    const ri = cell * 0.19;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      const rr = i % 2 === 0 ? ro : ri;
+      const x = Math.cos(a) * rr;
+      const y = Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    // 0 — Орб.
+    ctx.beginPath();
+    ctx.arc(0, 0, cell * 0.34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Направляющий «нос» — единый для всех вариантов, и в игре, и в превью.
+  const noseX = cx + dx * cell * 0.26;
+  const noseY = cy + dy * cell * 0.26;
+  const noseW = cell * 0.18;
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.88)';
+  ctx.shadowColor = 'rgba(0,0,0,0.35)';
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  ctx.moveTo(noseX, noseY);
+  ctx.lineTo(noseX - dy * noseW, noseY + dx * noseW);
+  ctx.lineTo(noseX + dy * noseW, noseY - dx * noseW);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/* --- NAMEPLATE: плашка ника ------------------------------------------------
+   x — центр по горизонтали, y — нижняя граница плашки. Варианты отличаются
+   ГЕОМЕТРИЕЙ пути, а не альфой заливки. */
+function drawNamePlate(ctx, label, x, y, hsl, plateId, alpha, fontPx, timeMs) {
+  const txt = String(label == null ? '' : label);
+  if (!txt) return;
+  const id = cosClampId(plateId);
+  const fs = Math.max(9, Math.round(Number(fontPx) || 12));
+  const a = Math.max(0, Math.min(1, Number(alpha == null ? 0.95 : alpha)));
+  const now = Number(timeMs) || 0;
+  const rgb = hslToRgb(hsl);
+  const acc = (aa) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${aa})`;
+
+  ctx.save();
+  ctx.font = `${fs}px ${COS_FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const h = Math.round(fs * 1.5);
+  const basePad = Math.round(fs * 0.62);
+  const extraPad = id === 1 ? Math.round(fs * 0.55) : id === 3 ? Math.round(fs * 0.5) : id === 7 ? Math.round(fs * 0.45) : 0;
+  const w = Math.ceil(ctx.measureText(txt).width + basePad * 2 + extraPad);
+  const px = Math.round(x - w / 2);
+  const py = Math.round(y - h);
+  const cyy = py + h / 2;
+  let textX = px + w / 2;
+
+  ctx.globalAlpha = a;
+  ctx.lineWidth = 1;
+
+  if (id === 1) {
+    // Планка: прямой прямоугольник + цветная полоса слева.
+    const bw = Math.max(3, Math.round(fs * 0.32));
+    ctx.fillStyle = 'rgba(0,0,0,0.52)';
+    ctx.fillRect(px, py, w, h);
+    ctx.fillStyle = acc(0.95);
+    ctx.fillRect(px, py, bw, h);
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+    ctx.strokeRect(px + 0.5, py + 0.5, w - 1, h - 1);
+    textX = px + bw + (w - bw) / 2;
+  } else if (id === 2) {
+    // Скос: срезанные углы.
+    const c = Math.round(h * 0.34);
+    ctx.beginPath();
+    ctx.moveTo(px + c, py);
+    ctx.lineTo(px + w - c, py);
+    ctx.lineTo(px + w, py + c);
+    ctx.lineTo(px + w, py + h - c);
+    ctx.lineTo(px + w - c, py + h);
+    ctx.lineTo(px + c, py + h);
+    ctx.lineTo(px, py + h - c);
+    ctx.lineTo(px, py + c);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0,0,0,0.50)';
+    ctx.fill();
+    ctx.strokeStyle = acc(0.75);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  } else if (id === 3) {
+    // Свиток: треугольные хвосты по бокам.
+    const tl = Math.round(h * 0.42);
+    ctx.beginPath();
+    ctx.moveTo(px + tl, py);
+    ctx.lineTo(px + w - tl, py);
+    ctx.lineTo(px + w, py + h / 2);
+    ctx.lineTo(px + w - tl, py + h);
+    ctx.lineTo(px + tl, py + h);
+    ctx.lineTo(px, py + h / 2);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0,0,0,0.48)';
+    ctx.fill();
+    ctx.strokeStyle = acc(0.68);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  } else if (id === 4) {
+    // Терминал: пунктирная рамка и угловые засечки.
+    ctx.fillStyle = 'rgba(0,0,0,0.58)';
+    ctx.fillRect(px, py, w, h);
+    ctx.save();
+    ctx.setLineDash([Math.max(2, fs * 0.22), Math.max(2, fs * 0.18)]);
+    ctx.strokeStyle = acc(0.80);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px + 0.5, py + 0.5, w - 1, h - 1);
+    ctx.restore();
+    const tk = Math.max(3, Math.round(fs * 0.34));
+    ctx.strokeStyle = acc(0.95);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px, py + tk); ctx.lineTo(px, py); ctx.lineTo(px + tk, py);
+    ctx.moveTo(px + w - tk, py); ctx.lineTo(px + w, py); ctx.lineTo(px + w, py + tk);
+    ctx.moveTo(px + w, py + h - tk); ctx.lineTo(px + w, py + h); ctx.lineTo(px + w - tk, py + h);
+    ctx.moveTo(px + tk, py + h); ctx.lineTo(px, py + h); ctx.lineTo(px, py + h - tk);
+    ctx.stroke();
+  } else if (id === 5) {
+    // Гравюра: фаска — светлая линия сверху-слева, тёмная снизу-справа,
+    // текст рисуется дважды со сдвигом (выдавленные буквы).
+    ctx.fillStyle = 'rgba(0,0,0,0.60)';
+    ctx.fillRect(px, py, w, h);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255,255,255,0.34)';
+    ctx.beginPath();
+    ctx.moveTo(px + 0.5, py + h - 1); ctx.lineTo(px + 0.5, py + 0.5); ctx.lineTo(px + w - 1, py + 0.5);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.beginPath();
+    ctx.moveTo(px + w - 0.5, py + 1); ctx.lineTo(px + w - 0.5, py + h - 0.5); ctx.lineTo(px + 1, py + h - 0.5);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillText(txt, textX + 1, cyy + 1.5);
+    ctx.fillStyle = acc(0.98);
+    ctx.fillText(txt, textX, cyy + 0.5);
+    ctx.restore();
+    return;
+  } else if (id === 6) {
+    // Блик: капсула с бегущей диагональной подсветкой.
+    const r = h / 2;
+    ctx.beginPath();
+    ctx.moveTo(px + r, py);
+    ctx.arcTo(px + w, py, px + w, py + h, r);
+    ctx.arcTo(px + w, py + h, px, py + h, r);
+    ctx.arcTo(px, py + h, px, py, r);
+    ctx.arcTo(px, py, px + w, py, r);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0,0,0,0.46)';
+    ctx.fill();
+    ctx.strokeStyle = acc(0.45);
+    ctx.stroke();
+    ctx.save();
+    ctx.clip();
+    const period = 2200;
+    const t01 = ((now % period) / period);
+    const bx = px - h + (w + h * 2) * t01;
+    ctx.globalAlpha = a * 0.55;
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.beginPath();
+    ctx.moveTo(bx, py + h);
+    ctx.lineTo(bx + h * 0.55, py);
+    ctx.lineTo(bx + h * 1.05, py);
+    ctx.lineTo(bx + h * 0.50, py + h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  } else if (id === 7) {
+    // Шеврон: параллелограмм со стрелкой по левому краю.
+    const sk = Math.round(h * 0.36);
+    ctx.beginPath();
+    ctx.moveTo(px + sk, py);
+    ctx.lineTo(px + w, py);
+    ctx.lineTo(px + w - sk, py + h);
+    ctx.lineTo(px, py + h);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0,0,0,0.50)';
+    ctx.fill();
+    ctx.strokeStyle = acc(0.70);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(px + sk * 0.5, py + h * 0.5);
+    ctx.lineTo(px + sk * 1.5, py + 1);
+    ctx.lineTo(px + sk * 1.15, py + h * 0.5);
+    ctx.lineTo(px + sk * 1.5, py + h - 1);
+    ctx.closePath();
+    ctx.fillStyle = acc(0.95);
+    ctx.fill();
+    textX = px + sk + (w - sk) / 2;
+  } else {
+    // 0 — Капсула.
+    const r = h / 2;
+    ctx.beginPath();
+    ctx.moveTo(px + r, py);
+    ctx.arcTo(px + w, py, px + w, py + h, r);
+    ctx.arcTo(px + w, py + h, px, py + h, r);
+    ctx.arcTo(px, py + h, px, py, r);
+    ctx.arcTo(px, py, px + w, py, r);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = Math.min(1, a + 0.18);
+  ctx.fillStyle = 'rgba(255,255,255,0.94)';
+  ctx.fillText(txt, textX, cyy + 0.5);
+  ctx.restore();
+}
+
+/* --- CAPTUREFX: вспышка в момент захвата -----------------------------------
+   progress 0..1 — фаза одного проигрывания. В игре это age/650мс, в магазине —
+   зацикленная фаза. Варианты 0..4 красятся цветом игрока (раньше они дублировали
+   палитру рамок и плашек), 5..7 имеют собственную яркую палитру. */
+const COS_FX_PALETTE = {
+  5: [255, 122, 24],   // магма
+  6: [20, 224, 200],   // бирюза
+  7: [255, 92, 225]    // магента
+};
+
+function cosFxRgb(fxId, hsl) {
+  const id = cosClampId(fxId);
+  return COS_FX_PALETTE[id] || hslToRgb(hsl);
+}
+
+function drawCaptureFx(ctx, cx, cy, cell, hsl, fxId, progress) {
+  const id = cosClampId(fxId);
+  const p = Math.max(0, Math.min(1, Number(progress) || 0));
+  const rgb = cosFxRgb(id, hsl);
+  const col = (aa) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${aa})`;
+  const base = cell * 1.05;
+  const r = base * (0.35 + 1.25 * p);
+  const a = Math.max(0, 1 - p) * 0.92;
+  if (a <= 0.01) return;
+
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = col(0.95);
+  ctx.fillStyle = col(0.95);
+  ctx.lineWidth = Math.max(1, cell * 0.10);
+
+  if (id === 0) {
+    // Кольца.
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = a * 0.55;
+    ctx.lineWidth = Math.max(1, cell * 0.06);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (id === 1) {
+    // Лучи.
+    ctx.lineWidth = Math.max(2, cell * 0.08);
+    for (let k = 0; k < 12; k++) {
+      const ang = p * 2.4 + (k * Math.PI * 2) / 12;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * r * 0.35, cy + Math.sin(ang) * r * 0.35);
+      ctx.lineTo(cx + Math.cos(ang) * r * 1.10, cy + Math.sin(ang) * r * 1.10);
+      ctx.stroke();
+    }
+  } else if (id === 2) {
+    // Кристалл: вложенные ромбы.
+    ctx.lineWidth = Math.max(2, cell * 0.08);
+    const rr = r * (0.85 + 0.10 * Math.sin(p * Math.PI * 2));
+    for (let k = 0; k < 2; k++) {
+      const q = rr * (k === 0 ? 1 : 0.55);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - q);
+      ctx.lineTo(cx + q * 0.72, cy);
+      ctx.lineTo(cx, cy + q);
+      ctx.lineTo(cx - q * 0.72, cy);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  } else if (id === 3) {
+    // Спираль: одна непрерывная линия (именно так, как в игре).
+    ctx.lineWidth = Math.max(2, cell * 0.08);
+    const rot = p * 8.0;
+    ctx.beginPath();
+    for (let s = 0; s <= 1.001; s += 0.045) {
+      const ang = rot + s * Math.PI * 6.2;
+      const rr = r * (0.12 + 0.90 * s);
+      const x = cx + Math.cos(ang) * rr;
+      const y = cy + Math.sin(ang) * rr;
+      if (s === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  } else if (id === 4) {
+    // Конфетти.
+    const extra = ['rgba(255,255,255,0.92)', col(0.92), 'rgba(255,215,0,0.92)', 'rgba(120,255,200,0.92)'];
+    ctx.globalAlpha = a * (0.75 + 0.25 * (1 - p));
+    for (let k = 0; k < 26; k++) {
+      const seed = ((k + 1) * 2654435761) >>> 0;
+      const u = (seed & 1023) / 1023;
+      const v = ((seed >>> 10) & 1023) / 1023;
+      const ang = u * Math.PI * 2 + p * 1.2;
+      const sp = 0.25 + 0.95 * v;
+      const rr = r * (0.05 + p * 1.45 * sp);
+      const x = cx + Math.cos(ang) * rr;
+      const y = cy + Math.sin(ang) * rr;
+      const sz = Math.max(2, (cell * (0.10 + 0.14 * (((seed >>> 20) & 3) / 3))) | 0);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate((p * 10.0 + u * 6.0) % (Math.PI * 2));
+      ctx.fillStyle = extra[seed % extra.length];
+      if ((seed & 1) === 0) {
+        ctx.beginPath();
+        ctx.moveTo(0, -sz);
+        ctx.lineTo(sz, 0);
+        ctx.lineTo(0, sz);
+        ctx.lineTo(-sz, 0);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillRect(-sz / 2, -sz / 2, sz, sz);
+      }
+      ctx.restore();
+    }
+  } else if (id === 5) {
+    // Магма: рваная корона, расходящаяся вспышкой.
+    ctx.lineWidth = Math.max(2, cell * 0.12);
+    ctx.beginPath();
+    const n = 14;
+    for (let k = 0; k <= n; k++) {
+      const ang = (k * Math.PI * 2) / n;
+      const jag = k % 2 === 0 ? 1 : 0.62;
+      const rr = r * jag * (0.9 + 0.12 * Math.sin(p * 6 + k));
+      const x = cx + Math.cos(ang) * rr;
+      const y = cy + Math.sin(ang) * rr;
+      if (k === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.globalAlpha = a * 0.28;
+    ctx.fill();
+  } else if (id === 6) {
+    // Вихрь: три закрученные дуги с хвостами.
+    ctx.lineCap = 'round';
+    for (let k = 0; k < 3; k++) {
+      const a0 = p * 9.0 + (k * Math.PI * 2) / 3;
+      ctx.globalAlpha = a * (1 - k * 0.22);
+      ctx.lineWidth = Math.max(1.5, cell * (0.12 - k * 0.025));
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * (0.55 + 0.22 * k), a0, a0 + Math.PI * 0.85);
+      ctx.stroke();
+    }
+  } else {
+    // 7 — Осколки: треугольные обломки, разлетающиеся и вращающиеся.
+    for (let k = 0; k < 9; k++) {
+      const ang = (k * Math.PI * 2) / 9 + p * 0.8;
+      const rr = r * (0.25 + 0.95 * p);
+      const x = cx + Math.cos(ang) * rr;
+      const y = cy + Math.sin(ang) * rr;
+      const sz = Math.max(2.5, cell * 0.30 * (1 - p * 0.55));
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(ang + p * 5.0);
+      ctx.globalAlpha = a;
+      ctx.beginPath();
+      ctx.moveTo(sz, 0);
+      ctx.lineTo(-sz * 0.6, -sz * 0.75);
+      ctx.lineTo(-sz * 0.6, sz * 0.75);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+/* --- FRAME: рамка профиля --------------------------------------------------
+   Единственная чисто CSS-категория: классы .frame0..frame7 навешиваются на
+   строки таблицы лидеров и итогов матча. В канвасе рисуется только имитация
+   этой строки — та же логика цвета берётся из одной таблицы. */
+const COS_FRAME_STYLE = [
+  { edge: '#6b7280', wash: 'rgba(107,114,128,0.16)', name: 'rgba(229,231,235,0.92)' },
+  { edge: '#b87333', wash: 'rgba(184,115,51,0.20)', name: 'rgba(255,224,196,0.95)' },
+  { edge: '#c9d1d9', wash: 'rgba(201,209,217,0.18)', name: 'rgba(255,255,255,0.96)' },
+  { edge: '#34d399', wash: 'rgba(52,211,153,0.20)', name: 'rgba(209,250,229,0.96)' },
+  { edge: '#4c1d95', wash: 'rgba(76,29,149,0.42)', name: 'rgba(237,233,254,0.96)' },
+  { edge: '#e5e7eb', wash: 'rgba(229,231,235,0.14)', name: 'rgba(255,255,255,0.96)' },
+  { edge: '#d4a017', wash: 'rgba(212,160,23,0.22)', name: 'rgba(255,243,205,0.96)' },
+  { edge: '#1f2937', wash: 'rgba(31,41,55,0.55)', name: 'rgba(203,213,225,0.96)' }
+];
+
+function cosFrameStyle(frId) {
+  return COS_FRAME_STYLE[cosClampId(frId)] || COS_FRAME_STYLE[0];
+}
+
+// Строка таблицы лидеров с рамкой — ровно то место, где рамка видна в игре.
+function drawFrameRow(ctx, x, y, w, h, frId, rank, name, score, highlight) {
+  const st = cosFrameStyle(frId);
+  const fs = Math.max(10, Math.round(h * 0.46));
+  ctx.save();
+  ctx.fillStyle = highlight ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.025)';
+  ctx.fillRect(x, y, w, h);
+  if (highlight) {
+    const g = ctx.createLinearGradient(x, y, x + w * 0.7, y);
+    g.addColorStop(0, st.wash);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = st.edge;
+    ctx.fillRect(x, y, 3, h);
+    const fr = cosClampId(frId);
+    if (fr === 2 || fr === 5) {
+      ctx.fillStyle = 'rgba(255,255,255,0.20)';
+      ctx.fillRect(x, y, w, 1);
+    }
+    if (fr === 7) {
+      ctx.strokeStyle = 'rgba(148,163,184,0.35)';
+      ctx.lineWidth = 1;
+      for (let k = -h; k < w; k += 6) {
+        ctx.beginPath();
+        ctx.moveTo(x + k, y + h);
+        ctx.lineTo(x + k + h, y);
+        ctx.stroke();
+      }
+    }
+  } else {
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(x, y, 3, h);
+  }
+  ctx.font = `${fs}px ${COS_FONT}`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = highlight ? st.name : 'rgba(229,231,235,0.62)';
+  ctx.fillText(String(rank), x + 12, y + h / 2);
+  if (highlight && (cosClampId(frId) === 3 || cosClampId(frId) === 6)) {
+    ctx.save();
+    ctx.shadowColor = st.edge;
+    ctx.shadowBlur = 8;
+    ctx.fillText(String(name), x + 34, y + h / 2);
+    ctx.restore();
+  } else {
+    ctx.fillText(String(name), x + 34, y + h / 2);
+  }
+  ctx.textAlign = 'right';
+  ctx.fillStyle = highlight ? 'rgba(255,255,255,0.88)' : 'rgba(229,231,235,0.55)';
+  ctx.fillText(String(score), x + w - 12, y + h / 2);
+  ctx.restore();
+}
+
+/* --- Мини-иконка карточки магазина ----------------------------------------
+   Использует ровно те же функции, что и игра. Backing store умножается на
+   devicePixelRatio, иначе иконка мылится на retina и на мобильном. */
+function cosPrepCanvas(canvasEl, cssW, cssH) {
+  const dpr = Math.max(1, Math.min(3, Number(window.devicePixelRatio) || 1));
+  const bw = Math.max(1, Math.round(cssW * dpr));
+  const bh = Math.max(1, Math.round(cssH * dpr));
+  // Размер на экране задаёт CSS; здесь только backing store под devicePixelRatio.
+  if (canvasEl.width !== bw) canvasEl.width = bw;
+  if (canvasEl.height !== bh) canvasEl.height = bh;
+  const c = canvasEl.getContext('2d');
+  if (!c) return null;
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, cssW, cssH);
+  return c;
+}
+
 function drawMiniCosmeticPreview(canvasEl, cat, id) {
-  const c = canvasEl?.getContext?.('2d');
+  if (!canvasEl) return;
+  const W = 44;
+  const H = 44;
+  const c = cosPrepCanvas(canvasEl, W, H);
   if (!c) return;
-  const w = canvasEl.width;
-  const h = canvasEl.height;
-  c.clearRect(0, 0, w, h);
-  c.fillStyle = 'rgba(0,0,0,0.22)';
-  c.fillRect(0, 0, w, h);
+  c.fillStyle = 'rgba(0,0,0,0.26)';
+  c.fillRect(0, 0, W, H);
 
   const base = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
-  const cx = w / 2;
-  const cy = h / 2;
+  const cx = W / 2;
+  const cy = H / 2;
+  const now = performance.now();
 
   if (cat === 'frame') {
-    const fr = Math.max(0, Math.min(7, Number(id) || 0));
-    const col = fr === 0 ? 'rgba(255,255,255,0.12)' : cosmeticAccent(fr, fr === 3 ? 0.62 : 0.70);
-    c.strokeStyle = col;
-    c.lineWidth = 3;
-    c.strokeRect(6, 6, w - 12, h - 12);
+    drawFrameRow(c, 2, 8, W - 4, 13, id, 1, '', '', false);
+    drawFrameRow(c, 2, 22, W - 4, 14, id, 2, '', '', true);
     return;
   }
 
   if (cat === 'capturefx') {
-    const fxId = Math.max(0, Math.min(7, Number(id) || 0));
-    const col = fxId === 0 ? 'rgba(255,215,0,0.92)' : cosmeticAccent(fxId, 0.92);
-    c.strokeStyle = col;
-    c.fillStyle = col;
-    c.lineWidth = 2;
-    if (fxId === 0) {
-      c.beginPath();
-      c.arc(cx, cy, 10, 0, Math.PI * 2);
-      c.stroke();
-      c.globalAlpha = 0.55;
-      c.beginPath();
-      c.arc(cx, cy, 6, 0, Math.PI * 2);
-      c.stroke();
-      c.globalAlpha = 1;
-    } else if (fxId === 1) {
-      for (let k = 0; k < 8; k++) {
-        const a = (k * Math.PI * 2) / 8;
-        c.beginPath();
-        c.moveTo(cx + Math.cos(a) * 4, cy + Math.sin(a) * 4);
-        c.lineTo(cx + Math.cos(a) * 13, cy + Math.sin(a) * 13);
-        c.stroke();
-      }
-    } else if (fxId === 2) {
-      c.beginPath();
-      c.moveTo(cx, cy - 11);
-      c.lineTo(cx + 11, cy);
-      c.lineTo(cx, cy + 11);
-      c.lineTo(cx - 11, cy);
-      c.closePath();
-      c.stroke();
-    } else if (fxId === 3) {
-      c.globalAlpha = 0.9;
-      for (let s = 0; s < 3; s++) {
-        c.beginPath();
-        c.arc(cx, cy, 12 - s * 3, s * 0.8, s * 0.8 + Math.PI * 1.2);
-        c.stroke();
-      }
-      c.globalAlpha = 1;
-    } else {
-      for (let k = 0; k < 10; k++) {
-        const a = (k * Math.PI * 2) / 10;
-        const rr = 4 + (k % 3) * 3;
-        const x = cx + Math.cos(a) * rr;
-        const y = cy + Math.sin(a) * rr;
-        c.fillRect(x - 1.5, y - 1.5, 3, 3);
-      }
-    }
+    // Иконка проигрывает тот же цикл, что и игра, только короче.
+    const p = ((now % 1400) / 1400);
+    c.save();
+    c.translate(0, 0);
+    drawCaptureFx(c, cx, cy, 13, base, id, p);
+    c.restore();
     return;
   }
 
   if (cat === 'seg') {
-    drawMiniSeg(c, 6, 10, w - 12, h - 20, base, id);
+    // Квадратные плитки — ровно как след в игре (раньше рисовалась цепочка кружков).
+    const cell = 13;
+    for (let i = 0; i < 3; i++) {
+      drawSegTile(c, 2 + i * cell, cy - cell / 2, cell, base, id, i, 0.95, now);
+    }
+    drawHead(c, 2 + 3 * cell + cell * 0.5, cy, cell, base, 0, 1, 0, now);
     return;
   }
 
   if (cat === 'nameplate') {
-    drawMiniNameplate(c, id);
+    drawNamePlate(c, 'YOU', cx, cy + 9, base, id, 0.98, 10, now);
     return;
   }
 
   if (cat === 'head') {
-    drawMiniHead(c, cx, cy, 14, base, id);
+    drawHead(c, cx - 3, cy, 34, base, id, 1, 0, now);
     return;
   }
-}
-
-function drawMiniSeg(ctx2, x, y, w, h, c, segId) {
-  const step = w / 4;
-  for (let i = 0; i < 5; i++) {
-    const px = x + i * step;
-    const py = y + (i % 2) * 2;
-    ctx2.save();
-    ctx2.globalAlpha = 0.95;
-    const sid = Math.max(0, Math.min(7, Number(segId) || 0));
-    if (sid === 1) {
-      ctx2.shadowColor = c;
-      ctx2.shadowBlur = 12;
-      ctx2.fillStyle = c;
-    } else if (sid === 2) {
-      ctx2.fillStyle = c;
-    } else if (sid === 3) {
-      const g = ctx2.createRadialGradient(px - 2, py + h / 2 - 2, 1, px, py + h / 2, 6);
-      g.addColorStop(0, 'rgba(255,255,255,0.85)');
-      g.addColorStop(0.5, c);
-      g.addColorStop(1, 'rgba(0,0,0,0.35)');
-      ctx2.fillStyle = g;
-    } else if (sid === 4) {
-      ctx2.fillStyle = c;
-    } else {
-      ctx2.fillStyle = c;
-    }
-    ctx2.beginPath();
-    ctx2.arc(px, py + h / 2, 4.6, 0, Math.PI * 2);
-    ctx2.fill();
-    if (sid === 2) {
-      ctx2.globalAlpha = 0.65;
-      ctx2.strokeStyle = 'rgba(0,0,0,0.55)';
-      ctx2.lineWidth = 2;
-      ctx2.beginPath();
-      ctx2.moveTo(px - 4, py + h / 2 - 1);
-      ctx2.lineTo(px + 5, py + h / 2 + 4);
-      ctx2.stroke();
-    } else if (sid === 4) {
-      ctx2.globalAlpha = 0.9;
-      ctx2.fillStyle = 'rgba(255,255,255,0.75)';
-      ctx2.fillRect(px + 1.5, py + h / 2 - 4.5, 2, 2);
-    }
-    ctx2.restore();
-  }
-}
-
-function drawMiniNameplate(ctx2, nameId) {
-  const np = Math.max(0, Math.min(7, Number(nameId) || 0));
-  ctx2.save();
-  ctx2.font = `10px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-  const t = 'YOU';
-  const m = ctx2.measureText(t);
-  const padX = 6;
-  const w = Math.ceil(m.width + padX * 2);
-  const h = 16;
-  const x = Math.round((ctx2.canvas.width - w) / 2);
-  const y = Math.round((ctx2.canvas.height - h) / 2);
-  const r = 8;
-  if (np === 0) {
-    ctx2.fillStyle = 'rgba(0,0,0,0.42)';
-    ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
-  } else {
-    ctx2.fillStyle = np === 1 ? 'rgba(0,0,0,0.30)' : cosmeticAccent(np, 0.12);
-    ctx2.strokeStyle = cosmeticAccent(np, 0.38);
-  }
-  ctx2.lineWidth = 1;
-  ctx2.beginPath();
-  ctx2.moveTo(x + r, y);
-  ctx2.arcTo(x + w, y, x + w, y + h, r);
-  ctx2.arcTo(x + w, y + h, x, y + h, r);
-  ctx2.arcTo(x, y + h, x, y, r);
-  ctx2.arcTo(x, y, x + w, y, r);
-  ctx2.closePath();
-  ctx2.fill();
-  ctx2.stroke();
-  ctx2.fillStyle = 'rgba(255,255,255,0.92)';
-  ctx2.textAlign = 'center';
-  ctx2.textBaseline = 'middle';
-  ctx2.fillText(t, x + w / 2, y + h / 2 + 0.5);
-  ctx2.restore();
-}
-
-function drawCaptureFxShopPreview(ctx2, fxId, w, h, baseHsl) {
-  const id = Math.max(0, Math.min(7, Number(fxId) || 0));
-  const now = performance.now() * 0.001;
-  const rgb = hslToRgb(baseHsl);
-  const fill = (a) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
-  const col = id === 0 ? 'rgba(255,215,0,0.92)' : cosmeticAccent(id, 0.92);
-
-  // animated tile capture
-  const cols = 10;
-  const rows = 6;
-  const cell = Math.floor(Math.min((w - 40) / cols, (h - 60) / rows));
-  const gw = cols * cell;
-  const gh = rows * cell;
-  const x0 = Math.floor((w - gw) / 2);
-  const y0 = Math.floor((h - gh) / 2) + 6;
-
-  const cx = x0 + gw / 2;
-  const cy = y0 + gh / 2;
-
-  ctx2.save();
-  ctx2.lineWidth = 1;
-  for (let yy = 0; yy < rows; yy++) {
-    for (let xx = 0; xx < cols; xx++) {
-      const x = x0 + xx * cell;
-      const y = y0 + yy * cell;
-
-      // base tile
-      ctx2.fillStyle = 'rgba(0,0,0,0.18)';
-      ctx2.fillRect(x, y, cell, cell);
-
-      // capture wave fill
-      const dx = (xx + 0.5) - cols / 2;
-      const dy = (yy + 0.5) - rows / 2;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      const phase = (now * 1.2) % 1.6;
-      const p = Math.max(0, Math.min(1, (phase * 4.2 - d) / 2.2));
-      if (p > 0.01) {
-        ctx2.fillStyle = fill(0.12 + 0.62 * p);
-        const inset = Math.max(1, (cell * 0.10) | 0);
-        ctx2.fillRect(x + inset, y + inset, cell - inset * 2, cell - inset * 2);
-      }
-
-      // subtle grid
-      ctx2.strokeStyle = 'rgba(255,255,255,0.05)';
-      ctx2.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
-    }
-  }
-
-  // overlay FX (matching in-game cap0..cap4)
-  const R = Math.min(gw, gh) * 0.32;
-  const prog = (now * 1.2) % 1;
-  ctx2.strokeStyle = col;
-  ctx2.fillStyle = col;
-  ctx2.globalAlpha = 0.95;
-
-  if (id === 0) {
-    // Rings
-    ctx2.lineWidth = Math.max(2, cell * 0.14);
-    ctx2.beginPath();
-    ctx2.arc(cx, cy, R * (0.75 + 0.45 * prog), 0, Math.PI * 2);
-    ctx2.stroke();
-    ctx2.globalAlpha = 0.55;
-    ctx2.lineWidth = Math.max(1, cell * 0.08);
-    ctx2.beginPath();
-    ctx2.arc(cx, cy, R * (0.42 + 0.30 * prog), 0, Math.PI * 2);
-    ctx2.stroke();
-  } else if (id === 1) {
-    // Rays
-    ctx2.lineWidth = Math.max(2, cell * 0.10);
-    for (let k = 0; k < 14; k++) {
-      const a = prog * 2.5 + (k * Math.PI * 2) / 14;
-      ctx2.beginPath();
-      ctx2.moveTo(cx + Math.cos(a) * R * 0.25, cy + Math.sin(a) * R * 0.25);
-      ctx2.lineTo(cx + Math.cos(a) * R * 1.25, cy + Math.sin(a) * R * 1.25);
-      ctx2.stroke();
-    }
-  } else if (id === 2) {
-    // Diamond
-    ctx2.lineWidth = Math.max(2, cell * 0.10);
-    const rr = R * (0.85 + 0.12 * Math.sin(prog * Math.PI * 2));
-    ctx2.beginPath();
-    ctx2.moveTo(cx, cy - rr);
-    ctx2.lineTo(cx + rr, cy);
-    ctx2.lineTo(cx, cy + rr);
-    ctx2.lineTo(cx - rr, cy);
-    ctx2.closePath();
-    ctx2.stroke();
-  } else if (id === 3) {
-    // Spiral (single winding path)
-    ctx2.lineWidth = Math.max(2, cell * 0.10);
-    const rot = prog * 8.0;
-    ctx2.beginPath();
-    for (let t = 0; t <= 1.001; t += 0.045) {
-      const ang = rot + t * Math.PI * 6.5;
-      const rr = R * (0.10 + 0.92 * t);
-      const x = cx + Math.cos(ang) * rr;
-      const y = cy + Math.sin(ang) * rr;
-      if (t === 0) ctx2.moveTo(x, y);
-      else ctx2.lineTo(x, y);
-    }
-    ctx2.stroke();
-  } else {
-    // Confetti
-    const colors = [col, 'rgba(255,255,255,0.92)', 'rgba(255,215,0,0.92)', 'rgba(120,255,200,0.92)', 'rgba(180,120,255,0.92)'];
-    ctx2.globalAlpha = 0.95;
-    for (let k = 0; k < 34; k++) {
-      const seed = (k * 2654435761) >>> 0;
-      const u = (seed & 1023) / 1023;
-      const v = ((seed >>> 10) & 1023) / 1023;
-      const ang = u * Math.PI * 2 + prog * 1.0;
-      const sp = 0.25 + 0.95 * v;
-      const rr = R * (0.05 + prog * 1.45 * sp);
-      const x = cx + Math.cos(ang) * rr;
-      const y = cy + Math.sin(ang) * rr;
-      const sz = Math.max(2, (cell * (0.16 + 0.18 * ((seed >>> 20) & 3) / 3)) | 0);
-      const rot = (prog * 8.0 + u * 6.0) % (Math.PI * 2);
-      ctx2.save();
-      ctx2.translate(x, y);
-      ctx2.rotate(rot);
-      ctx2.fillStyle = colors[seed % colors.length];
-      if ((seed & 1) === 0) {
-        // diamond
-        ctx2.beginPath();
-        ctx2.moveTo(0, -sz);
-        ctx2.lineTo(sz, 0);
-        ctx2.lineTo(0, sz);
-        ctx2.lineTo(-sz, 0);
-        ctx2.closePath();
-        ctx2.fill();
-      } else {
-        ctx2.fillRect(-sz / 2, -sz / 2, sz, sz);
-      }
-      ctx2.restore();
-    }
-  }
-
-  ctx2.restore();
-}
-
-function drawMiniHead(ctx2, x, y, r, c, headId) {
-  const id = Math.max(0, Math.min(7, Number(headId) || 0));
-  ctx2.save();
-  ctx2.fillStyle = c;
-  ctx2.strokeStyle = 'rgba(0,0,0,0.35)';
-  ctx2.lineWidth = Math.max(1, r * 0.18);
-  ctx2.beginPath();
-  if (id === 0) {
-    ctx2.arc(x, y, r, 0, Math.PI * 2);
-  } else if (id === 1) {
-    ctx2.moveTo(x, y - r);
-    ctx2.lineTo(x + r, y);
-    ctx2.lineTo(x, y + r);
-    ctx2.lineTo(x - r, y);
-    ctx2.closePath();
-  } else if (id === 2) {
-    ctx2.roundRect(x - r * 0.85, y - r * 0.85, r * 1.7, r * 1.7, r * 0.35);
-  } else if (id === 3) {
-    for (let i = 0; i < 8; i++) {
-      const a = -Math.PI / 2 + (i * Math.PI) / 4;
-      const px = x + Math.cos(a) * r;
-      const py = y + Math.sin(a) * r;
-      if (i === 0) ctx2.moveTo(px, py);
-      else ctx2.lineTo(px, py);
-    }
-    ctx2.closePath();
-  } else {
-    ctx2.moveTo(x - r * 0.90, y - r * 0.65);
-    ctx2.lineTo(x + r * 0.90, y - r * 0.65);
-    ctx2.lineTo(x + r * 0.70, y + r * 0.40);
-    ctx2.lineTo(x, y + r);
-    ctx2.lineTo(x - r * 0.70, y + r * 0.40);
-    ctx2.closePath();
-  }
-  ctx2.fill();
-  ctx2.stroke();
-  ctx2.restore();
-}
-
-function drawCaptureFxPreview(ctx2, fxId, cx, cy, cell, baseC) {
-  const id = Math.max(0, Math.min(7, Number(fxId) || 0));
-  const now = performance.now() * 0.001;
-  const col = id === 0 ? 'rgba(255,215,0,0.92)' : cosmeticAccent(id, 0.92);
-  const r0 = cell * 0.55;
-  const r1 = r0 * (0.6 + 0.25 * Math.sin(now * 2.4));
-  ctx2.save();
-  ctx2.strokeStyle = col;
-  ctx2.lineWidth = Math.max(2, cell * 0.10);
-  ctx2.globalAlpha = 0.85;
-  ctx2.beginPath();
-  ctx2.arc(cx, cy, r0, 0, Math.PI * 2);
-  ctx2.stroke();
-  if (id === 0) {
-    ctx2.globalAlpha = 0.55;
-    ctx2.lineWidth = Math.max(1, cell * 0.06);
-    ctx2.beginPath();
-    ctx2.arc(cx, cy, r1, 0, Math.PI * 2);
-    ctx2.stroke();
-  } else if (id === 1) {
-    ctx2.globalAlpha = 0.75;
-    ctx2.lineWidth = Math.max(1, cell * 0.08);
-    for (let k = 0; k < 10; k++) {
-      const a = now * 1.6 + (k * Math.PI * 2) / 10;
-      ctx2.beginPath();
-      ctx2.moveTo(cx + Math.cos(a) * r0 * 0.35, cy + Math.sin(a) * r0 * 0.35);
-      ctx2.lineTo(cx + Math.cos(a) * r0 * 1.05, cy + Math.sin(a) * r0 * 1.05);
-      ctx2.stroke();
-    }
-  } else if (id === 2) {
-    ctx2.globalAlpha = 0.70;
-    ctx2.lineWidth = Math.max(2, cell * 0.08);
-    ctx2.beginPath();
-    const rr = r0 * (0.75 + 0.12 * Math.sin(now * 2.2));
-    ctx2.moveTo(cx, cy - rr);
-    ctx2.lineTo(cx + rr, cy);
-    ctx2.lineTo(cx, cy + rr);
-    ctx2.lineTo(cx - rr, cy);
-    ctx2.closePath();
-    ctx2.stroke();
-  } else if (id === 3) {
-    ctx2.globalAlpha = 0.75;
-    ctx2.lineWidth = Math.max(2, cell * 0.07);
-    const rot = now * 1.6;
-    for (let s = 0; s < 4; s++) {
-      const a0 = rot + s * (Math.PI / 2);
-      ctx2.beginPath();
-      ctx2.arc(cx, cy, r0 * 0.82, a0, a0 + Math.PI * 0.65);
-      ctx2.stroke();
-    }
-  } else {
-    ctx2.globalAlpha = 0.85;
-    for (let i = 0; i < 18; i++) {
-      const a = now * 1.9 + (i * Math.PI * 2) / 18;
-      const rr = r0 * (0.30 + 0.55 * ((i % 3) / 3));
-      const x = cx + Math.cos(a) * rr;
-      const y = cy + Math.sin(a) * rr;
-      ctx2.fillStyle = col;
-      ctx2.fillRect(x - 2, y - 2, 4, 4);
-    }
-  }
-  ctx2.restore();
-}
-
-function drawFramePreview(ctx2, frId, w, h) {
-  const fr = Math.max(0, Math.min(7, Number(frId) || 0));
-  const col = fr === 0 ? 'rgba(255,255,255,0.12)' : cosmeticAccent(fr, fr === 3 ? 0.62 : 0.70);
-  const x = 60;
-  const y = 80;
-  const rw = w - 120;
-  const rh = 110;
-  ctx2.save();
-  ctx2.fillStyle = 'rgba(0,0,0,0.22)';
-  ctx2.fillRect(x, y, rw, rh);
-  ctx2.lineWidth = 3;
-  ctx2.strokeStyle = col;
-  ctx2.strokeRect(x, y, rw, rh);
-  ctx2.fillStyle = 'rgba(255,255,255,0.90)';
-  ctx2.font = `14px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-  ctx2.fillText('1', x + 18, y + 32);
-  ctx2.fillText('PlayerName', x + 48, y + 32);
-  ctx2.fillStyle = 'rgba(255,255,255,0.72)';
-  ctx2.fillText('999', x + rw - 50, y + 32);
-  ctx2.restore();
-}
-
-function drawSegPreview(ctx2, segId, cx, cy, cell, baseC) {
-  const id = Math.max(0, Math.min(7, Number(segId) || 0));
-  ctx2.save();
-  for (let i = 0; i < 8; i++) {
-    const x = cx - i * cell * 0.55;
-    const y = cy + Math.sin(i * 0.7) * cell * 0.08;
-    drawPreviewSegment(ctx2, x, y, cell * 0.24, baseC, id, i);
-  }
-  ctx2.restore();
 }
 
 function wsSend(type, data) {
@@ -2098,6 +2463,11 @@ let cosmeticsPrices = null;
 let cosmeticsPreviewRaf = 0;
 
 let cosmeticsPreviewLastAt = 0;
+
+// Превью реагирует на наведение/фокус карточки; по уходу курсора возвращается
+// к выбранному варианту.
+let cosmeticsHoverId = null;
+let cosmeticsHoverCat = null;
 
 let pendingCosmeticsOp = null;
 let cosmeticsOpTimer = 0;
@@ -6595,6 +6965,8 @@ function hideCosmeticsOverlay() {
   overlayManager.close('cosmetics');
   cosmeticsOpClear();
   setCosmeticsStatus('', '');
+  cosmeticsHoverId = null;
+  cosmeticsHoverCat = null;
   syncOverlayUiState();
   if (cosmeticsPreviewRaf) {
     try {
@@ -6612,7 +6984,7 @@ function scheduleCosmeticsPreviewAnim() {
     const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
     if (!reduceMotion) {
       const now = performance.now();
-      if (!cosmeticsPreviewLastAt || now - cosmeticsPreviewLastAt > 70) {
+      if (!cosmeticsPreviewLastAt || now - cosmeticsPreviewLastAt > 33) {
         cosmeticsPreviewLastAt = now;
         renderCosmeticsPreview();
       }
@@ -6723,51 +7095,36 @@ function cosmeticsLabel(cat) {
 function cosmeticsVariantName(cat, id) {
   const i = Math.max(0, Math.min(COSMETICS_MAX_ID, Number(id) || 0));
   const en = lang === 'en';
+  // Названия не повторяются между категориями: раньше «Лазурь/Алая/Золото/Аметист»
+  // стояли и в рамках, и в плашках, отчего покупка ощущалась как «купил цвет».
   if (cat === 'capturefx') {
     return (en
-      ? ['Rings', 'Beam', 'Diamond', 'Spiral', 'Confetti', 'Nova', 'Vortex', 'Prism']
-      : ['Кольца', 'Луч', 'Ромб', 'Спираль', 'Конфетти', 'Нова', 'Вихрь', 'Призма'])[i];
+      ? ['Rings', 'Rays', 'Crystal', 'Spiral', 'Confetti', 'Magma', 'Vortex', 'Shards']
+      : ['Кольца', 'Лучи', 'Кристалл', 'Спираль', 'Конфетти', 'Магма', 'Вихрь', 'Осколки'])[i];
   }
   if (cat === 'seg') {
     return (en
-      ? ['Classic', 'Neon', 'Stripes', 'Plasma', 'Sparks', 'Circuit', 'Frost', 'Void']
-      : ['Классика', 'Неон', 'Полосы', 'Плазма', 'Искры', 'Схема', 'Иней', 'Бездна'])[i];
+      ? ['Classic', 'Neon', 'Stripes', 'Plasma', 'Sparks', 'Circuit', 'Mosaic', 'Void']
+      : ['Классика', 'Неон', 'Полосы', 'Плазма', 'Искры', 'Схема', 'Мозаика', 'Бездна'])[i];
   }
   if (cat === 'frame') {
+    // Семейство «металлы и материалы» — совпадает с классами .frame0..7 в CSS.
     return (en
-      ? ['Steel', 'Azure', 'Crimson', 'Gold', 'Amethyst', 'Emerald', 'Ember', 'Prism']
-      : ['Сталь', 'Лазурь', 'Алая', 'Золото', 'Аметист', 'Изумруд', 'Жар', 'Призма'])[i];
+      ? ['Steel', 'Copper', 'Chrome', 'Emerald', 'Obsidian', 'Platinum', 'Brass', 'Carbon']
+      : ['Сталь', 'Медь', 'Хром', 'Изумруд', 'Обсидиан', 'Платина', 'Латунь', 'Карбон'])[i];
   }
   if (cat === 'nameplate') {
+    // Семейство «формы плашки» — различие в геометрии, не в цвете.
     return (en
-      ? ['Dark', 'Azure', 'Crimson', 'Gold', 'Amethyst', 'Emerald', 'Ember', 'Prism']
-      : ['Тёмная', 'Лазурь', 'Алая', 'Золото', 'Аметист', 'Изумруд', 'Жар', 'Призма'])[i];
+      ? ['Capsule', 'Bar', 'Bevel', 'Scroll', 'Terminal', 'Engrave', 'Gleam', 'Chevron']
+      : ['Капсула', 'Планка', 'Скос', 'Свиток', 'Терминал', 'Гравюра', 'Блик', 'Шеврон'])[i];
   }
   if (cat === 'head') {
     return (en
-      ? ['Classic', 'Diamond', 'Square', 'Octagon', 'Shield', 'Star', 'Arrow', 'Crown']
-      : ['Классика', 'Ромб', 'Квадрат', 'Октагон', 'Щит', 'Звезда', 'Стрела', 'Корона'])[i];
+      ? ['Orb', 'Rhombus', 'Cube', 'Ring', 'Shield', 'Arrow', 'Eclipse', 'Star']
+      : ['Орб', 'Ромб', 'Куб', 'Кольцо', 'Щит', 'Стрела', 'Затмение', 'Звезда'])[i];
   }
-  return `#${i + 1}`;
-}
-
-// Акцентный цвет варианта косметики. Единая палитра для превью и игры.
-const COSMETIC_ACCENT_RGB = [
-  [255, 255, 255],
-  [96, 165, 250],
-  [255, 45, 85],
-  [255, 215, 0],
-  [170, 120, 255],
-  [0, 230, 180],
-  [255, 140, 40],
-  [255, 90, 200]
-];
-
-function cosmeticAccent(id, alpha) {
-  const i = Math.max(0, Math.min(COSMETICS_MAX_ID, Number(id) || 0));
-  const [r, g, b] = COSMETIC_ACCENT_RGB[i] || COSMETIC_ACCENT_RGB[0];
-  const a = Math.max(0, Math.min(1, Number(alpha ?? 0.92)));
-  return `rgba(${r},${g},${b},${a})`;
+  return String(i + 1);
 }
 
 function cosmeticsSetFilter(next) {
@@ -7084,16 +7441,30 @@ function syncCosmeticsUi() {
       card.classList.toggle('isOwned', owned);
       card.classList.toggle('isEquipped', owned && equipped);
       card.classList.toggle('isLocked', !owned && balance < price);
+      card.tabIndex = 0;
       card.addEventListener('click', () => {
         cosmeticsSelId = id;
+        cosmeticsHoverId = null;
+        cosmeticsHoverCat = null;
         syncCosmeticsUi();
+      });
+      // Превью следует за наведением и за фокусом с клавиатуры.
+      const catNow = cosmeticsCat;
+      card.addEventListener('mouseenter', () => cosmeticsSetHover(catNow, id));
+      card.addEventListener('focus', () => cosmeticsSetHover(catNow, id));
+      card.addEventListener('mouseleave', () => cosmeticsSetHover(null, null));
+      card.addEventListener('blur', () => cosmeticsSetHover(null, null));
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          cosmeticsSelId = id;
+          syncCosmeticsUi();
+        }
       });
 
       const prev = document.createElement('div');
       prev.className = 'cosmeticsItemPreview';
       const cvs = document.createElement('canvas');
-      cvs.width = 44;
-      cvs.height = 44;
       prev.appendChild(cvs);
       drawMiniCosmeticPreview(cvs, cosmeticsCat, id);
 
@@ -7123,6 +7494,12 @@ function syncCosmeticsUi() {
         sub.textContent = equipped ? t('cosmetics.item_equipped') : owned ? t('cosmetics.item_owned') : t('cosmetics.item_not_owned');
       }
       left.appendChild(titleEl);
+      // Короткое описание: где именно предмет виден. Закрывает претензию
+      // «не понимаю, за что плачу».
+      const where = document.createElement('div');
+      where.className = 'cosmeticsItemWhere';
+      where.textContent = t(`cosmetics.where_${cosmeticsCat}`);
+      left.appendChild(where);
       left.appendChild(sub);
 
       // D11: прогресс-бар накопления на заблокированном товаре.
@@ -7251,22 +7628,52 @@ function syncCosmeticsUi() {
   scheduleCosmeticsPreviewAnim();
 }
 
+/* --------------------------------------------------------------------------
+   Большое превью магазина. Ни одной собственной функции отрисовки предметов:
+   всё рисуют drawSegTile / drawHead / drawNamePlate / drawCaptureFx / drawFrameRow,
+   то есть ровно то же, что и игровой цикл.
+   -------------------------------------------------------------------------- */
+
+// Какой id показывать: наведённая карточка важнее выбранной, при уходе курсора
+// превью возвращается к выбранному варианту.
+function cosmeticsPreviewId() {
+  if (cosmeticsHoverId != null && cosmeticsHoverCat === cosmeticsCat) return cosClampId(cosmeticsHoverId);
+  return cosClampId(cosmeticsSelId);
+}
+
+function cosmeticsSetHover(cat, id) {
+  const nextCat = id == null ? null : String(cat);
+  const nextId = id == null ? null : cosClampId(id);
+  if (cosmeticsHoverCat === nextCat && cosmeticsHoverId === nextId) return;
+  cosmeticsHoverCat = nextCat;
+  cosmeticsHoverId = nextId;
+  renderCosmeticsPreview();
+}
+
 function renderCosmeticsPreview() {
   if (!cosmeticsPreview) return;
-  const ctx2 = cosmeticsPreview.getContext('2d');
+  const cssW = Math.max(200, Math.round(cosmeticsPreview.clientWidth || 420));
+  const cssH = Math.max(140, Math.round(cosmeticsPreview.clientHeight || 260));
+  const ctx2 = cosPrepCanvas(cosmeticsPreview, cssW, cssH);
   if (!ctx2) return;
-  const w = cosmeticsPreview.width;
-  const h = cosmeticsPreview.height;
-  ctx2.clearRect(0, 0, w, h);
+  const w = cssW;
+  const h = cssH;
 
   const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-  const now = reduceMotion ? 0 : performance.now() * 0.001;
+  const now = reduceMotion ? 0 : performance.now();
 
   const baseC = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
+  const selId = cosmeticsPreviewId();
+
+  const setHint = () => {
+    if (!cosmeticsHintEl) return;
+    const where = t(`cosmetics.where_${cosmeticsCat}`);
+    cosmeticsHintEl.textContent = `${cosmeticsLabel(cosmeticsCat)}: ${cosmeticsVariantName(cosmeticsCat, selId)} — ${where}`;
+  };
 
   if (cosmeticsCat === 'frame') {
-    drawCosmeticsFramesScene(ctx2, w, h, cosmeticsSelId);
-    if (cosmeticsHintEl) cosmeticsHintEl.textContent = `${cosmeticsLabel(cosmeticsCat)}: ${cosmeticsVariantName(cosmeticsCat, cosmeticsSelId)}`;
+    drawCosmeticsFramesScene(ctx2, w, h, selId);
+    setHint();
     return;
   }
 
@@ -7278,58 +7685,55 @@ function renderCosmeticsPreview() {
   drawCosmeticsFieldBackdrop(ctx2, fx, fy, fw, fh);
 
   const cell = Math.min(fw, fh) * 0.12;
+  const scell = Math.max(14, Math.round(cell * 0.85));
   const cx = fx + fw * 0.40;
-  const cy = fy + fh * 0.64;
+  const cy = fy + fh * 0.62;
 
-  const headId = cosmeticsCat === 'head' ? cosmeticsSelId : youCosEqHead;
-  const segId = cosmeticsCat === 'seg' ? cosmeticsSelId : youCosEqSeg;
-  const nameId = cosmeticsCat === 'nameplate' ? cosmeticsSelId : youCosEqNameplate;
-  const capId = cosmeticsCat === 'capturefx' ? cosmeticsSelId : youCosEqCaptureFx;
+  const headId = cosmeticsCat === 'head' ? selId : youCosEqHead;
+  const segId = cosmeticsCat === 'seg' ? selId : youCosEqSeg;
+  const nameId = cosmeticsCat === 'nameplate' ? selId : youCosEqNameplate;
+  const capId = cosmeticsCat === 'capturefx' ? selId : youCosEqCaptureFx;
+  const plateFont = Math.max(11, Math.round(scell * 0.62));
 
   const zone = {
     x: Math.round(fx + fw * 0.58),
-    y: Math.round(fy + fh * 0.48),
+    y: Math.round(fy + fh * 0.42),
     w: Math.round(cell * 3.2),
     h: Math.round(cell * 3.2)
   };
 
-  if (cosmeticsCat === 'seg') {
-    drawCosmeticsSegmentsZone(ctx2, zone, you, segId, Math.max(14, Math.round(cell * 0.85)));
-  } else {
-    drawCosmeticsZone(ctx2, zone, you, 0.58);
-  }
-
   if (cosmeticsCat === 'capturefx') {
-    const reduce = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-    const tt = reduce ? 0 : performance.now() * 0.001;
-    const period = 4.2;
-    const p = (tt % period) / period;
+    // Зацикленный сценарий захвата. Раньше здесь была рассинхронизация: фаза
+    // эффекта считалась от performance.now() независимо от фазы сцены, поэтому
+    // в момент показа вспышка чаще всего уже догорела (alpha ≈ 0) и покупатель
+    // видел пустое поле. Теперь фаза эффекта — часть одного цикла.
+    const period = 2400;
+    const p = reduceMotion ? 0.60 : (now % period) / period;
 
-    const approach = Math.max(0, Math.min(1, p / 0.36));
-    const loopP = p < 0.36 ? 0 : Math.max(0, Math.min(1, (p - 0.36) / 0.24));
-    const fillP = p < 0.60 ? 0 : Math.max(0, Math.min(1, (p - 0.60) / 0.30));
+    const approach = Math.max(0, Math.min(1, p / 0.30));
+    const loopP = p < 0.30 ? 0 : Math.max(0, Math.min(1, (p - 0.30) / 0.22));
+    // Вспышка занимает ровно 650 мс — столько же, сколько живёт бурст в игре.
+    const burstStart = 0.52;
+    const burstLen = 650 / period;
+    const burstP = p < burstStart ? -1 : (p - burstStart) / burstLen;
+    const showBurst = burstP >= 0 && burstP <= 1;
+    const filled = p >= burstStart;
 
-    const headX = cx + (zone.x - cx - cell * 0.8) * (0.15 + 0.85 * approach);
-    const headY = cy + Math.sin(tt * 3.2) * cell * 0.10;
-
-    const newZone = {
-      x: zone.x - Math.round(zone.w * 0.42),
-      y: zone.y + Math.round(zone.h * 0.18),
-      w: Math.round(zone.w * 0.42 * fillP),
-      h: Math.round(zone.h * 0.64)
+    const loopRect = {
+      x: zone.x - Math.round(zone.w * 0.44),
+      y: zone.y + Math.round(zone.h * 0.16),
+      w: Math.round(zone.w * 0.44),
+      h: Math.round(zone.h * 0.66)
     };
-    if (newZone.w > 1) drawCosmeticsZone(ctx2, newZone, you, 0.58);
 
-    if (loopP > 0 && fillP <= 0) {
-      const loopRect = {
-        x: zone.x - Math.round(zone.w * 0.42),
-        y: zone.y + Math.round(zone.h * 0.18),
-        w: Math.round(zone.w * 0.42),
-        h: Math.round(zone.h * 0.64)
-      };
-      const scell = Math.max(14, Math.round(cell * 0.85));
-      const base = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
-      const per = Math.max(1, Math.round((loopRect.w + loopRect.h) * 2 / scell));
+    drawCosmeticsZone(ctx2, zone, you, 0.58);
+    if (filled) drawCosmeticsZone(ctx2, loopRect, you, 0.58);
+
+    const headX = cx + (loopRect.x - cx) * (0.15 + 0.85 * approach);
+    const headY = cy + (reduceMotion ? 0 : Math.sin(now * 0.0032) * cell * 0.10);
+
+    if (!filled && loopP > 0) {
+      const per = Math.max(1, Math.round(((loopRect.w + loopRect.h) * 2) / scell));
       const k = Math.floor(loopP * per);
       const pts = [];
       for (let x = loopRect.x; x <= loopRect.x + loopRect.w; x += scell) pts.push({ x, y: loopRect.y });
@@ -7337,459 +7741,68 @@ function renderCosmeticsPreview() {
       for (let x = loopRect.x + loopRect.w - scell; x >= loopRect.x; x -= scell) pts.push({ x, y: loopRect.y + loopRect.h });
       for (let y = loopRect.y + loopRect.h - scell; y >= loopRect.y + scell; y -= scell) pts.push({ x: loopRect.x, y });
       for (let i = 0; i < Math.min(pts.length, k); i++) {
-        const pt = pts[i];
-        drawGameSegTilePreview(ctx2, pt.x, pt.y, scell, base, youCosEqSeg, i + 3, 0.85);
+        drawSegTile(ctx2, pts[i].x, pts[i].y, scell, baseC, youCosEqSeg, i + 3, 0.85, now);
       }
     }
 
-    drawCosmeticsSnake(ctx2, headX, headY, Math.max(14, Math.round(cell * 0.85)), you, youCosEqSeg, youCosEqHead, baseC);
+    drawCosmeticsSnake(ctx2, headX, headY, scell, you, youCosEqSeg, youCosEqHead, baseC);
+    drawNamePlate(ctx2, t('cosmetics.balance_you'), headX, headY - scell * 0.85, baseC, youCosEqNameplate, 0.95, plateFont, now);
 
-    drawGameNameplatePreview(ctx2, t('cosmetics.balance_you'), headX + cell * 0.8, headY - cell * 0.85, 0.95, youCosEqNameplate);
-
-    if (fillP > 0) {
-      const fxX = zone.x + zone.w * 0.02;
-      const fxY = zone.y + zone.h * 0.55;
-      drawGameCaptureFxPreview(ctx2, capId, fxX, fxY, Math.max(14, Math.round(cell * 0.85)));
+    if (showBurst) {
+      const fxX = loopRect.x + loopRect.w / 2;
+      const fxY = loopRect.y + loopRect.h / 2;
+      // В магазине эффект обязан проигрываться всегда — независимо от того,
+      // выключил ли игрок эффекты в настройках (fxEnabled гасит только игру).
+      drawCaptureFx(ctx2, fxX, fxY, Math.max(18, Math.round(scell * 1.4)), baseC, capId, burstP);
     }
 
-    if (cosmeticsHintEl) cosmeticsHintEl.textContent = `${cosmeticsLabel(cosmeticsCat)}: ${cosmeticsVariantName(cosmeticsCat, cosmeticsSelId)}`;
+    setHint();
     return;
   }
 
-  drawCosmeticsSnake(ctx2, cx, cy, Math.max(14, Math.round(cell * 0.85)), you, cosmeticsCat === 'seg' ? segId : youCosEqSeg, cosmeticsCat === 'head' ? headId : youCosEqHead, baseC);
-  drawGameNameplatePreview(ctx2, t('cosmetics.balance_you'), cx + cell * 0.65, cy - cell * 0.80, 0.95, cosmeticsCat === 'nameplate' ? nameId : youCosEqNameplate);
+  // Территория игрока всегда рисуется его сплошным цветом: стиль следа в игре
+  // применяется ТОЛЬКО к временному следу вне территории, и превью обязано
+  // показывать ровно это, а не заливать стилем всю зону.
+  drawCosmeticsZone(ctx2, zone, you, 0.58);
 
+  drawCosmeticsSnake(ctx2, cx, cy, scell, you, segId, headId, baseC, cosmeticsCat === 'seg' ? 9 : 6);
+  drawNamePlate(ctx2, t('cosmetics.balance_you'), cx, cy - scell * 0.95, baseC, nameId, 0.95, plateFont, now);
+
+  // Указатель на то место сцены, которое меняет выбранный предмет.
+  ctx2.save();
+  ctx2.strokeStyle = 'rgba(96,165,250,0.55)';
+  ctx2.setLineDash([5, 4]);
+  ctx2.lineWidth = 2;
   if (cosmeticsCat === 'head') {
-    ctx2.save();
-    ctx2.strokeStyle = 'rgba(96,165,250,0.55)';
-    ctx2.lineWidth = 2;
     ctx2.beginPath();
-    ctx2.arc(cx, cy, cell * 0.55, 0, Math.PI * 2);
+    ctx2.arc(cx, cy, scell * 0.78, 0, Math.PI * 2);
     ctx2.stroke();
-    ctx2.restore();
   } else if (cosmeticsCat === 'nameplate') {
-    ctx2.save();
-    ctx2.strokeStyle = 'rgba(96,165,250,0.55)';
-    ctx2.lineWidth = 2;
-    ctx2.strokeRect(cx + cell * 0.65 - cell * 1.05 + 0.5, cy - cell * 0.80 - 24 + 0.5, cell * 2.1 - 1, 24 - 1);
-    ctx2.restore();
-  }
-
-  if (cosmeticsHintEl) cosmeticsHintEl.textContent = `${cosmeticsLabel(cosmeticsCat)}: ${cosmeticsVariantName(cosmeticsCat, cosmeticsSelId)}`;
-}
-
-function drawPreviewSegment(ctx2, x, y, r, c, segId, i) {
-  ctx2.save();
-  const sid = Math.max(0, Math.min(7, Number(segId) || 0));
-  if (sid === 1) {
-    ctx2.shadowColor = c;
-    ctx2.shadowBlur = 16;
-    ctx2.fillStyle = c;
-    ctx2.beginPath();
-    ctx2.arc(x, y, r, 0, Math.PI * 2);
-    ctx2.fill();
-    ctx2.shadowBlur = 0;
-    ctx2.strokeStyle = 'rgba(255,255,255,0.65)';
-    ctx2.lineWidth = Math.max(1, r * 0.22);
-    ctx2.beginPath();
-    ctx2.arc(x, y, r * 0.78, 0, Math.PI * 2);
-    ctx2.stroke();
-  } else if (sid === 2) {
-    ctx2.fillStyle = c;
-    ctx2.beginPath();
-    ctx2.arc(x, y, r, 0, Math.PI * 2);
-    ctx2.fill();
-    ctx2.globalAlpha = 0.55;
-    ctx2.save();
-    ctx2.beginPath();
-    ctx2.arc(x, y, r, 0, Math.PI * 2);
-    ctx2.clip();
-    ctx2.strokeStyle = 'rgba(0,0,0,0.55)';
-    ctx2.lineWidth = Math.max(1, r * 0.30);
-    ctx2.beginPath();
-    ctx2.moveTo(x - r * 1.2, y - r * 0.2);
-    ctx2.lineTo(x + r * 1.2, y + r * 1.0);
-    ctx2.stroke();
-    ctx2.restore();
-  } else if (sid === 3) {
-    const g = ctx2.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.2, x, y, r);
-    g.addColorStop(0, 'rgba(255,255,255,0.85)');
-    g.addColorStop(0.5, c);
-    g.addColorStop(1, 'rgba(0,0,0,0.35)');
-    ctx2.fillStyle = g;
-    ctx2.beginPath();
-    ctx2.arc(x, y, r, 0, Math.PI * 2);
-    ctx2.fill();
-  } else if (sid === 4) {
-    ctx2.fillStyle = c;
-    ctx2.beginPath();
-    ctx2.arc(x, y, r, 0, Math.PI * 2);
-    ctx2.fill();
-    ctx2.strokeStyle = 'rgba(255,255,255,0.35)';
-    ctx2.lineWidth = Math.max(1, r * 0.18);
-    ctx2.beginPath();
-    ctx2.arc(x, y, r, 0, Math.PI * 2);
-    ctx2.stroke();
-    ctx2.fillStyle = 'rgba(255,255,255,0.75)';
-    const a = (i * 1.7) % (Math.PI * 2);
-    ctx2.fillRect(x + Math.cos(a) * r * 0.55 - 1, y + Math.sin(a) * r * 0.55 - 1, 2, 2);
-  } else {
-    ctx2.fillStyle = c;
-    ctx2.beginPath();
-    ctx2.arc(x, y, r, 0, Math.PI * 2);
-    ctx2.fill();
+    const ph = Math.round(plateFont * 1.5);
+    ctx2.strokeRect(cx - scell * 1.9, cy - scell * 0.95 - ph - 3.5, scell * 3.8, ph + 7);
+  } else if (cosmeticsCat === 'seg') {
+    ctx2.strokeRect(cx - scell * 6.4, cy - scell * 0.72, scell * 6.0, scell * 1.44);
   }
   ctx2.restore();
+
+  setHint();
 }
 
-function drawPreviewHead(ctx2, x, y, r, c, headId) {
-  ctx2.save();
-  ctx2.fillStyle = c;
-  ctx2.strokeStyle = 'rgba(0,0,0,0.35)';
-  ctx2.lineWidth = Math.max(1, r * 0.22);
-  ctx2.shadowColor = c;
-  ctx2.shadowBlur = headId === 4 ? 16 : 10;
-  ctx2.beginPath();
-  if (headId === 0) {
-    ctx2.arc(x, y, r, 0, Math.PI * 2);
-  } else if (headId === 1) {
-    ctx2.moveTo(x, y - r);
-    ctx2.lineTo(x + r, y);
-    ctx2.lineTo(x, y + r);
-    ctx2.lineTo(x - r, y);
-    ctx2.closePath();
-  } else if (headId === 2) {
-    ctx2.roundRect(x - r * 0.85, y - r * 0.85, r * 1.7, r * 1.7, r * 0.35);
-  } else if (headId === 3) {
-    for (let i = 0; i < 8; i++) {
-      const a = -Math.PI / 2 + (i * Math.PI) / 4;
-      const px = x + Math.cos(a) * r;
-      const py = y + Math.sin(a) * r;
-      if (i === 0) ctx2.moveTo(px, py);
-      else ctx2.lineTo(px, py);
-    }
-    ctx2.closePath();
-  } else {
-    ctx2.moveTo(x - r * 0.90, y - r * 0.65);
-    ctx2.lineTo(x + r * 0.90, y - r * 0.65);
-    ctx2.lineTo(x + r * 0.70, y + r * 0.40);
-    ctx2.lineTo(x, y + r);
-    ctx2.lineTo(x - r * 0.70, y + r * 0.40);
-    ctx2.closePath();
-  }
-  ctx2.fill();
-  ctx2.stroke();
-  ctx2.restore();
-}
-
-function drawGameNameplatePreview(ctx2, label, x, y, alpha, nameplateId) {
-  if (!ctx2 || !label) return;
-  const t = String(label);
-  ctx2.save();
-  ctx2.font = `14px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-  const m = ctx2.measureText(t);
-  const padX = 10;
-  const w = Math.ceil(m.width + padX * 2);
-  const h = 22;
-  const r = 10;
-  const px = Math.round(x - w / 2);
-  const py = Math.round(y - h);
-
-  const np = Math.max(0, Math.min(7, Number(nameplateId) || 0));
-  ctx2.globalAlpha = alpha;
-  if (np === 0) {
-    ctx2.fillStyle = 'rgba(0,0,0,0.42)';
-    ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
-  } else {
-    ctx2.fillStyle = np === 1 ? 'rgba(0,0,0,0.30)' : cosmeticAccent(np, 0.12);
-    ctx2.strokeStyle = cosmeticAccent(np, 0.38);
-  }
-  ctx2.lineWidth = 1;
-  ctx2.beginPath();
-  ctx2.moveTo(px + r, py);
-  ctx2.arcTo(px + w, py, px + w, py + h, r);
-  ctx2.arcTo(px + w, py + h, px, py + h, r);
-  ctx2.arcTo(px, py + h, px, py, r);
-  ctx2.arcTo(px, py, px + w, py, r);
-  ctx2.closePath();
-  ctx2.fill();
-  ctx2.stroke();
-  ctx2.globalAlpha = Math.min(1, alpha + 0.18);
-  ctx2.fillStyle = 'rgba(255,255,255,0.92)';
-  ctx2.textAlign = 'center';
-  ctx2.textBaseline = 'middle';
-  ctx2.fillText(t, x, py + h / 2 + 0.5);
-  ctx2.restore();
-}
-
-function drawGameHeadPreview(ctx2, x, y, cell, c, headId) {
-  const id = Math.max(0, Math.min(7, Number(headId) || 0));
-  ctx2.save();
-  ctx2.fillStyle = c;
-  ctx2.strokeStyle = 'rgba(0,0,0,0.35)';
-  ctx2.lineWidth = Math.max(1, cell * 0.06);
-  ctx2.beginPath();
-  if (id === 0) {
-    ctx2.arc(x, y, cell * 0.34, 0, Math.PI * 2);
-  } else if (id === 1) {
-    const r = cell * 0.38;
-    ctx2.moveTo(x, y - r);
-    ctx2.lineTo(x + r, y);
-    ctx2.lineTo(x, y + r);
-    ctx2.lineTo(x - r, y);
-    ctx2.closePath();
-  } else if (id === 2) {
-    ctx2.roundRect(x - cell * 0.32, y - cell * 0.32, cell * 0.64, cell * 0.64, cell * 0.14);
-  } else if (id === 3) {
-    const r = cell * 0.36;
-    for (let i = 0; i < 8; i++) {
-      const a = -Math.PI / 2 + (i * Math.PI) / 4;
-      const px = x + Math.cos(a) * r;
-      const py = y + Math.sin(a) * r;
-      if (i === 0) ctx2.moveTo(px, py);
-      else ctx2.lineTo(px, py);
-    }
-    ctx2.closePath();
-  } else {
-    const r = cell * 0.36;
-    ctx2.moveTo(x - r * 0.95, y - r * 0.70);
-    ctx2.lineTo(x + r * 0.95, y - r * 0.70);
-    ctx2.lineTo(x + r * 0.75, y + r * 0.40);
-    ctx2.lineTo(x, y + r);
-    ctx2.lineTo(x - r * 0.75, y + r * 0.40);
-    ctx2.closePath();
-  }
-  ctx2.fill();
-  ctx2.stroke();
-  ctx2.restore();
-
-  const dx = 1;
-  const dy = 0;
-  const noseX = x + dx * cell * 0.26;
-  const noseY = y + dy * cell * 0.26;
-  const noseW = cell * 0.18;
-
-  ctx2.save();
-  ctx2.fillStyle = 'rgba(255,255,255,0.88)';
-  ctx2.shadowColor = 'rgba(0,0,0,0.35)';
-  ctx2.shadowBlur = 6;
-  ctx2.beginPath();
-  ctx2.moveTo(noseX, noseY);
-  ctx2.lineTo(noseX - dy * noseW, noseY + dx * noseW);
-  ctx2.lineTo(noseX + dy * noseW, noseY - dx * noseW);
-  ctx2.closePath();
-  ctx2.fill();
-  ctx2.restore();
-}
-
-function drawGameTrailPreview(ctx2, x0, y0, cell, ownerId, segId) {
-  const nowFrame = performance.now();
+function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, headColor, tileCount) {
   const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
-  for (let i = 0; i < 10; i++) {
-    const px = x0 - i * cell;
-    const py = y0 + Math.sin(i * 0.7 + nowFrame * 0.002) * cell * 0.06;
-    const a = 0.85;
-    drawGameSegTilePreview(ctx2, px, py, cell, base, segId, i, a);
-  }
-}
-
-function drawGameSegTilePreview(ctx2, px, py, cell, baseHsl, segId, seed, alpha) {
-  const id = Math.max(0, Math.min(7, Number(segId) || 0));
-  const nowFrame = performance.now();
-  const rgb = hslToRgb(baseHsl);
-  const fill = (a) => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
-  const a = Math.max(0, Math.min(1, Number(alpha) || 0));
-
-  if (id === 1) {
-    ctx2.save();
-    ctx2.shadowColor = baseHsl;
-    ctx2.shadowBlur = Math.max(6, cell * 0.55);
-    ctx2.fillStyle = fill(a);
-    ctx2.fillRect(px + 1, py + 1, cell - 2, cell - 2);
-    ctx2.restore();
-  } else if (id === 2) {
-    ctx2.save();
-    ctx2.fillStyle = fill(a * 0.92);
-    ctx2.fillRect(px + 1, py + 1, cell - 2, cell - 2);
-    ctx2.globalAlpha = 0.45;
-    ctx2.beginPath();
-    ctx2.rect(px + 1, py + 1, cell - 2, cell - 2);
-    ctx2.clip();
-    ctx2.strokeStyle = 'rgba(0,0,0,0.55)';
-    ctx2.lineWidth = Math.max(2, cell * 0.10);
-    const step = Math.max(6, (cell * 0.55) | 0);
-    for (let k = -cell; k <= cell * 2; k += step) {
-      ctx2.beginPath();
-      ctx2.moveTo(px + k, py - 2);
-      ctx2.lineTo(px + k + cell, py + cell + 2);
-      ctx2.stroke();
-    }
-    ctx2.restore();
-  } else if (id === 3) {
-    const tt = nowFrame * 0.004 + Number(seed || 0) * 0.12;
-    const wv = 0.5 + 0.5 * Math.sin(tt);
-    const g = ctx2.createLinearGradient(px, py, px + cell, py + cell);
-    g.addColorStop(0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${Math.min(1, a)})`);
-    g.addColorStop(0.5, `rgba(255,255,255,${0.18 * a + 0.10 * wv})`);
-    g.addColorStop(1, `rgba(0,0,0,${0.22 + 0.18 * (1 - wv)})`);
-    ctx2.fillStyle = g;
-    ctx2.fillRect(px + 1, py + 1, cell - 2, cell - 2);
-    ctx2.save();
-    ctx2.globalAlpha = 0.55 * a;
-    ctx2.strokeStyle = 'rgba(255,255,255,0.22)';
-    ctx2.lineWidth = Math.max(1, cell * 0.06);
-    ctx2.strokeRect(px + 1, py + 1, cell - 2, cell - 2);
-    ctx2.restore();
-  } else if (id === 4) {
-    ctx2.fillStyle = fill(a * 0.92);
-    ctx2.fillRect(px + 1, py + 1, cell - 2, cell - 2);
-    ctx2.save();
-    const h = ((Number(seed || 0) * 73856093) ^ ((nowFrame / 90) | 0)) >>> 0;
-    const sx = px + 3 + (h % Math.max(1, cell - 8));
-    const sy = py + 3 + ((h >>> 8) % Math.max(1, cell - 8));
-    const sz = 1 + ((h >>> 16) % 2);
-    ctx2.globalAlpha = 0.85;
-    ctx2.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx2.fillRect(sx, sy, sz + 1, sz + 1);
-    ctx2.globalAlpha = 0.35;
-    ctx2.strokeStyle = 'rgba(255,255,255,0.45)';
-    ctx2.lineWidth = Math.max(1, cell * 0.06);
-    ctx2.strokeRect(px + 1, py + 1, cell - 2, cell - 2);
-    ctx2.restore();
-  } else {
-    ctx2.fillStyle = fill(a);
-    ctx2.fillRect(px + 1, py + 1, cell - 2, cell - 2);
-  }
-}
-
-function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, headColor) {
-  const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
-  const segBase = base;
-  const c = headColor || segBase;
+  const c = headColor || base;
   const scell = Math.max(14, Math.round(cell));
-  const tiles = 6;
+  const now = performance.now();
+  const tiles = Math.max(3, Math.min(12, Number(tileCount) || 6));
   const startX = headX - scell * 0.85;
   for (let i = 0; i < tiles; i++) {
-    const px = startX - i * scell;
-    const py = headY;
-    drawGameSegTilePreview(ctx2, px - scell / 2, py - scell / 2, scell, segBase, segId, i + 17, 0.88);
+    drawSegTile(ctx2, startX - i * scell - scell / 2, headY - scell / 2, scell, base, segId, i + 17, 0.88, now);
   }
-  drawGameHeadPreview(ctx2, headX, headY, scell, c, headId);
+  drawHead(ctx2, headX, headY, scell, c, headId, 1, 0, now);
 }
 
-function drawGameCaptureFxPreview(ctx2, fxId, cx, cy, cell) {
-  const capId = Math.max(0, Math.min(7, Number(fxId) || 0));
-  const p = (performance.now() * 0.0012) % 1;
-  const base = cell * 1.05;
-  const r = base * (0.35 + 1.25 * p);
-  const a = (1 - p) * 0.92;
-
-  let col = 'rgba(255,215,0,0.92)';
-  if (capId === 1) col = 'rgba(96,165,250,0.92)';
-  else if (capId === 2) col = 'rgba(255,45,85,0.92)';
-  else if (capId === 3) col = 'rgba(170,120,255,0.92)';
-  else if (capId === 4) col = 'rgba(0,255,255,0.92)';
-
-  ctx2.save();
-  ctx2.globalAlpha = a;
-  ctx2.strokeStyle = col;
-  ctx2.lineWidth = Math.max(1, cell * 0.10);
-
-  if (capId === 0) {
-    ctx2.beginPath();
-    ctx2.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx2.stroke();
-    ctx2.globalAlpha = a * 0.55;
-    ctx2.lineWidth = Math.max(1, cell * 0.06);
-    ctx2.beginPath();
-    ctx2.arc(cx, cy, r * 0.62, 0, Math.PI * 2);
-    ctx2.stroke();
-  } else if (capId === 1) {
-    ctx2.lineWidth = Math.max(2, cell * 0.08);
-    for (let k = 0; k < 12; k++) {
-      const ang = p * 2.4 + (k * Math.PI * 2) / 12;
-      ctx2.beginPath();
-      ctx2.moveTo(cx + Math.cos(ang) * r * 0.35, cy + Math.sin(ang) * r * 0.35);
-      ctx2.lineTo(cx + Math.cos(ang) * r * 1.10, cy + Math.sin(ang) * r * 1.10);
-      ctx2.stroke();
-    }
-  } else if (capId === 2) {
-    ctx2.lineWidth = Math.max(2, cell * 0.08);
-    const rr = r * (0.85 + 0.10 * Math.sin(p * Math.PI * 2));
-    ctx2.beginPath();
-    ctx2.moveTo(cx, cy - rr);
-    ctx2.lineTo(cx + rr, cy);
-    ctx2.lineTo(cx, cy + rr);
-    ctx2.lineTo(cx - rr, cy);
-    ctx2.closePath();
-    ctx2.stroke();
-  } else if (capId === 3) {
-    ctx2.lineWidth = Math.max(2, cell * 0.08);
-    const rot = p * 8.0;
-    ctx2.beginPath();
-    for (let t = 0; t <= 1.001; t += 0.055) {
-      const ang = rot + t * Math.PI * 6.2;
-      const rr = r * (0.12 + 0.90 * t);
-      const x = cx + Math.cos(ang) * rr;
-      const y = cy + Math.sin(ang) * rr;
-      if (t === 0) ctx2.moveTo(x, y);
-      else ctx2.lineTo(x, y);
-    }
-    ctx2.stroke();
-  } else {
-    const colors = [col, 'rgba(255,255,255,0.92)', 'rgba(255,215,0,0.92)', 'rgba(120,255,200,0.92)', 'rgba(180,120,255,0.92)'];
-    ctx2.globalAlpha = a * (0.75 + 0.25 * (1 - p));
-    for (let k = 0; k < 28; k++) {
-      const seed = (k * 2654435761) >>> 0;
-      const u = (seed & 1023) / 1023;
-      const v = ((seed >>> 10) & 1023) / 1023;
-      const ang = u * Math.PI * 2 + p * 1.2;
-      const sp = 0.25 + 0.95 * v;
-      const rr = r * (0.05 + p * 1.45 * sp);
-      const x = cx + Math.cos(ang) * rr;
-      const y = cy + Math.sin(ang) * rr;
-      const sz = Math.max(2, (cell * (0.10 + 0.14 * ((seed >>> 20) & 3) / 3)) | 0);
-      const rot = (p * 10.0 + u * 6.0) % (Math.PI * 2);
-      ctx2.save();
-      ctx2.translate(x, y);
-      ctx2.rotate(rot);
-      ctx2.fillStyle = colors[seed % colors.length];
-      if ((seed & 1) === 0) {
-        ctx2.beginPath();
-        ctx2.moveTo(0, -sz);
-        ctx2.lineTo(sz, 0);
-        ctx2.lineTo(0, sz);
-        ctx2.lineTo(-sz, 0);
-        ctx2.closePath();
-        ctx2.fill();
-      } else {
-        ctx2.fillRect(-sz / 2, -sz / 2, sz, sz);
-      }
-      ctx2.restore();
-    }
-  }
-  ctx2.restore();
-}
-
-function drawGameFramePreview(ctx2, frId, x, y, w, h) {
-  const fr = Math.max(0, Math.min(7, Number(frId) || 0));
-  const col = fr === 0 ? 'rgba(255,255,255,0.12)' : cosmeticAccent(fr, fr === 3 ? 0.62 : 0.70);
-  ctx2.save();
-  ctx2.fillStyle = 'rgba(0,0,0,0.22)';
-  ctx2.fillRect(x, y, w, h);
-  ctx2.lineWidth = 3;
-  ctx2.strokeStyle = col;
-  ctx2.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  ctx2.restore();
-}
-
-function cosmeticsFrameColor(frId) {
-  const fr = Math.max(0, Math.min(7, Number(frId) || 0));
-  if (fr === 1) return { edge: 'rgba(96,165,250,0.70)', glow: 'rgba(96,165,250,0.35)' };
-  if (fr === 2) return { edge: 'rgba(255,45,85,0.70)', glow: 'rgba(255,45,85,0.35)' };
-  if (fr === 3) return { edge: 'rgba(255,215,0,0.62)', glow: 'rgba(255,215,0,0.30)' };
-  if (fr === 4) return { edge: 'rgba(170,120,255,0.70)', glow: 'rgba(170,120,255,0.35)' };
-  return { edge: 'rgba(255,255,255,0.12)', glow: 'rgba(255,255,255,0.08)' };
+function cosmeticsFrameSampleName(i) {
+  return i === 1 ? t('cosmetics.balance_you') : `${t('leaderboard.player')} ${i + 2}`;
 }
 
 function drawCosmeticsFramesScene(ctx2, w, h, frameId) {
@@ -7800,16 +7813,15 @@ function drawCosmeticsFramesScene(ctx2, w, h, frameId) {
   const tw = w - pad * 2;
   const tx = pad;
   const ty = Math.round((h - (th + rows * rowH)) / 2);
-  const col = cosmeticsFrameColor(frameId);
 
   ctx2.save();
-  ctx2.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx2.fillStyle = 'rgba(0,0,0,0.26)';
   ctx2.fillRect(tx, ty, tw, th + rows * rowH);
   ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx2.lineWidth = 1;
   ctx2.strokeRect(tx + 0.5, ty + 0.5, tw - 1, th + rows * rowH - 1);
 
-  ctx2.fillStyle = 'rgba(0,0,0,0.32)';
+  ctx2.fillStyle = 'rgba(0,0,0,0.34)';
   ctx2.fillRect(tx, ty, tw, th);
   ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx2.beginPath();
@@ -7817,40 +7829,31 @@ function drawCosmeticsFramesScene(ctx2, w, h, frameId) {
   ctx2.lineTo(tx + tw, ty + th + 0.5);
   ctx2.stroke();
 
-  ctx2.font = `12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+  ctx2.font = `12px ${COS_FONT}`;
   ctx2.fillStyle = 'rgba(255,255,255,0.86)';
   ctx2.textBaseline = 'middle';
   ctx2.textAlign = 'left';
-  ctx2.fillText('#', tx + 10, ty + th / 2);
+  ctx2.fillText('#', tx + 12, ty + th / 2);
   ctx2.fillText(t('leaderboard.player'), tx + 34, ty + th / 2);
   ctx2.textAlign = 'right';
   ctx2.fillText(t('leaderboard.cells'), tx + tw - 12, ty + th / 2);
+  ctx2.restore();
 
   const youRow = 1;
   for (let i = 0; i < rows; i++) {
-    const ry = ty + th + i * rowH;
-    const isYou = i === youRow;
-    ctx2.fillStyle = i % 2 ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.04)';
-    ctx2.fillRect(tx, ry, tw, rowH);
-
-    if (isYou) {
-      ctx2.save();
-      ctx2.shadowColor = col.glow;
-      ctx2.shadowBlur = 18;
-      ctx2.lineWidth = 3;
-      ctx2.strokeStyle = col.edge;
-      ctx2.strokeRect(tx + 1.5, ry + 1.5, tw - 3, rowH - 3);
-      ctx2.restore();
-    }
-
-    ctx2.fillStyle = isYou ? 'rgba(255,255,255,0.92)' : 'rgba(229,231,235,0.78)';
-    ctx2.textAlign = 'left';
-    ctx2.fillText(String(i + 1), tx + 10, ry + rowH / 2);
-    ctx2.fillText(isYou ? t('cosmetics.balance_you') : `${t('leaderboard.player')} ${i + 2}`, tx + 34, ry + rowH / 2);
-    ctx2.textAlign = 'right';
-    ctx2.fillText(fmtInt(1200 - i * 180), tx + tw - 12, ry + rowH / 2);
+    drawFrameRow(
+      ctx2,
+      tx,
+      ty + th + i * rowH,
+      tw,
+      rowH,
+      frameId,
+      i + 1,
+      cosmeticsFrameSampleName(i),
+      fmtInt(1200 - i * 180),
+      i === youRow
+    );
   }
-  ctx2.restore();
 }
 
 function drawCosmeticsFieldBackdrop(ctx2, x, y, w, h) {
@@ -7891,65 +7894,6 @@ function drawCosmeticsZone(ctx2, rect, ownerId, alpha) {
   ctx2.strokeStyle = 'rgba(0,0,0,0.25)';
   ctx2.lineWidth = 1;
   ctx2.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
-  ctx2.restore();
-}
-
-function drawCosmeticsSegmentsZone(ctx2, rect, ownerId, segId, cell) {
-  const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
-  const step = Math.max(10, Math.round(cell));
-  for (let yy = rect.y; yy < rect.y + rect.h; yy += cell) {
-    for (let xx = rect.x; xx < rect.x + rect.w; xx += cell) {
-      const i = (((xx - rect.x) / cell) | 0) + ((((yy - rect.y) / cell) | 0) * 31);
-      drawGameSegTilePreview(ctx2, xx, yy, step, base, segId, i, 0.85);
-    }
-  }
-}
-
-function drawPreviewNameplate(ctx2, label, x, y, nameId) {
-  const t = String(label || '');
-  ctx2.save();
-  ctx2.font = `14px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-  const m = ctx2.measureText(t);
-  const padX = 10;
-  const padY = 5;
-  const w = Math.ceil(m.width + padX * 2);
-  const h = 22;
-  const px = Math.round(x - w / 2);
-  const py = Math.round(y - h);
-  const rr = 10;
-
-  ctx2.globalAlpha = 0.95;
-  ctx2.beginPath();
-  if (nameId === 0) {
-    ctx2.fillStyle = 'rgba(0,0,0,0.42)';
-    ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
-  } else if (nameId === 1) {
-    ctx2.fillStyle = 'rgba(0,0,0,0.30)';
-    ctx2.strokeStyle = 'rgba(96,165,250,0.32)';
-  } else if (nameId === 2) {
-    ctx2.fillStyle = 'rgba(255,45,85,0.10)';
-    ctx2.strokeStyle = 'rgba(255,45,85,0.40)';
-  } else if (nameId === 3) {
-    ctx2.fillStyle = 'rgba(255,215,0,0.10)';
-    ctx2.strokeStyle = 'rgba(255,215,0,0.35)';
-  } else {
-    ctx2.fillStyle = 'rgba(170,120,255,0.12)';
-    ctx2.strokeStyle = 'rgba(170,120,255,0.40)';
-  }
-  ctx2.lineWidth = 1;
-  ctx2.moveTo(px + rr, py);
-  ctx2.arcTo(px + w, py, px + w, py + h, rr);
-  ctx2.arcTo(px + w, py + h, px, py + h, rr);
-  ctx2.arcTo(px, py + h, px, py, rr);
-  ctx2.arcTo(px, py, px + w, py, rr);
-  ctx2.closePath();
-  ctx2.fill();
-  ctx2.stroke();
-
-  ctx2.fillStyle = 'rgba(255,255,255,0.92)';
-  ctx2.textAlign = 'center';
-  ctx2.textBaseline = 'middle';
-  ctx2.fillText(t, x, py + h / 2 + 0.5);
   ctx2.restore();
 }
 
@@ -9196,7 +9140,7 @@ function handleStateBinary(buf) {
         o += 1;
         const pn = nameById.get(pid) || String(pid);
         pushEventFeed(`${pn} ${lang === 'en' ? 'captured' : 'захватил'} +${delta} ${lang === 'en' ? 'zone' : 'зоны'}`, 'Capture');
-        addFxBurst(ex, ey, `cap${Math.max(0, Math.min(7, Number(fxId) || 0))}`);
+        addFxBurst(ex, ey, `cap${Math.max(0, Math.min(7, Number(fxId) || 0))}`, { pid });
         if (pid === you) {
           // J5: самое частое приятное действие теперь показывает число.
           addScorePopup(ex, ey, delta);
@@ -10117,8 +10061,12 @@ function draw() {
   const nowFrame = performance.now();
 
   const segByOwner = new Map();
+  // Цвет владельца кэшируем до горячего цикла: drawSegTile зовётся для каждой
+  // клетки следа каждый кадр, лишний boostHsl там не нужен.
+  const hslByOwner = new Map();
   for (const p of lastState.players) {
     segByOwner.set(p.n, Math.max(0, Math.min(7, Number(p.cosSeg) || 0)));
+    hslByOwner.set(p.n, boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)'));
   }
 
   if (fxEnabled && speedActive) {
@@ -10241,71 +10189,8 @@ function draw() {
           const segId = segByOwner.get(t) || 0;
           const px = offsetX + x * cell;
           const py = offsetY + y * cell;
-          if (segId === 1) {
-            ctx.save();
-            ctx.shadowColor = boostHsl(colors.get(t) || 'hsl(210 20% 60%)');
-            ctx.shadowBlur = Math.max(6, cell * 0.55);
-            ctx.fillStyle = getOwnerFillStyle(t, a);
-            ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
-            ctx.restore();
-          } else if (segId === 2) {
-            // stripes (diagonal)
-            ctx.save();
-            ctx.fillStyle = getOwnerFillStyle(t, a * 0.92);
-            ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
-            ctx.globalAlpha = 0.45;
-            ctx.beginPath();
-            ctx.rect(px + 1, py + 1, cell - 2, cell - 2);
-            ctx.clip();
-            ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-            ctx.lineWidth = Math.max(2, cell * 0.10);
-            const step = Math.max(6, (cell * 0.55) | 0);
-            for (let k = -cell; k <= cell * 2; k += step) {
-              ctx.beginPath();
-              ctx.moveTo(px + k, py - 2);
-              ctx.lineTo(px + k + cell, py + cell + 2);
-              ctx.stroke();
-            }
-            ctx.restore();
-          } else if (segId === 3) {
-            // plasma (animated gradient)
-            const c1 = boostHsl(colors.get(t) || 'hsl(210 20% 60%)');
-            const rgb = hslToRgb(c1);
-            const tt = nowFrame * 0.004 + (x * 0.12 + y * 0.18);
-            const wv = 0.5 + 0.5 * Math.sin(tt);
-            const g = ctx.createLinearGradient(px, py, px + cell, py + cell);
-            g.addColorStop(0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${Math.min(1, a)})`);
-            g.addColorStop(0.5, `rgba(255,255,255,${0.18 * a + 0.10 * wv})`);
-            g.addColorStop(1, `rgba(0,0,0,${0.22 + 0.18 * (1 - wv)})`);
-            ctx.fillStyle = g;
-            ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
-            ctx.save();
-            ctx.globalAlpha = 0.55 * a;
-            ctx.strokeStyle = 'rgba(255,255,255,0.22)';
-            ctx.lineWidth = Math.max(1, cell * 0.06);
-            ctx.strokeRect(px + 1, py + 1, cell - 2, cell - 2);
-            ctx.restore();
-          } else if (segId === 4) {
-            // sparks (flicker + glints)
-            ctx.fillStyle = getOwnerFillStyle(t, a * 0.92);
-            ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
-            ctx.save();
-            const h = ((x * 73856093) ^ (y * 19349663) ^ ((nowFrame / 90) | 0)) >>> 0;
-            const sx = px + 3 + (h % Math.max(1, cell - 8));
-            const sy = py + 3 + ((h >>> 8) % Math.max(1, cell - 8));
-            const sz = 1 + ((h >>> 16) % 2);
-            ctx.globalAlpha = 0.85;
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-            ctx.fillRect(sx, sy, sz + 1, sz + 1);
-            ctx.globalAlpha = 0.35;
-            ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-            ctx.lineWidth = Math.max(1, cell * 0.06);
-            ctx.strokeRect(px + 1, py + 1, cell - 2, cell - 2);
-            ctx.restore();
-          } else {
-            ctx.fillStyle = getOwnerFillStyle(t, a);
-            ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
-          }
+          // Единый источник правды: тот же drawSegTile, что и в магазине.
+          drawSegTile(ctx, px, py, cell, hslByOwner.get(t) || 'hsl(210 20% 60%)', segId, x * 31 + y * 17, a, nowFrame);
 
           if (mineTrail && drawOwnOutline) {
             ctx.strokeStyle = ownTrailStroke;
@@ -10538,45 +10423,6 @@ function draw() {
     return [1, 0];
   };
 
-  const drawNamePill = (label, x, y, alpha, nameplateId) => {
-    if (!label) return;
-    const t = String(label);
-    const m = ctx.measureText(t);
-    const padX = 8;
-    const padY = 4;
-    const w = Math.ceil(m.width + padX * 2);
-    const h = 18;
-    const r = 9;
-    const px = Math.round(x - w / 2);
-    const py = Math.round(y - h);
-
-    const np = Math.max(0, Math.min(7, Number(nameplateId) || 0));
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    if (np === 0) {
-      ctx.fillStyle = 'rgba(0,0,0,0.42)';
-      ctx.strokeStyle = 'rgba(255,255,255,0.10)';
-    } else {
-      ctx.fillStyle = np === 1 ? 'rgba(0,0,0,0.30)' : cosmeticAccent(np, 0.12);
-      ctx.strokeStyle = cosmeticAccent(np, 0.38);
-    }
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(px + r, py);
-    ctx.arcTo(px + w, py, px + w, py + h, r);
-    ctx.arcTo(px + w, py + h, px, py + h, r);
-    ctx.arcTo(px, py + h, px, py, r);
-    ctx.arcTo(px, py, px + w, py, r);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.globalAlpha = Math.min(1, alpha + 0.18);
-    ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(t, x, py + h / 2 + 0.5);
-    ctx.restore();
-  };
   for (const p of lastState.players) {
     if (!p.a) continue;
     const ip = getInterpPlayer(p.n, interp) || { ...p, ix: p.x, iy: p.y };
@@ -10585,10 +10431,6 @@ function draw() {
     const py = offsetY + (ip.iy + 0.5) * cell;
 
     const [dx, dy] = dirVec(ip.d);
-    const noseX = px + dx * cell * 0.26;
-    const noseY = py + dy * cell * 0.26;
-    const noseW = cell * 0.18;
-
     if (fxEnabled && p.n === you && speedActive) {
       ctx.save();
       ctx.globalAlpha = 0.55 * (0.35 + fxIntensity * 0.65);
@@ -10672,60 +10514,8 @@ function draw() {
       ctx.restore();
     }
 
-    const headId = Math.max(0, Math.min(7, Number(ip.cosHead) || 0));
-
-    // body/head
-    ctx.save();
-    ctx.fillStyle = c;
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-    ctx.lineWidth = Math.max(1, cell * 0.06);
-    ctx.beginPath();
-    if (headId === 0) {
-      ctx.arc(px, py, cell * 0.34, 0, Math.PI * 2);
-    } else if (headId === 1) {
-      const r = cell * 0.38;
-      ctx.moveTo(px, py - r);
-      ctx.lineTo(px + r, py);
-      ctx.lineTo(px, py + r);
-      ctx.lineTo(px - r, py);
-      ctx.closePath();
-    } else if (headId === 2) {
-      ctx.roundRect(px - cell * 0.32, py - cell * 0.32, cell * 0.64, cell * 0.64, cell * 0.14);
-    } else if (headId === 3) {
-      const r = cell * 0.36;
-      for (let i = 0; i < 8; i++) {
-        const a = -Math.PI / 2 + (i * Math.PI) / 4;
-        const x = px + Math.cos(a) * r;
-        const y = py + Math.sin(a) * r;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-    } else {
-      const r = cell * 0.36;
-      ctx.moveTo(px - r * 0.95, py - r * 0.70);
-      ctx.lineTo(px + r * 0.95, py - r * 0.70);
-      ctx.lineTo(px + r * 0.75, py + r * 0.40);
-      ctx.lineTo(px, py + r);
-      ctx.lineTo(px - r * 0.75, py + r * 0.40);
-      ctx.closePath();
-    }
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-
-    // direction nose
-    ctx.save();
-    ctx.fillStyle = 'rgba(255,255,255,0.88)';
-    ctx.shadowColor = 'rgba(0,0,0,0.35)';
-    ctx.shadowBlur = 6;
-    ctx.beginPath();
-    ctx.moveTo(noseX, noseY);
-    ctx.lineTo(noseX - dy * noseW, noseY + dx * noseW);
-    ctx.lineTo(noseX + dy * noseW, noseY - dx * noseW);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+    // Голова и направляющий нос — единый drawHead, тот же и в магазине.
+    drawHead(ctx, px, py, cell, c, ip.cosHead, dx, dy, nowFrame);
 
     if (isBounty) {
       ctx.save();
@@ -10771,7 +10561,8 @@ function draw() {
     }
 
     const label = ip.nm ? String(ip.nm) : String(ip.n);
-    drawNamePill(label, px, py - cell * 0.58, 0.95, ip.cosNameplate);
+    // Плашка ника — единый drawNamePlate, тот же и в магазине.
+    drawNamePlate(ctx, label, px, py - cell * 0.58, c, ip.cosNameplate, 0.95, 12, nowFrame);
   }
 
   // I4: радар угрозы. Дуга по краю экрана в направлении чужой головы ближе
@@ -10929,135 +10720,56 @@ function draw() {
       const r = base * (0.35 + 1.25 * p) * (0.35 + fxIntensity * 0.95);
       const a = (1 - p) * (0.55 + 0.45 * fxIntensity);
 
+      // Захват: тот же drawCaptureFx, что и в превью магазина. Цвет берётся
+      // от игрока, совершившего захват (варианты 5..7 — со своей палитрой).
+      if (isCap) {
+        const capId = Math.max(0, Math.min(7, Number(knd.slice(3)) || 0));
+        const owner = Number(fx.pid);
+        const ownerHsl = boostHsl(colors.get(owner) || colors.get(you) || 'hsl(210 20% 60%)');
+        const capCell = cell * (0.35 + fxIntensity * 0.95);
+        drawCaptureFx(ctx, cx, cy, capCell, ownerHsl, capId, p);
+        continue;
+      }
+
       let col = 'rgba(255,215,0,0.92)';
       if (knd === 'kill') col = 'rgba(255,45,85,0.95)';
       else if (knd === 'use') col = 'rgba(0,255,255,0.95)';
       else if (knd === 'pickup2') col = 'rgba(255,215,0,0.95)';
       else if (knd === 'pickup4') col = 'rgba(190,150,255,0.96)';
-      else if (knd === 'cap0') col = 'rgba(255,215,0,0.92)';
-      else if (knd === 'cap1') col = 'rgba(96,165,250,0.92)';
-      else if (knd === 'cap2') col = 'rgba(255,45,85,0.92)';
-      else if (knd === 'cap3') col = 'rgba(170,120,255,0.92)';
-      else if (knd === 'cap4') col = 'rgba(0,255,255,0.92)';
-      else if (knd === 'cap5') col = cosmeticAccent(5, 0.92);
-      else if (knd === 'cap6') col = cosmeticAccent(6, 0.92);
-      else if (knd === 'cap7') col = cosmeticAccent(7, 0.92);
 
       ctx.save();
       ctx.globalAlpha = a;
       ctx.strokeStyle = col;
       ctx.lineWidth = Math.max(1, cell * 0.10);
-      if (!isCap) {
-        if (knd === 'pickup4') {
-          ctx.lineWidth = Math.max(2, cell * 0.10);
-          for (let k = 0; k < 10; k++) {
-            const ang = p * 2.0 + (k * Math.PI * 2) / 10;
-            ctx.beginPath();
-            ctx.moveTo(cx + Math.cos(ang) * r * 0.30, cy + Math.sin(ang) * r * 0.30);
-            ctx.lineTo(cx + Math.cos(ang) * r * 1.05, cy + Math.sin(ang) * r * 1.05);
-            ctx.stroke();
-          }
-          ctx.globalAlpha = a * 0.85;
+      if (knd === 'pickup4') {
+        ctx.lineWidth = Math.max(2, cell * 0.10);
+        for (let k = 0; k < 10; k++) {
+          const ang = p * 2.0 + (k * Math.PI * 2) / 10;
           ctx.beginPath();
-          ctx.arc(cx, cy, r * 0.95, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.globalAlpha = a * 0.45;
-          ctx.lineWidth = Math.max(1, cell * 0.06);
-          ctx.beginPath();
-          ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2);
-          ctx.stroke();
-        } else if (knd === 'pickup2') {
-          ctx.lineWidth = Math.max(2, cell * 0.09);
-          ctx.setLineDash([Math.max(2, cell * 0.10), Math.max(2, cell * 0.10)]);
-          ctx.lineDashOffset = -performance.now() * 0.03;
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.stroke();
-        } else {
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.moveTo(cx + Math.cos(ang) * r * 0.30, cy + Math.sin(ang) * r * 0.30);
+          ctx.lineTo(cx + Math.cos(ang) * r * 1.05, cy + Math.sin(ang) * r * 1.05);
           ctx.stroke();
         }
+        ctx.globalAlpha = a * 0.85;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 0.95, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = a * 0.45;
+        ctx.lineWidth = Math.max(1, cell * 0.06);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (knd === 'pickup2') {
+        ctx.lineWidth = Math.max(2, cell * 0.09);
+        ctx.setLineDash([Math.max(2, cell * 0.10), Math.max(2, cell * 0.10)]);
+        ctx.lineDashOffset = -nowFrame * 0.03;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
       } else {
-        const capId = Math.max(0, Math.min(7, Number(knd.slice(3)) || 0));
-        if (capId === 0) {
-          // Rings
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.globalAlpha = a * 0.55;
-          ctx.lineWidth = Math.max(1, cell * 0.06);
-          ctx.beginPath();
-          ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2);
-          ctx.stroke();
-        } else if (capId === 1) {
-          // Ray burst
-          ctx.lineWidth = Math.max(2, cell * 0.08);
-          for (let k = 0; k < 12; k++) {
-            const ang = p * 2.4 + (k * Math.PI * 2) / 12;
-            ctx.beginPath();
-            ctx.moveTo(cx + Math.cos(ang) * r * 0.35, cy + Math.sin(ang) * r * 0.35);
-            ctx.lineTo(cx + Math.cos(ang) * r * 1.10, cy + Math.sin(ang) * r * 1.10);
-            ctx.stroke();
-          }
-        } else if (capId === 2) {
-          // Diamond
-          ctx.lineWidth = Math.max(2, cell * 0.08);
-          const rr = r * (0.85 + 0.10 * Math.sin(p * Math.PI * 2));
-          ctx.beginPath();
-          ctx.moveTo(cx, cy - rr);
-          ctx.lineTo(cx + rr, cy);
-          ctx.lineTo(cx, cy + rr);
-          ctx.lineTo(cx - rr, cy);
-          ctx.closePath();
-          ctx.stroke();
-        } else if (capId === 3) {
-          // Spiral (single winding path)
-          ctx.lineWidth = Math.max(2, cell * 0.08);
-          const rot = p * 8.0;
-          ctx.beginPath();
-          for (let t = 0; t <= 1.001; t += 0.055) {
-            const ang = rot + t * Math.PI * 6.2;
-            const rr = r * (0.12 + 0.90 * t);
-            const x = cx + Math.cos(ang) * rr;
-            const y = cy + Math.sin(ang) * rr;
-            if (t === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-          }
-          ctx.stroke();
-        } else {
-          // Confetti
-          const colors = [col, 'rgba(255,255,255,0.92)', 'rgba(255,215,0,0.92)', 'rgba(120,255,200,0.92)', 'rgba(180,120,255,0.92)'];
-          ctx.globalAlpha = a * (0.75 + 0.25 * (1 - p));
-          for (let k = 0; k < 28; k++) {
-            const seed = (k * 2654435761) >>> 0;
-            const u = (seed & 1023) / 1023;
-            const v = ((seed >>> 10) & 1023) / 1023;
-            const ang = u * Math.PI * 2 + p * 1.2;
-            const sp = 0.25 + 0.95 * v;
-            const rr = r * (0.05 + p * 1.45 * sp);
-            const x = cx + Math.cos(ang) * rr;
-            const y = cy + Math.sin(ang) * rr;
-            const sz = Math.max(2, (cell * (0.10 + 0.14 * ((seed >>> 20) & 3) / 3)) | 0);
-            const rot = (p * 10.0 + u * 6.0) % (Math.PI * 2);
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate(rot);
-            ctx.fillStyle = colors[seed % colors.length];
-            if ((seed & 1) === 0) {
-              ctx.beginPath();
-              ctx.moveTo(0, -sz);
-              ctx.lineTo(sz, 0);
-              ctx.lineTo(0, sz);
-              ctx.lineTo(-sz, 0);
-              ctx.closePath();
-              ctx.fill();
-            } else {
-              ctx.fillRect(-sz / 2, -sz / 2, sz, sz);
-            }
-            ctx.restore();
-          }
-        }
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
       }
       ctx.restore();
     }
