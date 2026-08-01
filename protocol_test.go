@@ -7,6 +7,11 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1580,5 +1585,771 @@ func TestHelloCarriesVersion(t *testing.T) {
 	}
 	if Version == "" || Commit == "" || BuildTime == "" {
 		t.Fatal("Version/Commit/BuildTime должны иметь значения по умолчанию")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Приёмочные тесты по итогам ревью: номера игроков, rate-limiter, профили,
+// лимит комнат, origin-allowlist и античит-арифметика.
+// ---------------------------------------------------------------------------
+
+// TestPlayerNumNeverCollidesWithCoolFlag — главный инвариант провода: значение
+// клетки coolOwnerFlag|owner означает «остывающая территория», поэтому номер
+// живого игрока обязан быть строго меньше 0x8000. Раньше номер выдавался
+// простым инкрементом без верхней границы.
+func TestPlayerNumNeverCollidesWithCoolFlag(t *testing.T) {
+	if maxPlayerNum >= coolOwnerFlag {
+		t.Fatalf("maxPlayerNum=%#x должен быть меньше coolOwnerFlag=%#x", maxPlayerNum, coolOwnerFlag)
+	}
+	r := newTestRoom()
+	// Прокручиваем аллокатор через весь диапазон несколько раз: игроки
+	// «уходят» сразу, поэтому номера переиспользуются и никогда не растут
+	// за maxPlayerNum.
+	for i := 0; i < 3*int(maxPlayerNum)+17; i++ {
+		n := r.allocPlayerNumLocked()
+		if n == 0 {
+			t.Fatalf("итерация %d: аллокатор отказал на пустой комнате", i)
+		}
+		if n >= coolOwnerFlag {
+			t.Fatalf("итерация %d: номер %#x пересёкся с coolOwnerFlag %#x", i, n, coolOwnerFlag)
+		}
+		if n&coolOwnerFlag != 0 {
+			t.Fatalf("итерация %d: в номере %#x взведён бит coolOwnerFlag", i, n)
+		}
+	}
+}
+
+// TestPlayerNumAllocatorReusesFreedAndRefusesWhenFull: номера не должны
+// «прожигаться» навсегда, а при полном диапазоне join обязан получить отказ,
+// а не переполнившийся uint16.
+func TestPlayerNumAllocatorReusesFreedAndRefusesWhenFull(t *testing.T) {
+	r := newTestRoom()
+	a := r.allocPlayerNumLocked()
+	r.players[a] = &Player{num: a}
+	b := r.allocPlayerNumLocked()
+	if b == a {
+		t.Fatalf("занятый номер %d выдан повторно", a)
+	}
+	r.players[b] = &Player{num: b}
+	delete(r.players, a)
+	// Освободившийся номер обязан вернуться в оборот после прокрутки круга.
+	seen := false
+	for i := 0; i < int(maxPlayerNum)+2; i++ {
+		if r.allocPlayerNumLocked() == a {
+			seen = true
+			break
+		}
+	}
+	if !seen {
+		t.Fatalf("освобождённый номер %d так и не переиспользован", a)
+	}
+
+	full := newTestRoom()
+	for n := uint16(1); n <= maxPlayerNum; n++ {
+		full.players[n] = &Player{num: n}
+	}
+	if got := full.allocPlayerNumLocked(); got != 0 {
+		t.Fatalf("на полном диапазоне аллокатор выдал %#x, ожидался отказ (0)", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Rate limiter
+// ---------------------------------------------------------------------------
+
+func TestRateLimiterBurstAndRefill(t *testing.T) {
+	l := &ipRateLimiter{buckets: make(map[string]*tokenBucket)}
+	const rate, burst = 1.0, 3.0
+
+	for i := 0; i < int(burst); i++ {
+		if !l.allow("ip|join", rate, burst) {
+			t.Fatalf("запрос %d из burst должен пройти", i+1)
+		}
+	}
+	if l.allow("ip|join", rate, burst) {
+		t.Fatal("burst исчерпан, следующий запрос должен быть отклонён")
+	}
+
+	// Пополнение: 2 секунды при rate=1/с дают ровно 2 токена.
+	b := l.buckets["ip|join"]
+	b.last = b.last.Add(-2 * time.Second)
+	for i := 0; i < 2; i++ {
+		if !l.allow("ip|join", rate, burst) {
+			t.Fatalf("после пополнения запрос %d должен пройти", i+1)
+		}
+	}
+	if l.allow("ip|join", rate, burst) {
+		t.Fatal("пополнено только 2 токена, третий запрос должен быть отклонён")
+	}
+
+	// Накопление ограничено burst, а не временем простоя.
+	b.last = b.last.Add(-1000 * time.Second)
+	for i := 0; i < int(burst); i++ {
+		if !l.allow("ip|join", rate, burst) {
+			t.Fatalf("после долгого простоя запрос %d должен пройти", i+1)
+		}
+	}
+	if l.allow("ip|join", rate, burst) {
+		t.Fatal("после простоя накоплено больше burst токенов")
+	}
+
+	// Ключи независимы: у другого типа сообщения свой бакет.
+	if !l.allow("ip|chat", rate, burst) {
+		t.Fatal("отдельный ключ должен иметь собственный бакет")
+	}
+}
+
+// TestRateLimiterSweepsOnAcceptedPath — регрессия: очистка стояла ПОСЛЕ
+// раннего return на успешном пути, поэтому карта бакетов чистилась только
+// когда кого-то лимитировали, и на спокойном сервере росла без предела.
+func TestRateLimiterSweepsOnAcceptedPath(t *testing.T) {
+	l := &ipRateLimiter{buckets: make(map[string]*tokenBucket)}
+	stale := time.Now().Add(-time.Hour)
+	for i := 0; i < rateLimiterSweepAt+10; i++ {
+		l.buckets[fmt.Sprintf("stale|%d", i)] = &tokenBucket{
+			tokens: 1, last: stale, lastSeen: stale, rate: 1, burst: 1,
+		}
+	}
+	before := len(l.buckets)
+
+	// Один-единственный УСПЕШНЫЙ запрос обязан запустить очистку.
+	if !l.allow("fresh|input", 10, 10) {
+		t.Fatal("первый запрос нового ключа должен пройти")
+	}
+	if len(l.buckets) >= before {
+		t.Fatalf("карта не почищена на успешном пути: было %d, стало %d", before, len(l.buckets))
+	}
+	if _, ok := l.buckets["fresh|input"]; !ok {
+		t.Fatal("очистка удалила только что использованный бакет")
+	}
+	if len(l.buckets) != 1 {
+		t.Fatalf("после очистки осталось %d бакетов, ожидался 1", len(l.buckets))
+	}
+}
+
+func TestRateLimiterSweepIsThrottled(t *testing.T) {
+	l := &ipRateLimiter{buckets: make(map[string]*tokenBucket)}
+	now := time.Now()
+	l.lastSweep = now
+	stale := now.Add(-time.Hour)
+	for i := 0; i < rateLimiterSweepAt+10; i++ {
+		l.buckets[fmt.Sprintf("stale|%d", i)] = &tokenBucket{
+			tokens: 1, last: stale, lastSeen: stale, rate: 1, burst: 1,
+		}
+	}
+	l.sweepLocked(now)
+	if len(l.buckets) != rateLimiterSweepAt+10 {
+		t.Fatalf("свип отработал раньше интервала: осталось %d", len(l.buckets))
+	}
+	l.sweepLocked(now.Add(rateLimiterSweepEvery + time.Second))
+	if len(l.buckets) != 0 {
+		t.Fatalf("после интервала свип должен был всё удалить, осталось %d", len(l.buckets))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// parseProfileToken: вся модель идентичности держится на этой подписи.
+// ---------------------------------------------------------------------------
+
+func withTestProfileSecret(t *testing.T) {
+	t.Helper()
+	prev := profileSecret
+	profileSecret = []byte("test-profile-secret")
+	t.Cleanup(func() { profileSecret = prev })
+}
+
+// mintToken собирает токен вручную, чтобы тест мог подменить любое поле.
+func mintToken(pid string, iat int64, sign bool) string {
+	iatStr := strconv.FormatInt(iat, 10)
+	mac := profileTokenSign(profileTokenVersion + "." + pid + "." + iatStr)
+	if !sign {
+		mac = append([]byte(nil), mac...)
+		mac[0] ^= 0xFF
+	}
+	return profileTokenVersion + "." + b64u([]byte(pid)) + "." + b64u([]byte(iatStr)) + "." + b64u(mac)
+}
+
+func TestParseProfileToken(t *testing.T) {
+	withTestProfileSecret(t)
+
+	const pid = "0123456789abcdef0123456789abcdef"
+	const otherPID = "fedcba9876543210fedcba9876543210"
+	now := time.Now().Unix()
+
+	valid := mintToken(pid, now, true)
+	if got, ok := parseProfileToken(valid); !ok || got != pid {
+		t.Fatalf("валидный токен: got=%q ok=%v, ожидалось %q/true", got, ok, pid)
+	}
+
+	// Подменённый pid при неизменной подписи: MAC считается по pid, поэтому
+	// подстановка чужого идентификатора обязана слететь на проверке.
+	iatStr := strconv.FormatInt(now, 10)
+	macOfPID := profileTokenSign(profileTokenVersion + "." + pid + "." + iatStr)
+	swapped := profileTokenVersion + "." + b64u([]byte(otherPID)) + "." + b64u([]byte(iatStr)) + "." + b64u(macOfPID)
+
+	// Подпись чужим секретом.
+	profileSecret = []byte("attacker-secret")
+	foreign := mintToken(pid, now, true)
+	profileSecret = []byte("test-profile-secret")
+
+	cases := []struct {
+		name string
+		tok  string
+	}{
+		{"empty", ""},
+		{"garbage", "not-a-token"},
+		{"wrong_version", "v2." + b64u([]byte(pid)) + "." + b64u([]byte(iatStr)) + "." + b64u(macOfPID)},
+		{"too_few_parts", profileTokenVersion + "." + b64u([]byte(pid)) + "." + b64u([]byte(iatStr))},
+		{"too_many_parts", valid + ".extra"},
+		{"forged_mac", mintToken(pid, now, false)},
+		{"swapped_pid", swapped},
+		{"foreign_secret", foreign},
+		{"expired_iat", mintToken(pid, time.Now().Add(-profileTokenMaxAge-time.Hour).Unix(), true)},
+		{"future_iat", mintToken(pid, time.Now().Add(48*time.Hour).Unix(), true)},
+		{"bad_base64_pid", profileTokenVersion + ".!!!." + b64u([]byte(iatStr)) + "." + b64u(macOfPID)},
+		{"bad_base64_iat", profileTokenVersion + "." + b64u([]byte(pid)) + ".!!!." + b64u(macOfPID)},
+		{"bad_base64_mac", profileTokenVersion + "." + b64u([]byte(pid)) + "." + b64u([]byte(iatStr)) + ".!!!"},
+		{"pid_too_short", mintToken("0123456789abcdef", now, true)},
+		{"pid_too_long", mintToken(pid+"00", now, true)},
+		{"pid_not_hex", mintToken("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", now, true)},
+		{"oversized", profileTokenVersion + "." + strings.Repeat("A", 600)},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got, ok := parseProfileToken(tc.tok); ok {
+				t.Fatalf("токен принят (pid=%q), ожидался отказ", got)
+			}
+		})
+	}
+
+	// Токен внутри срока жизни принимается.
+	edge := mintToken(pid, time.Now().Add(-profileTokenMaxAge+time.Hour).Unix(), true)
+	if _, ok := parseProfileToken(edge); !ok {
+		t.Fatal("токен внутри срока жизни отвергнут")
+	}
+
+	// resolveProfileToken на мусоре обязан выдать НОВЫЙ валидный pid.
+	newPID, fresh := resolveProfileToken("garbage")
+	if !validProfilePID(newPID) {
+		t.Fatalf("resolveProfileToken выдал невалидный pid %q", newPID)
+	}
+	if got, ok := parseProfileToken(fresh); !ok || got != newPID {
+		t.Fatalf("перевыпущенный токен не разбирается: got=%q ok=%v", got, ok)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// requestClientIP / доверенные прокси
+// ---------------------------------------------------------------------------
+
+func TestRequestClientIPTrustedProxies(t *testing.T) {
+	prev := trustedProxyNets
+	initTrustedProxies("127.0.0.1/8,::1,10.0.0.0/8")
+	t.Cleanup(func() { trustedProxyNets = prev })
+
+	cases := []struct {
+		name   string
+		remote string
+		xff    string
+		want   string
+	}{
+		{"untrusted_peer_xff_ignored", "203.0.113.7:5555", "1.2.3.4", "203.0.113.7"},
+		{"trusted_peer_no_xff", "127.0.0.1:5555", "", "127.0.0.1"},
+		{"trusted_peer_single_hop", "127.0.0.1:5555", "198.51.100.9", "198.51.100.9"},
+		// Скан справа налево: доверенные хопы пропускаем, первый недоверенный - ответ.
+		{"scan_right_to_left", "127.0.0.1:5555", "9.9.9.9, 198.51.100.9, 10.1.2.3", "198.51.100.9"},
+		// Всё, что левее правого недоверенного хопа, подконтрольно атакующему.
+		{"spoofed_left_part_ignored", "127.0.0.1:5555", "6.6.6.6, 198.51.100.9", "198.51.100.9"},
+		// Битая цепочка: цепочке больше не верим совсем.
+		{"malformed_chain", "127.0.0.1:5555", "198.51.100.9, junk", "127.0.0.1"},
+		{"empty_entries", "127.0.0.1:5555", "198.51.100.9, ,", "198.51.100.9"},
+		{"all_hops_trusted", "127.0.0.1:5555", "10.0.0.1, 10.0.0.2", "127.0.0.1"},
+		{"remote_without_port", "127.0.0.1", "198.51.100.9", "198.51.100.9"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+			r.RemoteAddr = tc.remote
+			if tc.xff != "" {
+				r.Header.Set("X-Forwarded-For", tc.xff)
+			}
+			if got := requestClientIP(r); got != tc.want {
+				t.Fatalf("requestClientIP = %q, ожидалось %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Античит: потолки дохода Стиля
+// ---------------------------------------------------------------------------
+
+func TestStyleIncomeGrantLockedMinuteCeiling(t *testing.T) {
+	pr := &Profile{}
+	if got := styleIncomeGrantLocked(pr, "pid", 300); got != 300 {
+		t.Fatalf("первое начисление = %d, ожидалось 300", got)
+	}
+	if got := styleIncomeGrantLocked(pr, "pid", 300); got != styleIncomePerMinute-300 {
+		t.Fatalf("добор до потолка = %d, ожидалось %d", got, styleIncomePerMinute-300)
+	}
+	if got := styleIncomeGrantLocked(pr, "pid", 50); got != 0 {
+		t.Fatalf("за потолком минуты выдано %d, ожидался 0", got)
+	}
+	if pr.styleWindowGained != styleIncomePerMinute {
+		t.Fatalf("накоплено %d, ожидалось ровно %d", pr.styleWindowGained, styleIncomePerMinute)
+	}
+	// Окно скользящее: через минуту потолок открывается заново.
+	pr.styleWindowStart = time.Now().Unix() - 61
+	if got := styleIncomeGrantLocked(pr, "pid", 100); got != 100 {
+		t.Fatalf("после сброса окна выдано %d, ожидалось 100", got)
+	}
+	// Нулевая дельта проходит насквозь и окно не трогает.
+	before := pr.styleWindowGained
+	if got := styleIncomeGrantLocked(pr, "pid", 0); got != 0 || pr.styleWindowGained != before {
+		t.Fatalf("нулевая дельта изменила окно: got=%d gained=%d", got, pr.styleWindowGained)
+	}
+}
+
+func TestStyleDayIncomeGrantLockedSoftCap(t *testing.T) {
+	// До мягкого потолка платят полностью.
+	pr := &Profile{}
+	if got := styleDayIncomeGrantLocked(pr, 500); got != 500 {
+		t.Fatalf("под потолком выдано %d, ожидалось 500", got)
+	}
+	if pr.DayIncome != 500 {
+		t.Fatalf("DayIncome=%d, ожидалось 500", pr.DayIncome)
+	}
+	if pr.DayIncomeDay != dayStampNow() {
+		t.Fatal("день дохода не проставлен")
+	}
+
+	// Пересечение потолка: часть полностью, остаток по 40% с округлением вверх.
+	// 100 полных + ceil(300*2/5)=120 -> 220.
+	pr = &Profile{DayIncome: StyleDaySoftCap - 100, DayIncomeDay: dayStampNow()}
+	if got := styleDayIncomeGrantLocked(pr, 400); got != 220 {
+		t.Fatalf("на границе потолка выдано %d, ожидалось 220", got)
+	}
+	if pr.DayIncome != StyleDaySoftCap-100+220 {
+		t.Fatalf("DayIncome=%d, ожидалось %d", pr.DayIncome, StyleDaySoftCap-100+220)
+	}
+
+	// Полностью за потолком.
+	pr = &Profile{DayIncome: StyleDaySoftCap, DayIncomeDay: dayStampNow()}
+	if got := styleDayIncomeGrantLocked(pr, 100); got != 40 {
+		t.Fatalf("за потолком выдано %d, ожидалось 40", got)
+	}
+	// Округление вверх: мелкое начисление за потолком не должно пропадать.
+	pr = &Profile{DayIncome: StyleDaySoftCap, DayIncomeDay: dayStampNow()}
+	if got := styleDayIncomeGrantLocked(pr, 1); got != 1 {
+		t.Fatalf("минимальное начисление за потолком = %d, ожидалось 1", got)
+	}
+
+	// Смена суток обнуляет счётчик.
+	pr = &Profile{DayIncome: StyleDaySoftCap * 2, DayIncomeDay: dayStampNow() - 1}
+	if got := styleDayIncomeGrantLocked(pr, 100); got != 100 {
+		t.Fatalf("в новых сутках выдано %d, ожидалось 100", got)
+	}
+	if pr.DayIncome != 100 {
+		t.Fatalf("DayIncome после смены суток = %d, ожидалось 100", pr.DayIncome)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Хранилище профилей: без создания на «заходе», короткий TTL для пустых,
+// потолок размера карты.
+// ---------------------------------------------------------------------------
+
+func withEmptyProfileStore(t *testing.T) {
+	t.Helper()
+	profilesMu.Lock()
+	prev := profiles
+	profiles = make(map[string]*Profile)
+	profilesMu.Unlock()
+	t.Cleanup(func() {
+		profilesMu.Lock()
+		profiles = prev
+		profilesMu.Unlock()
+	})
+}
+
+func profileStoreLen() int {
+	profilesMu.Lock()
+	defer profilesMu.Unlock()
+	return len(profiles)
+}
+
+// TestProfileForKeyDoesNotStore — атака «connect без токена -> join ->
+// disconnect» давала новую запись в карте на каждое подключение. Путь чтения
+// обязан возвращать пустой профиль-значение и НЕ писать в карту.
+func TestProfileForKeyDoesNotStore(t *testing.T) {
+	withEmptyProfileStore(t)
+
+	const pid = "0123456789abcdef0123456789abcdef"
+	pr := profileForKey(pid)
+	if pr == nil {
+		t.Fatal("profileForKey вернул nil для валидного pid")
+	}
+	if n := profileStoreLen(); n != 0 {
+		t.Fatalf("чтение создало %d записей, ожидалось 0", n)
+	}
+	// Запись через временный профиль никуда не сохраняется.
+	pr.StyleBalance = 1234
+	if again := profileForKey(pid); again.StyleBalance != 0 {
+		t.Fatalf("временный профиль просочился в хранилище: balance=%d", again.StyleBalance)
+	}
+	if profileForKey("") != nil {
+		t.Fatal("пустой ключ должен давать nil")
+	}
+	// touchProfileLastSeen тоже не должен создавать запись.
+	touchProfileLastSeen(pid)
+	if n := profileStoreLen(); n != 0 {
+		t.Fatalf("touchProfileLastSeen создал %d записей", n)
+	}
+}
+
+// TestProfileForKeyCreateStoresAndKeepsProgress: запись заводится на первом
+// реальном начислении, и уже заработанный Стиль после этого не теряется.
+func TestProfileForKeyCreateStoresAndKeepsProgress(t *testing.T) {
+	withEmptyProfileStore(t)
+
+	const pid = "0123456789abcdef0123456789abcdef"
+	pr := profileForKeyCreate(pid)
+	if pr == nil {
+		t.Fatal("profileForKeyCreate вернул nil")
+	}
+	if n := profileStoreLen(); n != 1 {
+		t.Fatalf("в хранилище %d записей, ожидалась 1", n)
+	}
+	profilesMu.Lock()
+	addProfileStyleLocked(pr, 500)
+	profilesMu.Unlock()
+
+	// Дальнейшее чтение обязано видеть тот же объект с прогрессом.
+	if got := profileForKey(pid); got.StyleBalance != 500 {
+		t.Fatalf("после начисления чтение вернуло balance=%d, ожидалось 500", got.StyleBalance)
+	}
+	if got := profileForKeyCreate(pid); got != pr {
+		t.Fatal("повторный create завёл вторую запись вместо существующей")
+	}
+	if profileForKeyCreate("") != nil {
+		t.Fatal("пустой ключ должен давать nil и в create")
+	}
+}
+
+func TestProfileEmptyTTLIsShort(t *testing.T) {
+	now := time.Now()
+
+	empty := &Profile{LastSeen: now.Add(-profileEmptyTTL - time.Minute).Unix()}
+	profilesMu.Lock()
+	expiredEmpty := profileExpiredLocked(empty, now)
+	profilesMu.Unlock()
+	if !expiredEmpty {
+		t.Fatalf("пустой профиль старше %v должен протухать", profileEmptyTTL)
+	}
+
+	// Тот же возраст, но с заработанным Стилем: живёт полные 90 дней.
+	rich := &Profile{LastSeen: now.Add(-profileEmptyTTL - time.Minute).Unix(), StyleBalance: 10}
+	profilesMu.Lock()
+	expiredRich := profileExpiredLocked(rich, now)
+	hasProgress := profileHasProgressLocked(rich)
+	profilesMu.Unlock()
+	if expiredRich {
+		t.Fatal("профиль с балансом протух по короткому TTL")
+	}
+	if !hasProgress {
+		t.Fatal("баланс не считается прогрессом")
+	}
+
+	// А через 90 дней протухает и он.
+	old := &Profile{LastSeen: now.Add(-profileTTL - time.Hour).Unix(), StyleBalance: 10}
+	profilesMu.Lock()
+	expiredOld := profileExpiredLocked(old, now)
+	profilesMu.Unlock()
+	if !expiredOld {
+		t.Fatal("профиль старше 90 дней должен протухать")
+	}
+
+	// Косметика: бит 0 бесплатный и прогрессом не считается, любой другой - да.
+	free := &Profile{CosInvHead: 1, CosInvSeg: 1}
+	bought := &Profile{CosInvHead: 1 | 4}
+	titled := &Profile{TitleID: 3}
+	achv := &Profile{AchvMask: 2}
+	profilesMu.Lock()
+	gotFree := profileHasProgressLocked(free)
+	gotBought := profileHasProgressLocked(bought)
+	gotTitled := profileHasProgressLocked(titled)
+	gotAchv := profileHasProgressLocked(achv)
+	profilesMu.Unlock()
+	if gotFree {
+		t.Fatal("бесплатный дефолт косметики принят за прогресс")
+	}
+	if !gotBought || !gotTitled || !gotAchv {
+		t.Fatalf("прогресс не распознан: cos=%v title=%v achv=%v", gotBought, gotTitled, gotAchv)
+	}
+}
+
+func TestProfileStoreEvictsLeastRecentlySeen(t *testing.T) {
+	withEmptyProfileStore(t)
+	prevMax := maxProfiles
+	maxProfiles = 4
+	t.Cleanup(func() { maxProfiles = prevMax })
+
+	now := time.Now().Unix()
+	pids := []string{
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"cccccccccccccccccccccccccccccccc",
+		"dddddddddddddddddddddddddddddddd",
+	}
+	profilesMu.Lock()
+	for i, pid := range pids {
+		// У всех есть прогресс, чтобы вытеснение шло именно по LastSeen.
+		profiles[pid] = &Profile{StyleBalance: 5, LastSeen: now - int64(len(pids)-i)*3600}
+	}
+	profilesMu.Unlock()
+
+	profileForKeyCreate("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+
+	if n := profileStoreLen(); n > maxProfiles {
+		t.Fatalf("в хранилище %d записей при потолке %d", n, maxProfiles)
+	}
+	profilesMu.Lock()
+	_, oldestAlive := profiles[pids[0]]
+	_, newestAlive := profiles[pids[len(pids)-1]]
+	_, freshAlive := profiles["eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"]
+	profilesMu.Unlock()
+	if oldestAlive {
+		t.Fatal("вытеснен не самый несвежий профиль")
+	}
+	if !newestAlive {
+		t.Fatal("вытеснен свежий профиль")
+	}
+	if !freshAlive {
+		t.Fatal("новая запись не создана")
+	}
+}
+
+// TestProfilesRoundTripKeepsProgress: старые файлы обязаны продолжать
+// грузиться, а заработанный Стиль - переживать сохранение и загрузку.
+func TestProfilesRoundTripKeepsProgress(t *testing.T) {
+	withEmptyProfileStore(t)
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	t.Setenv("PROFILES_PATH", path)
+
+	const richPID = "11111111111111111111111111111111"
+	const emptyPID = "22222222222222222222222222222222"
+	now := time.Now().Unix()
+
+	// Файл в старом формате: без части ключей косметики, с балансом.
+	raw := fmt.Sprintf(`{"version":1,"savedAt":%d,"profiles":{
+		%q:{"styleBalance":777,"totalStyleGained":900,"cosInvHead":5,"cosEqHead":2,"lastSeen":%d},
+		%q:{"lastSeen":%d}
+	}}`, now, richPID, now, emptyPID, now)
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("не удалось записать файл профилей: %v", err)
+	}
+
+	loadProfiles()
+	pr := profileForKey(richPID)
+	if pr.StyleBalance != 777 || pr.CosInvHead != 5 || pr.CosEqHead != 2 {
+		t.Fatalf("старый профиль загрузился с потерями: %+v", *pr)
+	}
+	if n := profileStoreLen(); n != 2 {
+		t.Fatalf("загружено %d профилей, ожидалось 2", n)
+	}
+
+	// Сохранение и повторная загрузка не теряют прогресс.
+	if err := saveProfiles(); err != nil {
+		t.Fatalf("saveProfiles: %v", err)
+	}
+	withEmptyProfileStore(t)
+	loadProfiles()
+	if got := profileForKey(richPID); got.StyleBalance != 777 {
+		t.Fatalf("после round-trip balance=%d, ожидалось 777", got.StyleBalance)
+	}
+}
+
+// TestProfilesLoadDropsStaleEmpty: пустые профили не должны переживать
+// перезапуск дольше короткого TTL, а профили с прогрессом - должны.
+func TestProfilesLoadDropsStaleEmpty(t *testing.T) {
+	withEmptyProfileStore(t)
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	t.Setenv("PROFILES_PATH", path)
+
+	stale := time.Now().Add(-profileEmptyTTL - time.Hour).Unix()
+	raw := fmt.Sprintf(`{"version":1,"savedAt":%d,"profiles":{
+		%q:{"lastSeen":%d},
+		%q:{"styleBalance":10,"lastSeen":%d}
+	}}`, time.Now().Unix(),
+		"33333333333333333333333333333333", stale,
+		"44444444444444444444444444444444", stale)
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("не удалось записать файл профилей: %v", err)
+	}
+
+	loadProfiles()
+	profilesMu.Lock()
+	_, emptyAlive := profiles["33333333333333333333333333333333"]
+	_, richAlive := profiles["44444444444444444444444444444444"]
+	profilesMu.Unlock()
+	if emptyAlive {
+		t.Fatal("протухший пустой профиль загружен")
+	}
+	if !richAlive {
+		t.Fatal("профиль с прогрессом потерян при загрузке")
+	}
+}
+
+// TestDailyRollIsDeterministic: квесты, показанные на входе (по временному
+// профилю), обязаны совпасть с теми, что попадут в созданный позже профиль.
+func TestDailyRollIsDeterministic(t *testing.T) {
+	const pid = "0123456789abcdef0123456789abcdef"
+	a := &Profile{}
+	b := &Profile{}
+	ensureProfileDailyLocked(a, pid)
+	ensureProfileDailyLocked(b, pid)
+	if a.DailyType1 != b.DailyType1 || a.DailyType2 != b.DailyType2 || a.DailyType3 != b.DailyType3 {
+		t.Fatalf("раскатка не детерминирована: %v vs %v",
+			[]uint8{a.DailyType1, a.DailyType2, a.DailyType3},
+			[]uint8{b.DailyType1, b.DailyType2, b.DailyType3})
+	}
+	for _, tp := range []uint8{a.DailyType1, a.DailyType2, a.DailyType3} {
+		if tp < 1 || tp > 4 {
+			t.Fatalf("тип квеста %d вне диапазона 1..4", tp)
+		}
+	}
+	// Разные игроки получают разные наборы (иначе это не «свой» квест).
+	c := &Profile{}
+	ensureProfileDailyLocked(c, "fedcba9876543210fedcba9876543210")
+	if c.DailyType1 == a.DailyType1 && c.DailyType2 == a.DailyType2 && c.DailyType3 == a.DailyType3 {
+		t.Log("разные pid дали одинаковый набор квестов (допустимо, но подозрительно)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Лимит числа комнат
+// ---------------------------------------------------------------------------
+
+func TestHubRoomLimit(t *testing.T) {
+	prev := maxRoomsLimit
+	maxRoomsLimit = 2
+	t.Cleanup(func() { maxRoomsLimit = prev })
+
+	h := &Hub{rooms: make(map[int]*Room), nextRoomID: 1, roomLimit: RoomHumanLimitDefault}
+	t.Cleanup(func() {
+		h.mu.Lock()
+		for _, rm := range h.rooms {
+			rm.close()
+		}
+		h.mu.Unlock()
+	})
+
+	if r := h.createRoom("a"); r == nil {
+		t.Fatal("первая комната не создалась")
+	}
+	if r := h.createRoom("b"); r == nil {
+		t.Fatal("вторая комната не создалась")
+	}
+	if r := h.createRoom("c"); r != nil {
+		t.Fatal("комната создана сверх MaxRooms")
+	}
+	if n := len(h.rooms); n != 2 {
+		t.Fatalf("комнат %d, ожидалось 2", n)
+	}
+
+	// Автоподбор не должен ни создавать третью комнату, ни возвращать nil.
+	if rm := h.pickRoomForJoin(); rm == nil {
+		t.Fatal("pickRoomForJoin вернул nil при свободных комнатах")
+	}
+	for _, rm := range h.rooms {
+		rm.mu.Lock()
+		rm.humanCount = rm.limit
+		rm.mu.Unlock()
+	}
+	rm := h.pickRoomForJoin()
+	if rm == nil {
+		t.Fatal("pickRoomForJoin вернул nil на исчерпанном лимите комнат")
+	}
+	if n := len(h.rooms); n != 2 {
+		t.Fatalf("автоподбор создал комнату сверх лимита: %d", n)
+	}
+}
+
+func TestLoadMaxRoomsEnv(t *testing.T) {
+	t.Setenv("MAX_ROOMS", "7")
+	if got := loadMaxRooms(); got != 7 {
+		t.Fatalf("MAX_ROOMS=7 -> %d", got)
+	}
+	t.Setenv("MAX_ROOMS", "0")
+	if got := loadMaxRooms(); got != DefaultMaxRooms {
+		t.Fatalf("MAX_ROOMS=0 -> %d, ожидался дефолт %d", got, DefaultMaxRooms)
+	}
+	t.Setenv("MAX_ROOMS", "abc")
+	if got := loadMaxRooms(); got != DefaultMaxRooms {
+		t.Fatalf("мусор в MAX_ROOMS -> %d, ожидался дефолт %d", got, DefaultMaxRooms)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WS_ALLOW_LOCALHOST
+// ---------------------------------------------------------------------------
+
+func TestWSOriginLocalhostIsGated(t *testing.T) {
+	prevList := allowedWSOrigins
+	allowedWSOrigins = map[string]struct{}{"https://snakes.example.com": {}}
+	prevFlag := wsAllowLocalhost
+	t.Cleanup(func() {
+		allowedWSOrigins = prevList
+		wsAllowLocalhost = prevFlag
+	})
+
+	req := func(origin string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		return r
+	}
+	loopback := []string{"http://localhost:3000", "http://127.0.0.1:8080", "http://[::1]:3000"}
+
+	wsAllowLocalhost = true
+	for _, o := range loopback {
+		if !wsOriginAllowed(req(o)) {
+			t.Fatalf("в дев-режиме origin %q должен приниматься", o)
+		}
+	}
+
+	wsAllowLocalhost = false
+	for _, o := range loopback {
+		if wsOriginAllowed(req(o)) {
+			t.Fatalf("при WS_ALLOW_LOCALHOST=0 origin %q должен отвергаться", o)
+		}
+	}
+	// Флаг не влияет ни на allowlist, ни на клиента без Origin.
+	if !wsOriginAllowed(req("https://snakes.example.com")) {
+		t.Fatal("origin из allowlist отвергнут")
+	}
+	if !wsOriginAllowed(req("")) {
+		t.Fatal("запрос без Origin отвергнут")
+	}
+	if wsOriginAllowed(req("https://evil.example.com")) {
+		t.Fatal("чужой origin принят")
+	}
+}
+
+func TestLoadWSAllowLocalhostEnv(t *testing.T) {
+	for _, v := range []string{"0", "false", "no", "off", "OFF"} {
+		t.Setenv("WS_ALLOW_LOCALHOST", v)
+		if loadWSAllowLocalhost() {
+			t.Fatalf("WS_ALLOW_LOCALHOST=%q должен выключать localhost", v)
+		}
+	}
+	for _, v := range []string{"", "1", "true", "yes"} {
+		t.Setenv("WS_ALLOW_LOCALHOST", v)
+		if !loadWSAllowLocalhost() {
+			t.Fatalf("WS_ALLOW_LOCALHOST=%q должен оставлять localhost включённым", v)
+		}
 	}
 }

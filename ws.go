@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -61,8 +62,47 @@ type tokenBucket struct {
 }
 
 type ipRateLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]*tokenBucket
+	mu        sync.Mutex
+	buckets   map[string]*tokenBucket
+	lastSweep time.Time
+}
+
+const (
+	// rateLimiterSweepAt is the bucket count above which idle entries are
+	// dropped. One bucket exists per (IP, message type) pair.
+	rateLimiterSweepAt = 5000
+	// rateLimiterSweepEvery bounds how often the O(n) sweep runs.
+	rateLimiterSweepEvery = 30 * time.Second
+	// rateLimiterBucketTTL is how long an untouched bucket is kept.
+	rateLimiterBucketTTL = 10 * time.Minute
+	// rateLimiterBucketTTLTight is the fallback cutoff used when a normal
+	// sweep did not bring the map back under the threshold.
+	rateLimiterBucketTTLTight = time.Minute
+)
+
+// sweepLocked drops idle buckets. It must run on the accepted path too: the
+// original code swept only after a rejection, so a server where nobody is
+// being limited grew the map without bound. Caller holds l.mu.
+func (l *ipRateLimiter) sweepLocked(now time.Time) {
+	if len(l.buckets) <= rateLimiterSweepAt {
+		return
+	}
+	if !l.lastSweep.IsZero() && now.Sub(l.lastSweep) < rateLimiterSweepEvery {
+		return
+	}
+	l.lastSweep = now
+	l.dropIdleLocked(now.Add(-rateLimiterBucketTTL))
+	if len(l.buckets) > rateLimiterSweepAt {
+		l.dropIdleLocked(now.Add(-rateLimiterBucketTTLTight))
+	}
+}
+
+func (l *ipRateLimiter) dropIdleLocked(cut time.Time) {
+	for k, v := range l.buckets {
+		if v.lastSeen.Before(cut) {
+			delete(l.buckets, k)
+		}
+	}
 }
 
 func (l *ipRateLimiter) allow(key string, rate float64, burst float64) bool {
@@ -88,17 +128,10 @@ func (l *ipRateLimiter) allow(key string, rate float64, burst float64) bool {
 		b.tokens = math.Min(b.burst, b.tokens+dt*b.rate)
 		b.last = now
 	}
+	l.sweepLocked(now)
 	if b.tokens >= 1 {
 		b.tokens -= 1
 		return true
-	}
-	if len(l.buckets) > 5000 {
-		cut := now.Add(-10 * time.Minute)
-		for k, v := range l.buckets {
-			if v.lastSeen.Before(cut) {
-				delete(l.buckets, k)
-			}
-		}
 	}
 	return false
 }
@@ -116,6 +149,25 @@ func normalizeWSOrigin(s string) string {
 	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
 }
 
+// wsAllowLocalhost keeps the "any loopback Origin is fine" shortcut. It is
+// convenient in development and a hole in production, where it hands a page
+// served by malware on the player's own machine a valid Origin. On by default,
+// switch it off with WS_ALLOW_LOCALHOST=0.
+var wsAllowLocalhost = loadWSAllowLocalhost()
+
+func loadWSAllowLocalhost() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("WS_ALLOW_LOCALHOST"))) {
+	case "0", "false", "no", "off":
+		return false
+	}
+	return true
+}
+
+func isLoopbackOriginHost(h string) bool {
+	h = strings.ToLower(strings.TrimSpace(h))
+	return h == "localhost" || h == "127.0.0.1" || h == "::1"
+}
+
 // wsOriginAllowed is the single arbiter of the WebSocket Origin check;
 // websocket.Accept runs with InsecureSkipVerify so nothing rejects earlier.
 func wsOriginAllowed(r *http.Request) bool {
@@ -124,10 +176,8 @@ func wsOriginAllowed(r *http.Request) bool {
 		// Non-browser client: no Origin to judge.
 		return true
 	}
-	u, err := url.Parse(origin)
-	if err == nil {
-		h := strings.ToLower(strings.TrimSpace(u.Hostname()))
-		if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+	if wsAllowLocalhost {
+		if u, err := url.Parse(origin); err == nil && isLoopbackOriginHost(u.Hostname()) {
 			return true
 		}
 	}
@@ -293,6 +343,10 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			rm := hub.createRoom(title)
+			if rm == nil {
+				client.sendJSON(r.Context(), "error", map[string]any{"message": "rooms_limit_reached"})
+				continue
+			}
 			client.joinRoom(r.Context(), hub, rm)
 		case "leave":
 			client.leaveRoom(r.Context())
@@ -494,6 +548,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			owned := inv != nil && (*inv&bit) != 0
 			var payload map[string]any
 			balance := pr.StyleBalance
+			changed := owned && profileEquippedLocked(pr, cat) != id
 			if owned {
 				profileSetEquippedLocked(pr, cat, id)
 				pr.LastSeen = time.Now().Unix()
@@ -513,9 +568,14 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "cosmetics_not_owned"})
 				continue
 			}
-			markProfilesDirty()
-			log.Printf("cosmetics_txn pid=%q cat=%q id=%d price=%d balance_before=%d balance_after=%d",
-				shortPID(pid), "equip:"+cat, id, 0, balance, balance)
+			// Re-equipping what is already on is a no-op: neither persist nor
+			// log it, or a client at the rate limit turns the log into a
+			// firehose and the autosave into a treadmill.
+			if changed {
+				markProfilesDirty()
+				log.Printf("cosmetics_txn pid=%q cat=%q id=%d price=%d balance_before=%d balance_after=%d",
+					shortPID(pid), "equip:"+cat, id, 0, balance, balance)
+			}
 			client.sendJSON(r.Context(), "cosmetics", payload)
 			if rm != nil {
 				rm.broadcastCosExtra(r.Context())
@@ -550,6 +610,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			ensureProfileCosmeticsLocked(pr)
 			// id 0 clears the title and is always allowed.
 			unlocked := p.ID == 0 || titleUnlockedLocked(pr, p.ID)
+			changed := unlocked && pr.TitleID != p.ID
 			var payload map[string]any
 			if unlocked {
 				pr.TitleID = p.ID
@@ -567,8 +628,10 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "title_not_unlocked"})
 				continue
 			}
-			markProfilesDirty()
-			log.Printf("title_equip pid=%q id=%d", shortPID(pid), p.ID)
+			if changed {
+				markProfilesDirty()
+				log.Printf("title_equip pid=%q id=%d", shortPID(pid), p.ID)
+			}
 			client.sendJSON(r.Context(), "cosmetics", payload)
 			if rm != nil {
 				rm.broadcastCosExtra(r.Context())

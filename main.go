@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -440,7 +441,28 @@ func dailyGoalFor(slot uint8, t uint8) uint16 {
 	return 0
 }
 
-func (r *Room) ensureProfileDailyLocked(p *Profile) {
+// dailyRollType picks a quest type for a slot from the profile id and the day.
+// It has to be deterministic: the quests sent at join are rolled on a transient
+// profile (profileForKey), and the stored profile created later on the first
+// real grant must come up with exactly the same set, otherwise the client shows
+// quests that nothing is counting towards.
+func dailyRollType(pid string, day int64, slot uint8) uint8 {
+	h := uint32(2166136261)
+	mix := func(b byte) {
+		h ^= uint32(b)
+		h *= 16777619
+	}
+	for i := 0; i < len(pid); i++ {
+		mix(pid[i])
+	}
+	for s := 0; s < 8; s++ {
+		mix(byte(day >> (8 * s)))
+	}
+	mix(slot)
+	return uint8(1 + h%4)
+}
+
+func ensureProfileDailyLocked(p *Profile, pid string) {
 	if p == nil {
 		return
 	}
@@ -470,7 +492,7 @@ func (r *Room) ensureProfileDailyLocked(p *Profile) {
 		if *t != 0 {
 			return
 		}
-		nt := uint8(1 + r.rng.Intn(4))
+		nt := dailyRollType(pid, today, slot)
 		*t = nt
 		*goal = dailyGoalFor(slot, nt)
 		*prog = 0
@@ -508,14 +530,19 @@ func (r *Room) sendDailyStateToPlayer(p *Player) {
 		prog uint16
 	}
 	profilesMu.Lock()
-	r.ensureProfileDailyLocked(pr)
+	ensureProfileDailyLocked(pr, p.profileKey)
 	slots := [3]slotState{
 		{1, pr.DailyType1, pr.DailyGoal1, pr.DailyProg1},
 		{2, pr.DailyType2, pr.DailyGoal2, pr.DailyProg2},
 		{3, pr.DailyType3, pr.DailyGoal3, pr.DailyProg3},
 	}
+	// pr may be a transient profile (nothing earned yet): rolling its quests
+	// changes nothing on disk, so do not wake the autosave for it.
+	stored := profiles[p.profileKey] != nil
 	profilesMu.Unlock()
-	markProfilesDirty()
+	if stored {
+		markProfilesDirty()
+	}
 
 	for _, s := range slots {
 		r.pushEvent(Event{Kind: EventDailyAssign, A: p.num, B: s.goal, C: (uint32(s.t) << 16) | uint32(s.prog), D: s.slot})
@@ -587,7 +614,7 @@ func (r *Room) grantFirstWinBonus(p *Player) {
 	if p == nil || p.bot {
 		return
 	}
-	pr := profileForKey(p.profileKey)
+	pr := profileForKeyCreate(p.profileKey)
 	if pr == nil {
 		return
 	}
@@ -609,12 +636,12 @@ func (r *Room) addDailyProgress(p *Player, kind uint8, inc uint16) {
 	if p == nil || p.bot || inc == 0 {
 		return
 	}
-	pr := profileForKey(p.profileKey)
+	pr := profileForKeyCreate(p.profileKey)
 	if pr == nil {
 		return
 	}
 	profilesMu.Lock()
-	r.ensureProfileDailyLocked(pr)
+	ensureProfileDailyLocked(pr, p.profileKey)
 	rewardCount := r.addDailyProgressLocked(p, pr, kind, inc)
 	profilesMu.Unlock()
 	markProfilesDirty()
@@ -952,6 +979,24 @@ type Hub struct {
 	rooms      map[int]*Room
 	nextRoomID int
 	roomLimit  int
+}
+
+// DefaultMaxRooms caps how many rooms may exist at once. A room costs ~500 KB
+// of grid arrays plus up to BotCount bots and its own 10 Hz goroutine, and it
+// survives for 30s after the last human leaves, so an unbounded count is a
+// memory DoS: one connection creating rooms at the rate limit would hold
+// dozens of them alive. Override with MAX_ROOMS.
+const DefaultMaxRooms = 64
+
+var maxRoomsLimit = loadMaxRooms()
+
+func loadMaxRooms() int {
+	if v := strings.TrimSpace(os.Getenv("MAX_ROOMS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return DefaultMaxRooms
 }
 
 type playerAnchor struct {
@@ -1419,15 +1464,39 @@ func dayStampNow() int64 {
 	return time.Now().Unix() / 86400
 }
 
+// profileForKey is the READ path. It returns the stored profile when there is
+// one, otherwise a transient zero-value profile that is deliberately NOT put in
+// the map: a connect/join/disconnect loop must not be able to grow the store.
+// Writes through a transient profile are dropped, which is exactly right for a
+// player who has not earned anything yet.
 func profileForKey(key string) *Profile {
 	if key == "" {
 		return nil
 	}
 	profilesMu.Lock()
+	p := profiles[key]
+	profilesMu.Unlock()
+	if p == nil {
+		p = &Profile{LastSeen: time.Now().Unix()}
+	}
+	return p
+}
+
+// profileForKeyCreate is the WRITE path: it materialises the profile in the
+// store. Only call it where there is real progress to persist (a Style grant, a
+// quest step, a purchase) — never from a path a client can drive without
+// actually playing.
+func profileForKeyCreate(key string) *Profile {
+	if key == "" {
+		return nil
+	}
+	now := time.Now()
+	profilesMu.Lock()
 	defer profilesMu.Unlock()
 	p := profiles[key]
 	if p == nil {
-		p = &Profile{LastSeen: time.Now().Unix()}
+		evictProfilesLocked(now)
+		p = &Profile{LastSeen: now.Unix()}
 		profiles[key] = p
 		markProfilesDirty()
 	}
@@ -2347,6 +2416,10 @@ func (c *Client) joinRoomByID(ctx context.Context, hub *Hub, id int) {
 }
 
 func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
+	if rm == nil {
+		c.sendJSON(ctx, "error", map[string]any{"message": "rooms_limit_reached"})
+		return
+	}
 	c.leaveRoomInternal(ctx, false)
 
 	name := c.name.Load().(string)
@@ -2358,11 +2431,12 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 		return
 	}
 
-	pnum := rm.nextPlayerNum
+	pnum := rm.allocPlayerNumLocked()
 	if pnum == 0 {
-		pnum = 1
+		rm.mu.Unlock()
+		c.sendJSON(ctx, "error", map[string]any{"message": "room_full"})
+		return
 	}
-	rm.nextPlayerNum = pnum + 1
 
 	hue := rm.allocUniqueHue()
 
@@ -2402,8 +2476,13 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 		ensureProfileCosmeticsLocked(pr)
 		pr.LastSeen = time.Now().Unix()
 		applyProfileCosmeticsToPlayerLocked(pl, pr)
+		// Only a stored profile has something to persist; a transient one is
+		// discarded with this call.
+		stored := profiles[pl.profileKey] != nil
 		profilesMu.Unlock()
-		markProfilesDirty()
+		if stored {
+			markProfilesDirty()
+		}
 	}
 
 	rm.players[pnum] = pl
@@ -2674,6 +2753,25 @@ func (h *Hub) pickRoomForJoin() *Room {
 		return best
 	}
 
+	// At the room cap every room is full. Hand back the emptiest one anyway so
+	// auto-join never returns nil: joinRoom then answers a plain "room_full".
+	if len(h.rooms) >= maxRoomsLimit {
+		bestHumans := math.MaxInt
+		bestID = math.MaxInt
+		for _, r := range h.rooms {
+			r.mu.Lock()
+			humans := r.humanCount
+			id := r.id
+			r.mu.Unlock()
+			if humans < bestHumans || (humans == bestHumans && id < bestID) {
+				bestHumans = humans
+				bestID = id
+				best = r
+			}
+		}
+		return best
+	}
+
 	r := newRoom(h, h.nextRoomID, h.roomLimit)
 	h.nextRoomID++
 	h.rooms[r.id] = r
@@ -2681,6 +2779,8 @@ func (h *Hub) pickRoomForJoin() *Room {
 	return r
 }
 
+// createRoom makes a room on client request. It returns nil once maxRoomsLimit
+// is reached; the caller reports "rooms_limit_reached".
 func (h *Hub) createRoom(title string) *Room {
 	name := sanitizeRoomName(title)
 	if name == "" {
@@ -2688,6 +2788,10 @@ func (h *Hub) createRoom(title string) *Room {
 	}
 
 	h.mu.Lock()
+	if len(h.rooms) >= maxRoomsLimit {
+		h.mu.Unlock()
+		return nil
+	}
 	r := newRoom(h, h.nextRoomID, h.roomLimit)
 	h.nextRoomID++
 	h.rooms[r.id] = r
@@ -3171,11 +3275,11 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 	achvCount := 0
 	var pr *Profile
 	if !p.bot {
-		pr = profileForKey(p.profileKey)
+		pr = profileForKeyCreate(p.profileKey)
 	}
 	if pr != nil {
 		profilesMu.Lock()
-		r.ensureProfileDailyLocked(pr)
+		ensureProfileDailyLocked(pr, p.profileKey)
 		granted := styleIncomeGrantLocked(pr, p.profileKey, delta)
 		if granted == 0 {
 			profilesMu.Unlock()
@@ -3279,10 +3383,10 @@ func (r *Room) addContractProgress(p *Player, inc uint16) {
 		r.addStyle(p, StyleContractReward, StyleContract)
 		r.awardPoints(p.num, 16, PointsContract)
 		if !p.bot {
-			pr := profileForKey(p.profileKey)
+			pr := profileForKeyCreate(p.profileKey)
 			if pr != nil {
 				profilesMu.Lock()
-				r.ensureProfileDailyLocked(pr)
+				ensureProfileDailyLocked(pr, p.profileKey)
 				if pr.TotalContracts < ^uint32(0) {
 					pr.TotalContracts++
 				}
@@ -4197,11 +4301,10 @@ func (r *Room) botROIBounds(p *Player) (minX, minY, maxX, maxY int) {
 
 // newBotLocked creates one bot with the given personality and spawns it.
 func (r *Room) newBotLocked(used, usedStarts map[string]struct{}, tier, arch uint8, fallbackN int) *Player {
-	pnum := r.nextPlayerNum
+	pnum := r.allocPlayerNumLocked()
 	if pnum == 0 {
-		pnum = 1
+		return nil
 	}
-	r.nextPlayerNum = pnum + 1
 	name := pickUniqueBotName(r.rng, used, usedStarts, fallbackN)
 	hue := r.allocUniqueHue()
 	p := &Player{
@@ -4312,7 +4415,10 @@ func (r *Room) syncBotPopulationLocked() {
 	for have < want {
 		tier := pickUnderfilled(tiers, tierT)
 		arch := pickUnderfilled(archs, archT)
-		r.newBotLocked(used, usedStarts, tier, arch, have+1)
+		if r.newBotLocked(used, usedStarts, tier, arch, have+1) == nil {
+			// Player numbers exhausted: stop instead of spinning forever.
+			break
+		}
 		tiers[tier]++
 		archs[arch]++
 		have++
@@ -4457,8 +4563,13 @@ const (
 	// tick, so a huge estate can never stall a tick.
 	ReclaimExpireBudget = 1024
 	// coolOwnerFlag marks a grid value on the wire as "cooling territory of
-	// player (value &^ coolOwnerFlag)". Player numbers never reach 0x8000.
+	// player (value &^ coolOwnerFlag)". Player numbers are allocated strictly
+	// below it (see maxPlayerNum / allocPlayerNumLocked), so a live owner can
+	// never be mistaken for cooling territory.
 	coolOwnerFlag = uint16(0x8000)
+	// maxPlayerNum is the highest number a player may be given. It must stay
+	// below coolOwnerFlag.
+	maxPlayerNum = coolOwnerFlag - 1
 
 	// Bot reclaim (aiMode 5) tunables. The scan is a strided sweep of the
 	// bot's own ROI, so it stays far cheaper than the hunt scan.
@@ -5083,7 +5194,10 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 		}
 	}
 
-	if p.bot {
+	// The bot_death line is ~700 bytes of AI state: useful when tuning the AI,
+	// pure disk burn in production. BOT_DEATH_SNAP gates the whole block, not
+	// just the local snapshot field.
+	if p.bot && debugBotDeathSnap {
 		area, bw, bh, dens, per := r.measureTerritoryShape(num, p)
 		headX := p.x
 		headY := p.y
@@ -5115,16 +5229,13 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 		if p.aiLastSeenTick != 0 {
 			lastSeenDist = manhattan(headX, headY, p.aiLastSeenX, p.aiLastSeenY)
 		}
-		snap := ""
-		if debugBotDeathSnap {
-			snapCX := headX
-			snapCY := headY
-			if reason == "self_trail" {
-				snapCX = prevX
-				snapCY = prevY
-			}
-			snap = r.botLocalSnapshot(num, snapCX, snapCY, hx, hy, 5)
+		snapCX := headX
+		snapCY := headY
+		if reason == "self_trail" {
+			snapCX = prevX
+			snapCY = prevY
 		}
+		snap := r.botLocalSnapshot(num, snapCX, snapCY, hx, hy, 5)
 		speedActive := p.speedUntil != 0 && r.tick < p.speedUntil
 		avoidAge := -1
 		if p.aiAvoidTick != 0 {
@@ -5217,10 +5328,10 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 		if k != nil {
 			r.ensureContract(k)
 			if !k.bot {
-				pr := profileForKey(k.profileKey)
+				pr := profileForKeyCreate(k.profileKey)
 				if pr != nil {
 					profilesMu.Lock()
-					r.ensureProfileDailyLocked(pr)
+					ensureProfileDailyLocked(pr, k.profileKey)
 					if pr.TotalKills < ^uint32(0) {
 						pr.TotalKills++
 					}
@@ -5261,10 +5372,10 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 				r.addStyle(k, 20, StyleRevenge)
 				r.awardPoints(k.num, 10, PointsRevenge)
 				if !k.bot {
-					pr := profileForKey(k.profileKey)
+					pr := profileForKeyCreate(k.profileKey)
 					if pr != nil {
 						profilesMu.Lock()
-						r.ensureProfileDailyLocked(pr)
+						ensureProfileDailyLocked(pr, k.profileKey)
 						if pr.TotalRevenge < ^uint32(0) {
 							pr.TotalRevenge++
 						}
@@ -5304,10 +5415,10 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 			r.addStyle(k, 40, StyleBounty)
 			r.awardPoints(k.num, 28, PointsBounty)
 			if !k.bot {
-				pr := profileForKey(k.profileKey)
+				pr := profileForKeyCreate(k.profileKey)
 				if pr != nil {
 					profilesMu.Lock()
-					r.ensureProfileDailyLocked(pr)
+					ensureProfileDailyLocked(pr, k.profileKey)
 					if pr.TotalBounty < ^uint32(0) {
 						pr.TotalBounty++
 					}
@@ -7616,7 +7727,7 @@ func (r *Room) capture(playerNum uint16) {
 			r.addDailyProgress(p, DailyCapture, uint16(trailLen))
 			// TotalCapture was declared but never fed; the capture achievements
 			// need it.
-			if pr := profileForKey(p.profileKey); pr != nil && trailLen > 0 {
+			if pr := profileForKeyCreate(p.profileKey); pr != nil && trailLen > 0 {
 				profilesMu.Lock()
 				if pr.TotalCapture < ^uint32(0)-uint32(trailLen) {
 					pr.TotalCapture += uint32(trailLen)
@@ -7967,10 +8078,10 @@ func (r *Room) applyMove(p *Player) {
 				r.addContractProgress(p, 1)
 			}
 			if !p.bot {
-				pr := profileForKey(p.profileKey)
+				pr := profileForKeyCreate(p.profileKey)
 				if pr != nil {
 					profilesMu.Lock()
-					r.ensureProfileDailyLocked(pr)
+					ensureProfileDailyLocked(pr, p.profileKey)
 					if pr.TotalPickups < ^uint32(0) {
 						pr.TotalPickups++
 					}
@@ -8476,28 +8587,6 @@ func (r *Room) step() {
 			roiSkipped,
 		)
 	}
-	if tickNow%10 == 0 {
-		d := time.Since(stepStartedAt)
-		log.Printf(
-			"room_step_stat room=%d tick=%d total_ms=%.3f bot_ms=%.3f move_ms=%.3f roi_ms=%.3f send_ms=%.3f clients=%d players=%d alive=%d forceROI=%t changedGrid=%d changedTrail=%d roiFast=%d roiScan=%d roiSkipped=%d",
-			r.id,
-			tickNow,
-			float64(d)/float64(time.Millisecond),
-			float64(botDur)/float64(time.Millisecond),
-			float64(moveDur)/float64(time.Millisecond),
-			float64(roiDur)/float64(time.Millisecond),
-			float64(sendDur)/float64(time.Millisecond),
-			len(clients),
-			len(players),
-			len(alive),
-			forceROI,
-			changedGridN,
-			changedTrailN,
-			roiFast,
-			roiScan,
-			roiSkipped,
-		)
-	}
 
 	_ = matchStartPayload
 }
@@ -8759,202 +8848,6 @@ func (r *Room) buildMinimapChunkBinary(full bool) []byte {
 	return out
 }
 
-func (r *Room) buildROIBinary(rx, ry, rw, rh int, full bool, sinceTick uint32, players []*Player) []byte {
-	// packed changes use absolute cell index, so the client can patch its full arrays
-	dg := make([]uint32, 0, rw*rh/2)
-	dt := make([]uint32, 0, rw*rh/4)
-
-	for y := ry; y < ry+rh; y++ {
-		row := y * W
-		for x := rx; x < rx+rw; x++ {
-			i := row + x
-			if full || r.gridStamp[i] > sinceTick {
-				dg = append(dg, packChange(uint16(i), r.gridWireAt(i)))
-			}
-			if full || r.trailStamp[i] > sinceTick {
-				dt = append(dt, packChange(uint16(i), r.trailOwner[i]))
-			}
-		}
-	}
-
-	plCount := len(players)
-	bytesPlayers := plCount * (2 + 2 + 2 + 1 + 1 + 2 + 2 + 2 + 1 + 1 + 5)
-	bytesDG := len(dg) * 4
-	bytesDT := len(dt) * 4
-
-	out := make([]byte, 0, 1+4+2+bytesPlayers+2+2+2+2+4+4+bytesDG+bytesDT)
-	pushU8 := func(v uint8) { out = append(out, v) }
-	pushU16 := func(v uint16) {
-		var b [2]byte
-		binary.LittleEndian.PutUint16(b[:], v)
-		out = append(out, b[:]...)
-	}
-	pushU32 := func(v uint32) {
-		var b [4]byte
-		binary.LittleEndian.PutUint32(b[:], v)
-		out = append(out, b[:]...)
-	}
-
-	pushU8(MsgROIBinary)
-	pushU32(r.tick)
-	pushU16(uint16(plCount))
-	for _, p := range players {
-		pushU16(p.num)
-		pushU16(uint16(maxInt(0, p.x)))
-		pushU16(uint16(maxInt(0, p.y)))
-		pushU8(uint8(p.dir))
-		if p.alive {
-			pushU8(1)
-		} else {
-			pushU8(0)
-		}
-		pushU16(r.scores[p.num])
-		pushU16(r.points[p.num])
-		pushU16(p.hue)
-		pushU8(r.playerShieldBits(p))
-		if p.bot {
-			pushU8(1)
-		} else {
-			pushU8(0)
-		}
-		pushU8(p.cosCaptureFx)
-		pushU8(p.cosHead)
-		pushU8(p.cosSeg)
-		pushU8(p.cosNameplate)
-		pushU8(p.cosFrame)
-	}
-	pushU16(uint16(rx))
-	pushU16(uint16(ry))
-	pushU16(uint16(rw))
-	pushU16(uint16(rh))
-	pushU32(uint32(bytesDG))
-	pushU32(uint32(bytesDT))
-	for _, v := range dg {
-		pushU32(v)
-	}
-	for _, v := range dt {
-		pushU32(v)
-	}
-	return out
-}
-
-func (r *Room) buildStateBinary(full bool) []byte {
-	players := make([]*Player, 0, len(r.players))
-	for _, p := range r.players {
-		players = append(players, p)
-	}
-
-	gridBytes := 0
-	trailBytes := 0
-	dgBytes := 0
-	dtBytes := 0
-	if full {
-		gridBytes = len(r.gridOwner) * 2
-		trailBytes = len(r.trailOwner) * 2
-	} else {
-		dgBytes = len(r.changedGrid) * 4
-		dtBytes = len(r.changedTrail) * 4
-	}
-
-	headerBytes := 1 + 1 + 4 + 2
-	playerBytes := len(players) * 21
-	lensBytes := 4 + 4
-	payloadBytes := 0
-	if full {
-		payloadBytes = gridBytes + trailBytes
-	} else {
-		payloadBytes = dgBytes + dtBytes
-	}
-
-	total := headerBytes + playerBytes + lensBytes + payloadBytes
-	out := make([]byte, total)
-	o := 0
-	out[o] = MsgStateBinary
-	o++
-	if full {
-		out[o] = 1
-	} else {
-		out[o] = 0
-	}
-	o++
-	binary.LittleEndian.PutUint32(out[o:], r.tick)
-	o += 4
-	binary.LittleEndian.PutUint16(out[o:], uint16(len(players)))
-	o += 2
-
-	for _, p := range players {
-		binary.LittleEndian.PutUint16(out[o:], p.num)
-		o += 2
-		binary.LittleEndian.PutUint16(out[o:], uint16(maxInt(0, p.x)))
-		o += 2
-		binary.LittleEndian.PutUint16(out[o:], uint16(maxInt(0, p.y)))
-		o += 2
-		out[o] = uint8(p.dir)
-		o++
-		if p.alive {
-			out[o] = 1
-		} else {
-			out[o] = 0
-		}
-		o++
-		sc := r.scores[p.num]
-		binary.LittleEndian.PutUint16(out[o:], sc)
-		o += 2
-		binary.LittleEndian.PutUint16(out[o:], r.points[p.num])
-		o += 2
-		binary.LittleEndian.PutUint16(out[o:], p.hue)
-		o += 2
-		out[o] = r.playerShieldBits(p)
-		o++
-		if p.bot {
-			out[o] = 1
-		} else {
-			out[o] = 0
-		}
-		o++
-		out[o] = p.cosCaptureFx
-		o++
-		out[o] = p.cosHead
-		o++
-		out[o] = p.cosSeg
-		o++
-		out[o] = p.cosNameplate
-		o++
-		out[o] = p.cosFrame
-		o++
-	}
-
-	if full {
-		binary.LittleEndian.PutUint32(out[o:], uint32(gridBytes))
-		o += 4
-		binary.LittleEndian.PutUint32(out[o:], uint32(trailBytes))
-		o += 4
-		for i := range r.gridOwner {
-			binary.LittleEndian.PutUint16(out[o:], r.gridWireAt(i))
-			o += 2
-		}
-		for _, v := range r.trailOwner {
-			binary.LittleEndian.PutUint16(out[o:], v)
-			o += 2
-		}
-		return out
-	}
-
-	binary.LittleEndian.PutUint32(out[o:], uint32(dgBytes))
-	o += 4
-	binary.LittleEndian.PutUint32(out[o:], uint32(dtBytes))
-	o += 4
-	for _, v := range r.changedGrid {
-		binary.LittleEndian.PutUint32(out[o:], v)
-		o += 4
-	}
-	for _, v := range r.changedTrail {
-		binary.LittleEndian.PutUint32(out[o:], v)
-		o += 4
-	}
-	return out
-}
-
 func parseDir(s string) (Dir, bool) {
 	switch s {
 	case "up":
@@ -9051,6 +8944,34 @@ var colorVariants = []hslVariant{
 	{s: 90, l: 52},
 	{s: 66, l: 52},
 	{s: 90, l: 62},
+}
+
+// allocPlayerNumLocked hands out the first free number in 1..maxPlayerNum,
+// scanning forward from the last one issued and wrapping around. Numbers are
+// burned by bots too (syncBotPopulationLocked recreates them on every human
+// join/leave), so a plain increment would eventually reach coolOwnerFlag and
+// make live territory indistinguishable from cooling territory on the wire.
+// Returns 0 when the room has no free number left. Caller holds r.mu.
+func (r *Room) allocPlayerNumLocked() uint16 {
+	n := r.nextPlayerNum
+	if n < 1 || n > maxPlayerNum {
+		n = 1
+	}
+	for i := 0; i < int(maxPlayerNum); i++ {
+		if r.players[n] == nil {
+			next := n + 1
+			if next > maxPlayerNum {
+				next = 1
+			}
+			r.nextPlayerNum = next
+			return n
+		}
+		n++
+		if n > maxPlayerNum {
+			n = 1
+		}
+	}
+	return 0
 }
 
 func (r *Room) allocUniqueHue() uint16 {

@@ -14,6 +14,14 @@ services:
         BUILD_TIME: ${BUILD_TIME:-unknown}
     image: snakes:local
     restart: unless-stopped
+    # Драйвер json-file по умолчанию НЕ ограничен: файл в
+    # /var/lib/docker/containers/<id>/*-json.log растёт до заполнения диска, а
+    # диск здесь общий с чужими проектами. 10m x 3 = максимум 30 МБ на сервис.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       # .env необязателен: без него берутся дефолты ниже. Но PROFILE_SECRET
       # задать придётся (см. комментарий у переменной).
@@ -64,6 +72,11 @@ services:
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       game:
         condition: service_healthy

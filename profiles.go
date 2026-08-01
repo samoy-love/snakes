@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -255,6 +256,31 @@ func profileCosInvLocked(pr *Profile, cat string) *uint8 {
 	return nil
 }
 
+// profileEquippedLocked returns the id currently equipped in a category, or 0
+// for an unknown category. Caller holds profilesMu.
+func profileEquippedLocked(pr *Profile, cat string) uint8 {
+	if pr == nil {
+		return 0
+	}
+	switch cat {
+	case "capturefx":
+		return pr.CosEqCaptureFx
+	case "head":
+		return pr.CosEqHead
+	case "seg":
+		return pr.CosEqSeg
+	case "nameplate":
+		return pr.CosEqNameplate
+	case "frame":
+		return pr.CosEqFrame
+	case "terr":
+		return pr.CosEqTerr
+	case "death":
+		return pr.CosEqDeath
+	}
+	return 0
+}
+
 // profileSetEquippedLocked equips an item. Caller holds profilesMu.
 func profileSetEquippedLocked(pr *Profile, cat string, id uint8) {
 	if pr == nil {
@@ -357,7 +383,115 @@ const (
 	profilesFileVersion = 1
 	profileTTL          = 90 * 24 * time.Hour
 	profilesSaveEvery   = 30 * time.Second
+
+	// DefaultProfileEmptyTTLHours is how long a profile with nothing in it is
+	// kept. Such an entry only exists because someone touched a progress path
+	// once; it costs a map slot and a slice of every 30s marshal, so it must
+	// not sit around for the full 90 days. Override with
+	// PROFILE_EMPTY_TTL_HOURS.
+	DefaultProfileEmptyTTLHours = 6
+
+	// DefaultMaxProfiles bounds the store. saveProfiles copies and marshals the
+	// whole map under profilesMu, and profilesMu is taken from under rm.mu on
+	// the hot paths, so an unbounded store stalls every room at once. Override
+	// with MAX_PROFILES.
+	DefaultMaxProfiles = 50000
 )
+
+var (
+	profileEmptyTTL = loadProfileEmptyTTL()
+	maxProfiles     = loadMaxProfiles()
+)
+
+func loadProfileEmptyTTL() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("PROFILE_EMPTY_TTL_HOURS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Hour
+		}
+	}
+	return DefaultProfileEmptyTTLHours * time.Hour
+}
+
+func loadMaxProfiles() int {
+	if v := strings.TrimSpace(os.Getenv("MAX_PROFILES")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return DefaultMaxProfiles
+}
+
+// profileHasProgressLocked reports whether a profile holds anything worth
+// keeping for 90 days: currency earned or held, a cosmetic bought past the free
+// default (bit 0), an achievement, a title or a real login streak.
+// Caller holds profilesMu.
+func profileHasProgressLocked(pr *Profile) bool {
+	if pr == nil {
+		return false
+	}
+	if pr.StyleBalance > 0 || pr.TotalStyleGained > 0 {
+		return true
+	}
+	if pr.AchvMask != 0 || pr.TitleID != 0 {
+		return true
+	}
+	if pr.StreakDays > 1 {
+		return true
+	}
+	inv := [...]uint8{
+		pr.CosInvCaptureFx, pr.CosInvHead, pr.CosInvSeg,
+		pr.CosInvNameplate, pr.CosInvFrame, pr.CosInvTerr, pr.CosInvDeath,
+	}
+	for _, m := range inv {
+		// Bit 0 is granted to everyone by ensureProfileCosmeticsLocked.
+		if m&^uint8(1) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// profileExpiredLocked applies the short TTL to empty profiles and the full one
+// to profiles with progress. Caller holds profilesMu.
+func profileExpiredLocked(pr *Profile, now time.Time) bool {
+	if pr == nil {
+		return true
+	}
+	ttl := profileEmptyTTL
+	if profileHasProgressLocked(pr) {
+		ttl = profileTTL
+	}
+	return pr.LastSeen < now.Add(-ttl).Unix()
+}
+
+// evictProfilesLocked keeps the store under maxProfiles: expired entries go
+// first, then the least recently seen ones. Caller holds profilesMu.
+func evictProfilesLocked(now time.Time) {
+	if len(profiles) < maxProfiles {
+		return
+	}
+	for pid, pr := range profiles {
+		if profileExpiredLocked(pr, now) {
+			delete(profiles, pid)
+		}
+	}
+	if len(profiles) < maxProfiles {
+		return
+	}
+	type entry struct {
+		pid  string
+		seen int64
+	}
+	list := make([]entry, 0, len(profiles))
+	for pid, pr := range profiles {
+		list = append(list, entry{pid, pr.LastSeen})
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].seen < list[j].seen })
+	drop := len(profiles) - maxProfiles + 1
+	for i := 0; i < drop && i < len(list); i++ {
+		delete(profiles, list[i].pid)
+	}
+}
 
 var profilesDirty atomic.Bool
 
@@ -416,7 +550,7 @@ func loadProfiles() {
 	if savedAt == 0 {
 		savedAt = time.Now().Unix()
 	}
-	cutoff := time.Now().Add(-profileTTL).Unix()
+	now := time.Now()
 	loaded, evicted := 0, 0
 	profilesMu.Lock()
 	for pid, pr := range f.Profiles {
@@ -426,7 +560,7 @@ func loadProfiles() {
 		if pr.LastSeen == 0 {
 			pr.LastSeen = savedAt
 		}
-		if pr.LastSeen < cutoff {
+		if profileExpiredLocked(pr, now) {
 			evicted++
 			continue
 		}
@@ -434,6 +568,9 @@ func loadProfiles() {
 		profiles[pid] = pr
 		loaded++
 	}
+	// A file written before the cap existed may be larger than it.
+	evictProfilesLocked(now)
+	loaded = len(profiles)
 	profilesMu.Unlock()
 	log.Printf("profiles_loaded path=%q count=%d evicted=%d", path, loaded, evicted)
 }
@@ -446,13 +583,14 @@ func saveProfiles() error {
 		return err
 	}
 
-	cutoff := time.Now().Add(-profileTTL).Unix()
+	now := time.Now()
 	profilesMu.Lock()
 	for pid, pr := range profiles {
-		if pr == nil || pr.LastSeen < cutoff {
+		if pr == nil || profileExpiredLocked(pr, now) {
 			delete(profiles, pid)
 		}
 	}
+	evictProfilesLocked(now)
 	snap := make(map[string]*Profile, len(profiles))
 	for pid, pr := range profiles {
 		cp := *pr

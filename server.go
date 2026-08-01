@@ -28,6 +28,8 @@ func main() {
 
 	initProfileSecret()
 	loadProfiles()
+	log.Printf("limits roomLimit=%d maxRooms=%d maxProfiles=%d profileEmptyTTL=%s wsAllowLocalhost=%t botDeathLog=%t",
+		roomLimit, maxRoomsLimit, maxProfiles, profileEmptyTTL, wsAllowLocalhost, debugBotDeathSnap)
 	autosaveStop := make(chan struct{})
 	startProfilesAutosave(autosaveStop)
 

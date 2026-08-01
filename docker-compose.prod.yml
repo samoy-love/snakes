@@ -8,7 +8,23 @@
 #   * PROFILE_SECRET в .env.
 
 services:
+  # Оба сервиса ограничивают json-file лог явно (10m x 3): без этого драйвер
+  # пишет без предела и выедает диск, общий с чужими проектами. Дублируется
+  # здесь, а не только в базовом файле, чтобы прод-оверлей был самодостаточен
+  # при чтении и не «терял» лимит, если базовый файл когда-нибудь разъедется.
+  game:
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   nginx:
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports: !override
       - "80:80"
       - "443:443"
