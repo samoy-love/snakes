@@ -1,5 +1,8 @@
 name: snakes
 
+# Локальный стенд: игра + nginx по HTTP на ${HTTP_PORT} (по умолчанию 8080).
+# Прод с TLS: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
 services:
   game:
     build:
@@ -12,22 +15,40 @@ services:
     image: snakes:local
     restart: unless-stopped
     env_file:
-      - .env
+      # .env необязателен: без него берутся дефолты ниже. Но PROFILE_SECRET
+      # задать придётся (см. комментарий у переменной).
+      - path: .env
+        required: false
     environment:
       # Явный проброс: значения берутся из .env, дефолты — как в коде.
       PORT: ${PORT:-3000}
       ROOM_LIMIT: ${ROOM_LIMIT:-16}
       MATCH_DURATION_TICKS: ${MATCH_DURATION_TICKS:-3000}
-      MATCH_INTERMISSION_TICKS: ${MATCH_INTERMISSION_TICKS:-300}
+      MATCH_INTERMISSION_TICKS: ${MATCH_INTERMISSION_TICKS:-150}
+      # Origin'ы, с которых разрешено WebSocket-рукопожатие. Без переменной
+      # сервер уходит в дефолт https://snakes.samoy.love и отвечает 403 на /ws
+      # с любого другого хоста (localhost/127.0.0.1 разрешены в коде отдельно).
+      # Если открываете стенд не по localhost — перечислите здесь свой origin
+      # ВМЕСТЕ С ПОРТОМ, например http://192.168.1.10:8080
+      WS_ORIGINS: ${WS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      # Без секрета прогресс игроков не переживает рестарт (см. .env.example).
       PROFILE_SECRET: ${PROFILE_SECRET:?PROFILE_SECRET must be set in .env - otherwise all player progress is lost on every restart}
       PROFILES_PATH: ${PROFILES_PATH:-/app/data/profiles.json}
-      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1/8,::1,172.16.0.0/12}
+      # Подсети docker обязаны быть в списке, иначе X-Forwarded-For от nginx
+      # не принимается и rate-limit считает всех игроков одним клиентом.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1/8,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       BOT_DEATH_SNAP: ${BOT_DEATH_SNAP:-}
     volumes:
       - snakes_data:/app/data
     # Порт наружу НЕ публикуется: доступ только через nginx по внутренней сети.
     expose:
       - "3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     networks:
       - snakes_net
 
@@ -35,19 +56,17 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     depends_on:
-      - game
+      game:
+        condition: service_healthy
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_PORT:-8080}:80"
     volumes:
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/nginx.common.conf:/etc/nginx/snippets/nginx.common.conf:ro
       - ./deploy/security-headers.conf:/etc/nginx/snippets/security-headers.conf:ro
       # Статика раздаётся напрямую nginx-ом, минуя Go-процесс.
       # Тот же каталог лежит и внутри образа game (сервер умеет отдавать его сам).
       - ./public:/var/www/snakes:ro
-      # TLS-сертификаты хоста (letsencrypt). Если TLS не нужен — закомментируйте
-      # и оставьте в nginx.conf только 80-й server-блок.
-      - /etc/letsencrypt:/etc/letsencrypt:ro
     networks:
       - snakes_net
 

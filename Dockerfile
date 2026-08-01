@@ -21,8 +21,9 @@ ARG BUILD_TIME=unknown
 
 # -s -w выкидывают таблицу символов и DWARF (образ меньше).
 # -X проставляет main.Version/main.Commit/main.BuildTime, если такие переменные
-# в пакете main существуют. Сейчас их в коде НЕТ, и линкер молча игнорирует
-# -X для несуществующего символа — сборка не ломается (проверено).
+# в пакете main существуют. Сейчас их в коде НЕТ; фактическая сборка показала,
+# что линкер молча игнорирует -X для несуществующего символа и не падает.
+# ARG-и объявлены ДО этого шага, иначе их изменение не инвалидирует кэш слоя.
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -ldflags "-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildTime=${BUILD_TIME}" \
@@ -55,10 +56,13 @@ ENV PORT=3000 \
     PROFILES_PATH=/app/data/profiles.json
 
 EXPOSE 3000
-VOLUME ["/app/data"]
 
-# В коде нет /healthz, поэтому проверяем /metrics (JSON-эндпоинт из server.go).
+# VOLUME здесь НЕ объявляем намеренно: каждый `docker run` без -v плодил бы
+# анонимный том с профилями, который потом никто не находит. Постоянное
+# хранилище задаётся явно — именованным томом snakes_data в docker-compose.yml.
+
+# /healthz есть в server.go и отдаёт 200. wget берётся из busybox alpine.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1:${PORT}/metrics || exit 1
+    CMD wget -q -O /dev/null http://127.0.0.1:${PORT}/healthz || exit 1
 
 ENTRYPOINT ["/app/snakes"]

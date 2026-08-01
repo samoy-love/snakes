@@ -214,6 +214,71 @@ func (r *Room) awardPoints(num uint16, base uint16, reason uint8) {
 	}
 }
 
+// freeKillBonus rewards stepping onto an enemy trail cell that will actually
+// kill its owner. Shielded owners and players still in spawn grace are worth
+// nothing, so they get no bonus (G6).
+func (r *Room) freeKillBonus(p *Player, i int) int32 {
+	if i < 0 || i >= N {
+		return 0
+	}
+	to := r.trailOwner[i]
+	if to == 0 || to == p.num {
+		return 0
+	}
+	o := r.players[to]
+	if o == nil || !o.alive || o.shield > 0 || r.hasSpawnGrace(o) {
+		return 0
+	}
+	if p.aiAggression < 0.35 {
+		return 50
+	}
+	return 120
+}
+
+// recentAt returns the position `back` steps ago from the anti-loop ring.
+func (p *Player) recentAt(back int) (int, int, bool) {
+	if back < 0 || back >= int(p.aiRecentN) || back >= aiRecentCap {
+		return 0, 0, false
+	}
+	idx := int(p.aiRecentI) - 1 - back
+	for idx < 0 {
+		idx += aiRecentCap
+	}
+	idx %= aiRecentCap
+	return p.aiRecentX[idx], p.aiRecentY[idx], true
+}
+
+// inPositionCycle detects a repeating path of period 2, 4 or 6. The old check
+// only caught A-B-A-B, so bots could orbit their own territory forever (G13).
+func (p *Player) inPositionCycle() bool {
+	for _, k := range [3]int{2, 4, 6} {
+		if int(p.aiRecentN) < 2*k {
+			continue
+		}
+		x0, y0, ok0 := p.recentAt(0)
+		if !ok0 {
+			continue
+		}
+		match := true
+		distinct := false
+		for j := 0; j < k; j++ {
+			xa, ya, oka := p.recentAt(j)
+			xb, yb, okb := p.recentAt(j + k)
+			if !oka || !okb || xa != xb || ya != yb {
+				match = false
+				break
+			}
+			if xa != x0 || ya != y0 {
+				distinct = true
+			}
+		}
+		if match && distinct {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Room) botPickDirOutside(p *Player) (Dir, bool) {
 	if p == nil || !p.alive {
 		return DirUp, false
@@ -249,6 +314,9 @@ func (r *Room) botPickDirOutside(p *Player) (Dir, bool) {
 			if r.gridOwner[i] == p.num {
 				score += 180
 			}
+			// G6: an unshielded enemy trail one step away is a free kill.
+			// Bots used to swerve away from it, which read as stupidity.
+			score += r.freeKillBonus(p, i)
 			if r.lookaheadBad(p, d, 5, 0) {
 				score -= 240
 			}
@@ -760,10 +828,64 @@ const (
 
 const (
 	BotCount = 14
+	// BotCountMin is the floor for the dynamic bot population (G7). Bots are
+	// removed as humans join so a full room does not turn into a mob.
+	BotCountMin = 4
 )
 
 const (
-	BotRespawnDelayTicks = 8
+	// G8: respawn is slow enough to feel like a real loss, and gets slower for
+	// a bot that keeps feeding the same player.
+	BotRespawnDelayMin    = 25
+	BotRespawnDelayMax    = 45
+	BotRespawnDeathWindow = 300
+	BotRespawnDeathStep   = 10
+	BotRespawnDelayCap    = 80
+	// aiDeathCap bounds the per-bot recent-death ring used for the progression.
+	aiDeathCap = 8
+)
+
+// Difficulty tiers (G3). A room always holds a fixed mix so a player meets
+// pushovers and real threats in the same match.
+const (
+	TierEasy uint8 = iota
+	TierNormal
+	TierHard
+	TierCount
+)
+
+// Behaviour archetypes (G4). Each one is meant to be recognisable from the
+// outside after a few seconds of watching.
+const (
+	ArchFarmer uint8 = iota
+	ArchAggressor
+	ArchCoward
+	ArchTerritorial
+	ArchCount
+)
+
+// tierMix / archMix are the target compositions, expressed as weights over
+// BotCount. They are scaled with largest-remainder for smaller populations.
+var (
+	tierMix = [TierCount]int{5, 6, 3}
+	archMix = [ArchCount]int{4, 4, 3, 3}
+)
+
+const (
+	// Hunter caps per victim (G2). Humans get the tighter one: being chased by
+	// three bots at once is unreadable.
+	HuntCapHuman = 2
+	HuntCapBot   = 3
+
+	// G14: windup before a hunt actually starts. The bot drives straight at
+	// the target for a few ticks, which is the player's cue to react.
+	HuntWindupMin = 3
+	HuntWindupMax = 5
+
+	// G17: tryHunt is the most expensive part of a bot tick, so it only runs
+	// every few ticks and only over a bounded number of BFS probes.
+	BotHuntScanEvery = 5
+	BotHuntMaxProbes = 40
 )
 
 const (
@@ -882,6 +1004,10 @@ type Room struct {
 	nextPlayerNum uint16
 	humanCount    int
 
+	// G2: how many bots are currently hunting each victim. Rebuilt from the
+	// actual bot state at the top of every tick so it cannot drift.
+	huntersOn map[uint16]int
+
 	tick              uint32
 	forceFullSnapshot bool
 
@@ -989,6 +1115,33 @@ type Player struct {
 	aiBaitSense    float32
 	aiRiskiness    float32
 	aiPredictDepth uint8
+
+	// G3/G4: difficulty tier and behaviour archetype, plus the per-bot values
+	// they derive. Server-side only, nothing here reaches the wire protocol.
+	aiTier        uint8
+	aiArchetype   uint8
+	aiROIW        int
+	aiROIH        int
+	aiCooldownMin uint8
+	aiCooldownMax uint8
+	aiTrailBudget int
+	aiHuntGate    float32
+
+	// G2: victim this bot is accounted against in Room.huntersOn. Distinct
+	// from aiHuntTarget, which stays the trail owner used for path validation.
+	aiHuntWho uint16
+
+	// G14: straight-line windup before a hunt becomes a real chase.
+	aiWindupUntil uint32
+	aiWindupDir   Dir
+
+	// G17: throttle for the expensive trail scan in botStep.
+	aiHuntScanTick uint32
+
+	// G8: ring of recent death ticks driving the respawn progression.
+	aiDeathAt [aiDeathCap]uint32
+	aiDeathI  uint8
+	aiDeathN  uint8
 
 	aiAggression float32
 	aiCaution    float32
@@ -1675,11 +1828,10 @@ func (r *Room) predictedNextCell(o *Player) (int, int, bool) {
 	if o == nil || !o.alive {
 		return 0, 0, false
 	}
-	moveDir := o.dir
-	if o.pendingDir != o.dir && !isOpposite(o.dir, o.pendingDir) {
-		moveDir = o.pendingDir
-	}
-	dx, dy := dirToDelta(moveDir)
+	// G10: read the committed direction, never pendingDir. pendingDir already
+	// holds this tick's network input, and bots run before stepPlayer, which
+	// let them react to a human turn before it happened.
+	dx, dy := dirToDelta(o.dir)
 	nx := o.x + dx
 	ny := o.y + dy
 	if !inBounds(nx, ny) {
@@ -1700,8 +1852,13 @@ func (r *Room) worstCaseCutDistToTrail(p *Player, maxTrailCells int) int {
 		return 9999
 	}
 	minCut := 9999
+	// G9: only enemies the bot can actually see may scare it off a loop.
+	minX, minY, maxX, maxY := r.botROIBounds(p)
 	for _, o := range r.players {
 		if o == nil || !o.alive || o.num == p.num {
+			continue
+		}
+		if o.x < minX || o.x >= maxX || o.y < minY || o.y >= maxY {
 			continue
 		}
 		vx0 := o.x
@@ -1792,30 +1949,9 @@ func (r *Room) minimaxOutsideDir(p *Player) (Dir, bool) {
 		p.aiRiskiness = 1
 	}
 	trailLen := len(p.trail)
-	budget := p.aiBravery
-	if budget < 8 {
-		budget = 8
-	}
-	budget += int(6 * float32(p.aiRiskiness))
-	budget -= int(7 * float32(p.aiBaitSense))
-	if p.aiCaution > 0.55 {
-		budget -= 2
-	}
-	if budget < 7 {
-		budget = 7
-	}
-	if budget > 26 {
-		budget = 26
-	}
+	budget := r.botTrailBudget(p, p.aiRiskiness, p.aiCaution)
 
-	rw := ROIWidth
-	rh := ROIHeight
-	if rw > W {
-		rw = W
-	}
-	if rh > H {
-		rh = H
-	}
+	rw, rh := p.botROI()
 	rx := p.x - rw/2
 	ry := p.y - rh/2
 	if rx < 0 {
@@ -2074,6 +2210,10 @@ func (c *Client) leaveRoomInternal(ctx context.Context, notify bool) {
 	rm.humanCount = maxInt(0, rm.humanCount-1)
 	rm.forceFullSnapshot = true
 	shouldCleanup := rm.humanCount == 0
+	if !shouldCleanup {
+		// G7: refill the bot field as the room empties out.
+		rm.syncBotPopulationLocked()
+	}
 	rm.mu.Unlock()
 
 	if offlineUpdate != "" {
@@ -2168,6 +2308,8 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	rm.humanCount++
 	rm.forceFullSnapshot = true
 	rm.cancelCleanupLocked()
+	// G7: thin the bot field out so a busy room is not a mob.
+	rm.syncBotPopulationLocked()
 
 	rm.setKnownNameLocked(pnum, name, true)
 	rm.sendDailyStateToPlayer(pl)
@@ -2638,8 +2780,16 @@ func (r *Room) resetMatchLocked() {
 		p.styleCaptureMatch = 0
 		p.styleKillMatch = 0
 		p.botKillsMatch = 0
+		// G8: the respawn penalty is per match, not cumulative forever.
+		p.aiDeathI = 0
+		p.aiDeathN = 0
 		r.respawnPlayer(p)
 		r.ensureContract(p)
+	}
+	if r.huntersOn != nil {
+		for k := range r.huntersOn {
+			delete(r.huntersOn, k)
+		}
 	}
 
 	r.forceFullSnapshot = true
@@ -3651,87 +3801,366 @@ func (r *Room) displayNameLocked(num uint16) string {
 	return name + " (отключен)"
 }
 
-func (r *Room) spawnBots() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// mixTargets distributes n slots over weights using largest remainder, so a
+// shrinking bot population keeps roughly the intended composition.
+func mixTargets(weights []int, n int) []int {
+	out := make([]int, len(weights))
+	if n <= 0 {
+		return out
+	}
+	total := 0
+	for _, w := range weights {
+		total += w
+	}
+	if total <= 0 {
+		out[0] = n
+		return out
+	}
+	rem := make([]int, len(weights))
+	assigned := 0
+	for i, w := range weights {
+		v := n * w
+		out[i] = v / total
+		rem[i] = v % total
+		assigned += out[i]
+	}
+	for assigned < n {
+		bi := 0
+		bv := -1
+		for i := range weights {
+			if rem[i] > bv {
+				bv = rem[i]
+				bi = i
+			}
+		}
+		out[bi]++
+		rem[bi] = -1
+		assigned++
+	}
+	return out
+}
+
+// pickUnderfilled returns the slot whose current count trails its target by
+// the most; ties go to the lowest index.
+func pickUnderfilled(counts []int, targets []int) uint8 {
+	bi := 0
+	bd := -1 << 30
+	for i := range targets {
+		d := targets[i] - counts[i]
+		if d > bd {
+			bd = d
+			bi = i
+		}
+	}
+	return uint8(bi)
+}
+
+// botMixCountsLocked tallies the tiers and archetypes currently in the room.
+func (r *Room) botMixCountsLocked() (tiers []int, archs []int, bots int) {
+	tiers = make([]int, TierCount)
+	archs = make([]int, ArchCount)
+	for _, p := range r.players {
+		if p == nil || !p.bot {
+			continue
+		}
+		bots++
+		if int(p.aiTier) < len(tiers) {
+			tiers[p.aiTier]++
+		}
+		if int(p.aiArchetype) < len(archs) {
+			archs[p.aiArchetype]++
+		}
+	}
+	return tiers, archs, bots
+}
+
+// applyBotPersonality derives every per-bot knob from the tier and archetype.
+// The tier fixes reaction speed, sight and prediction depth; the archetype
+// fixes what the bot wants to do with them.
+func (r *Room) applyBotPersonality(p *Player, tier uint8, arch uint8) {
+	p.aiTier = tier
+	p.aiArchetype = arch
+
+	// Tier: reaction, sight, lookahead, willingness to chase a trail.
+	var tierBudgetLo, tierBudgetHi int
+	switch tier {
+	case TierEasy:
+		tierBudgetLo, tierBudgetHi = 6, 9
+		p.aiCooldownMin, p.aiCooldownMax = 6, 9
+		p.aiPredictDepth = 1
+		p.aiROIW, p.aiROIH = 48, 34
+		p.aiHuntGate = 0.25
+	case TierHard:
+		tierBudgetLo, tierBudgetHi = 18, 26
+		p.aiCooldownMin, p.aiCooldownMax = 2, 2
+		p.aiPredictDepth = uint8(2 + r.rng.Intn(2))
+		p.aiROIW, p.aiROIH = ROIWidth, ROIHeight
+		p.aiHuntGate = 1.0
+	default:
+		tier = TierNormal
+		p.aiTier = TierNormal
+		tierBudgetLo, tierBudgetHi = 10, 16
+		p.aiCooldownMin, p.aiCooldownMax = 3, 5
+		p.aiPredictDepth = uint8(1 + r.rng.Intn(2))
+		p.aiROIW, p.aiROIH = ROIWidth, ROIHeight
+		p.aiHuntGate = 0.65
+	}
+
+	// Archetype: temperament plus its own trail-length band. The tier then
+	// picks where inside that band this particular bot sits, so a hard farmer
+	// runs the longest loops of anyone.
+	budgetLo, budgetHi := tierBudgetLo, tierBudgetHi
+	switch arch {
+	case ArchFarmer:
+		p.aiAggression = 0.15 + 0.15*r.rng.Float32()
+		p.aiCaution = 0.45 + 0.30*r.rng.Float32()
+		budgetLo, budgetHi = 18, 26
+	case ArchAggressor:
+		p.aiAggression = 0.80 + 0.15*r.rng.Float32()
+		p.aiCaution = 0.25
+		budgetLo, budgetHi = 8, 12
+		p.aiHuntGate = 1.0
+	case ArchCoward:
+		p.aiAggression = 0.25 + 0.25*r.rng.Float32()
+		p.aiCaution = 0.85
+		budgetLo, budgetHi = 8, 14
+	default:
+		p.aiArchetype = ArchTerritorial
+		p.aiAggression = 0.40 + 0.35*r.rng.Float32()
+		p.aiCaution = 0.35 + 0.40*r.rng.Float32()
+	}
+
+	// Place the bot inside its archetype band according to the tier, with a
+	// little jitter so same-tier siblings still differ.
+	span := budgetHi - budgetLo
+	frac := 0.5
+	switch p.aiTier {
+	case TierEasy:
+		frac = 0.10
+	case TierHard:
+		frac = 0.90
+	}
+	base := budgetLo + int(float64(span)*frac+0.5)
+	if span > 0 {
+		base += r.randInt(-1, 1)
+	}
+	if base < budgetLo {
+		base = budgetLo
+	}
+	if base > budgetHi {
+		base = budgetHi
+	}
+	p.aiTrailBudget = base
+	p.aiBravery = base
+
+	// baitSense now scales the budget instead of being subtracted from it, so
+	// the top of the scale stays reachable (G3).
+	p.aiBaitSense = 0.30 + 0.60*r.rng.Float32()
+	p.aiRiskiness = 0.20 + 0.65*r.rng.Float32()
+	if p.aiCaution > 0.70 {
+		p.aiBaitSense += 0.12
+		p.aiRiskiness -= 0.10
+	}
+	if p.aiAggression > 0.70 {
+		p.aiRiskiness += 0.12
+		p.aiBaitSense -= 0.10
+	}
+	if p.aiBaitSense < 0.05 {
+		p.aiBaitSense = 0.05
+	} else if p.aiBaitSense > 1 {
+		p.aiBaitSense = 1
+	}
+	if p.aiRiskiness < 0 {
+		p.aiRiskiness = 0
+	} else if p.aiRiskiness > 1 {
+		p.aiRiskiness = 1
+	}
+}
+
+// botROI returns this bot's perception window, falling back to the global one
+// for bots created before personalities existed.
+func (p *Player) botROI() (int, int) {
+	w := p.aiROIW
+	h := p.aiROIH
+	if w <= 0 {
+		w = ROIWidth
+	}
+	if h <= 0 {
+		h = ROIHeight
+	}
+	if w > W {
+		w = W
+	}
+	if h > H {
+		h = H
+	}
+	return w, h
+}
+
+// botROIBounds clips the bot's perception window to the map.
+func (r *Room) botROIBounds(p *Player) (minX, minY, maxX, maxY int) {
+	rw, rh := p.botROI()
+	rx := p.x - rw/2
+	ry := p.y - rh/2
+	if rx < 0 {
+		rx = 0
+	}
+	if ry < 0 {
+		ry = 0
+	}
+	if rx+rw > W {
+		rx = W - rw
+	}
+	if ry+rh > H {
+		ry = H - rh
+	}
+	return rx, ry, rx + rw, ry + rh
+}
+
+// newBotLocked creates one bot with the given personality and spawns it.
+func (r *Room) newBotLocked(used, usedStarts map[string]struct{}, tier, arch uint8, fallbackN int) *Player {
+	pnum := r.nextPlayerNum
+	if pnum == 0 {
+		pnum = 1
+	}
+	r.nextPlayerNum = pnum + 1
+	name := pickUniqueBotName(r.rng, used, usedStarts, fallbackN)
+	hue := r.allocUniqueHue()
+	p := &Player{
+		num:             pnum,
+		name:            name,
+		bot:             true,
+		x:               -1,
+		y:               -1,
+		homeX:           -1,
+		homeY:           -1,
+		dir:             DirRight,
+		pendingDir:      DirRight,
+		nextX:           -1,
+		nextY:           -1,
+		nextI:           -1,
+		alive:           false,
+		trail:           nil,
+		owned:           nil,
+		hue:             hue,
+		cosInvCaptureFx: 1,
+		cosInvHead:      1,
+		cosInvSeg:       1,
+		cosInvNameplate: 1,
+		cosInvFrame:     1,
+		aiMode:          0,
+		aiModeUntil:     0,
+		aiTargetX:       -1,
+		aiTargetY:       -1,
+	}
+	r.applyBotPersonality(p, tier, arch)
+	r.players[pnum] = p
+	r.scores[pnum] = 0
+	r.points[pnum] = 0
+	r.setKnownNameLocked(pnum, name, true)
+	r.respawnPlayer(p)
+	return p
+}
+
+// usedBotNamesLocked collects the names already taken in this room so the
+// generator keeps producing distinguishable nicknames.
+func (r *Room) usedBotNamesLocked() (map[string]struct{}, map[string]struct{}) {
 	used := make(map[string]struct{}, BotCount)
 	usedStarts := make(map[string]struct{}, BotCount)
 	for _, kn := range r.knownNames {
-		if kn.Name != "" {
-			used[kn.Name] = struct{}{}
-			startKey := botNameStartKey(kn.Name)
-			if startKey != "" {
-				usedStarts[startKey] = struct{}{}
+		if kn.Name == "" {
+			continue
+		}
+		used[kn.Name] = struct{}{}
+		if k := botNameStartKey(kn.Name); k != "" {
+			usedStarts[k] = struct{}{}
+		}
+	}
+	return used, usedStarts
+}
+
+func (r *Room) spawnBots() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.syncBotPopulationLocked()
+}
+
+// desiredBotCount thins the bot field out as real players fill the room (G7).
+func desiredBotCount(humans int) int {
+	if humans < 0 {
+		humans = 0
+	}
+	n := BotCount - (3*humans)/2
+	if n < BotCountMin {
+		n = BotCountMin
+	}
+	return n
+}
+
+// syncBotPopulationLocked adds or removes bots to match desiredBotCount while
+// holding the intended tier/archetype mix. Removed bots go through
+// removePlayer, which clears their territory and trail.
+func (r *Room) syncBotPopulationLocked() {
+	want := desiredBotCount(r.humanCount)
+	tiers, archs, have := r.botMixCountsLocked()
+
+	for have > want {
+		num := r.pickBotToRemoveLocked()
+		if num == 0 {
+			break
+		}
+		if p := r.players[num]; p != nil {
+			r.releaseHunt(p)
+			if int(p.aiTier) < len(tiers) {
+				tiers[p.aiTier]--
+			}
+			if int(p.aiArchetype) < len(archs) {
+				archs[p.aiArchetype]--
 			}
 		}
+		r.removePlayer(num)
+		delete(r.knownNames, num)
+		have--
+		r.forceFullSnapshot = true
 	}
-	for i := 0; i < BotCount; i++ {
-		pnum := r.nextPlayerNum
-		if pnum == 0 {
-			pnum = 1
-		}
-		r.nextPlayerNum = pnum + 1
-		name := pickUniqueBotName(r.rng, used, usedStarts, i+1)
-		hue := r.allocUniqueHue()
-		p := &Player{
-			num:             pnum,
-			name:            name,
-			bot:             true,
-			x:               -1,
-			y:               -1,
-			homeX:           -1,
-			homeY:           -1,
-			dir:             DirRight,
-			pendingDir:      DirRight,
-			nextX:           -1,
-			nextY:           -1,
-			nextI:           -1,
-			alive:           false,
-			trail:           nil,
-			owned:           nil,
-			hue:             hue,
-			cosInvCaptureFx: 1,
-			cosInvHead:      1,
-			cosInvSeg:       1,
-			cosInvNameplate: 1,
-			cosInvFrame:     1,
-			cosCaptureFx:    0,
-			cosHead:         0,
-			cosSeg:          0,
-			cosNameplate:    0,
-			cosFrame:        0,
-			aiMode:          0,
-			aiModeUntil:     0,
-			aiTargetX:       -1,
-			aiTargetY:       -1,
-			aiAggression:    float32(0.40 + 0.35*r.rng.Float64()),
-			aiCaution:       float32(0.35 + 0.50*r.rng.Float64()),
-			aiBravery:       r.randInt(8, 16),
-		}
-		p.aiBaitSense = 0.35 + 0.55*r.rng.Float32()
-		p.aiRiskiness = 0.20 + 0.65*r.rng.Float32()
-		p.aiPredictDepth = uint8(1 + r.rng.Intn(2))
-		if p.aiCaution > 0.55 {
-			p.aiBaitSense += 0.18
-			p.aiRiskiness -= 0.10
-		}
-		if p.aiAggression > 0.55 {
-			p.aiRiskiness += 0.10
-		}
-		if p.aiBaitSense > 1 {
-			p.aiBaitSense = 1
-		}
-		if p.aiRiskiness < 0 {
-			p.aiRiskiness = 0
-		} else if p.aiRiskiness > 1 {
-			p.aiRiskiness = 1
-		}
-		r.players[pnum] = p
-		r.scores[pnum] = 0
-		r.points[pnum] = 0
-		r.setKnownNameLocked(pnum, name, true)
-		r.respawnPlayer(p)
+	if have >= want {
+		return
 	}
+
+	used, usedStarts := r.usedBotNamesLocked()
+	tierT := mixTargets(tierMix[:], want)
+	archT := mixTargets(archMix[:], want)
+	for have < want {
+		tier := pickUnderfilled(tiers, tierT)
+		arch := pickUnderfilled(archs, archT)
+		r.newBotLocked(used, usedStarts, tier, arch, have+1)
+		tiers[tier]++
+		archs[arch]++
+		have++
+		r.forceFullSnapshot = true
+	}
+}
+
+// pickBotToRemoveLocked prefers a dead bot, then the least successful live one,
+// so removing bots does not erase a leader mid-match.
+func (r *Room) pickBotToRemoveLocked() uint16 {
+	bestNum := uint16(0)
+	bestKey := 1 << 30
+	for num, p := range r.players {
+		if p == nil || !p.bot {
+			continue
+		}
+		// Dead bots sort first, then by points, then by held cells.
+		key := int(r.points[num])*4 + int(r.scores[num])
+		if !p.alive {
+			key = -1000000 + key
+		}
+		if key < bestKey {
+			bestKey = key
+			bestNum = num
+		}
+	}
+	return bestNum
 }
 
 func (r *Room) start() {
@@ -4393,7 +4822,8 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 		p.contractUntil += 100
 	}
 	if p.bot {
-		p.respawnAt = r.tick + uint32(BotRespawnDelayTicks+r.rng.Intn(5))
+		r.releaseHunt(p)
+		p.respawnAt = r.tick + r.botRespawnDelay(p)
 	}
 	if killer != 0 && killer != num {
 		k := r.players[killer]
@@ -4522,6 +4952,32 @@ func (r *Room) killPlayer(num uint16) {
 	r.killPlayerWithReason(num, 0, "unknown", -2, 0, 0)
 }
 
+// botRespawnDelay records the death and returns how long this bot stays off
+// the map. A bot that keeps dying comes back slower, so a player who farms one
+// spawn point runs out of food (G8).
+func (r *Room) botRespawnDelay(p *Player) uint32 {
+	p.aiDeathAt[p.aiDeathI%aiDeathCap] = r.tick
+	p.aiDeathI = (p.aiDeathI + 1) % aiDeathCap
+	if p.aiDeathN < aiDeathCap {
+		p.aiDeathN++
+	}
+	recent := 0
+	for i := 0; i < int(p.aiDeathN); i++ {
+		if r.tick-p.aiDeathAt[i] <= BotRespawnDeathWindow {
+			recent++
+		}
+	}
+	d := r.randInt(BotRespawnDelayMin, BotRespawnDelayMax)
+	// The death just recorded counts as the baseline, not as a penalty.
+	if recent > 1 {
+		d += BotRespawnDeathStep * (recent - 1)
+	}
+	if d > BotRespawnDelayCap {
+		d = BotRespawnDelayCap
+	}
+	return uint32(d)
+}
+
 func (r *Room) respawnPlayer(p *Player) {
 	x, y := r.pickSpawnCell()
 	p.x = x
@@ -4553,6 +5009,10 @@ func (r *Room) respawnPlayer(p *Player) {
 	p.aiAvoidFrom = 0
 	p.aiAvoidTo = 0
 	p.aiAvoidReason = 0
+	r.releaseHunt(p)
+	p.aiHuntTarget = 0
+	p.aiWindupUntil = 0
+	p.aiHuntScanTick = 0
 	for i := 0; i < aiRecentCap; i++ {
 		p.aiRecentX[i] = 0
 		p.aiRecentY[i] = 0
@@ -4738,6 +5198,38 @@ func (r *Room) nearestOwnedApprox(num uint16, x, y int) (int, int, int) {
 		}
 	}
 	return bestI % W, bestI / W, bestD
+}
+
+// visibleReturnEstimate guesses how far an enemy is from safety using only
+// what the hunting bot can see. When the enemy's nearest own cell lies outside
+// the bot's ROI the bot must not know the exact number, so the estimate falls
+// back to "at least as far as the edge of what I can see" (G9).
+func (r *Room) visibleReturnEstimate(p *Player, enemy *Player, minX, minY, maxX, maxY int) int {
+	if enemy == nil {
+		return 9999
+	}
+	if inBounds(enemy.x, enemy.y) && r.gridOwner[r.idx(enemy.x, enemy.y)] == enemy.num {
+		return 0
+	}
+	ox, oy, d := r.nearestOwnedApprox(enemy.num, enemy.x, enemy.y)
+	if d < 9999 && ox >= minX && ox < maxX && oy >= minY && oy < maxY {
+		return d
+	}
+	// Unknown: lower-bounded by the distance from the enemy to the ROI edge.
+	edge := maxX - 1 - enemy.x
+	if v := enemy.x - minX; v < edge {
+		edge = v
+	}
+	if v := enemy.y - minY; v < edge {
+		edge = v
+	}
+	if v := maxY - 1 - enemy.y; v < edge {
+		edge = v
+	}
+	if edge < 0 {
+		edge = 0
+	}
+	return edge + 4
 }
 
 func (r *Room) estimateReturnSteps(num uint16, x, y int) int {
@@ -5335,32 +5827,8 @@ type sensedInfo struct {
 
 func (r *Room) senseBot(p *Player) sensedInfo {
 	out := sensedInfo{enemyHeadDist: 9999, enemyTrailDist: 9999}
-	rw := ROIWidth
-	rh := ROIHeight
-	if rw > W {
-		rw = W
-	}
-	if rh > H {
-		rh = H
-	}
-	rx := p.x - rw/2
-	ry := p.y - rh/2
-	if rx < 0 {
-		rx = 0
-	}
-	if ry < 0 {
-		ry = 0
-	}
-	if rx+rw > W {
-		rx = W - rw
-	}
-	if ry+rh > H {
-		ry = H - rh
-	}
-	minX := rx
-	minY := ry
-	maxX := rx + rw
-	maxY := ry + rh
+	// G3: perception window is a tier property, not a global constant.
+	minX, minY, maxX, maxY := r.botROIBounds(p)
 	for _, o := range r.players {
 		if o == nil || !o.alive || o.num == p.num {
 			continue
@@ -5419,12 +5887,176 @@ func (r *Room) botTrySetDir(p *Player, d Dir, urgent bool) {
 	}
 	if d != p.pendingDir && !isOpposite(p.dir, d) {
 		p.pendingDir = d
-		cool := uint32(2 + r.rng.Intn(3))
-		if p.aiCaution > 0.55 {
-			cool++
+		// G3: reaction time is a tier property. Easy bots think in ~700ms,
+		// hard bots re-decide almost every tick.
+		lo := int(p.aiCooldownMin)
+		hi := int(p.aiCooldownMax)
+		if lo <= 0 {
+			lo = 2
+		}
+		if hi < lo {
+			hi = lo
+		}
+		cool := uint32(lo)
+		if hi > lo {
+			cool = uint32(lo + r.rng.Intn(hi-lo+1))
 		}
 		p.aiNextDecisionTick = r.tick + cool
 	}
+}
+
+// huntCapFor is the hard ceiling on simultaneous hunters for one victim (G2).
+func huntCapFor(victim *Player) int {
+	if victim == nil {
+		return 0
+	}
+	if victim.bot {
+		return HuntCapBot
+	}
+	return HuntCapHuman
+}
+
+// recomputeHuntersLocked rebuilds the hunter census from actual bot state.
+// Running it every tick makes the counter impossible to desync, which is the
+// failure mode that would silently disable all bot aggression.
+func (r *Room) recomputeHuntersLocked() {
+	if r.huntersOn == nil {
+		r.huntersOn = make(map[uint16]int, 8)
+	}
+	for k := range r.huntersOn {
+		delete(r.huntersOn, k)
+	}
+	for _, p := range r.players {
+		if p == nil || !p.bot || !p.alive || p.aiMode != 2 {
+			continue
+		}
+		if p.aiHuntWho == 0 {
+			continue
+		}
+		v := r.players[p.aiHuntWho]
+		if v == nil || !v.alive {
+			p.aiHuntWho = 0
+			continue
+		}
+		r.huntersOn[p.aiHuntWho]++
+	}
+}
+
+// canHunt combines the per-victim hunter cap with the bot's archetype rules.
+func (r *Room) canHunt(p *Player, victim *Player, tx, ty, dist int) bool {
+	if p == nil || victim == nil || !victim.alive || victim.num == p.num {
+		return false
+	}
+	if !r.botMayHunt(p, tx, ty, dist) {
+		return false
+	}
+	if p.aiMode == 2 && p.aiHuntWho == victim.num {
+		return true
+	}
+	if r.huntersOn == nil {
+		return true
+	}
+	return r.huntersOn[victim.num] < huntCapFor(victim)
+}
+
+// botMayHunt applies the archetype's appetite for a chase (G4).
+func (r *Room) botMayHunt(p *Player, tx, ty int, dist int) bool {
+	switch p.aiArchetype {
+	case ArchFarmer:
+		// Farmers only swat a trail that is already under their nose.
+		return dist <= 2
+	case ArchAggressor:
+		return true
+	case ArchCoward:
+		// Cowards commit only to short, near-certain finishes.
+		return dist <= 6
+	case ArchTerritorial:
+		if inBounds(tx, ty) && r.gridOwner[r.idx(tx, ty)] == p.num {
+			return true
+		}
+		if p.homeX >= 0 && manhattan(tx, ty, p.homeX, p.homeY) <= 24 {
+			return true
+		}
+		return false
+	}
+	return true
+}
+
+// enterHunt is the single entry point into aiMode 2. It books a hunter slot
+// and arms the windup so the attack is telegraphed (G2, G14).
+func (r *Room) enterHunt(p *Player, victim uint16, tx, ty int, trailOwner uint16, dur uint32) {
+	r.releaseHunt(p)
+	p.aiMode = 2
+	p.aiTargetX = tx
+	p.aiTargetY = ty
+	p.aiHuntTarget = trailOwner
+	p.aiHuntWho = victim
+	p.aiModeUntil = r.tick + dur
+	p.aiExpandPhase = 0
+	if victim != 0 {
+		if r.huntersOn == nil {
+			r.huntersOn = make(map[uint16]int, 8)
+		}
+		r.huntersOn[victim]++
+	}
+	p.aiWindupUntil = r.tick + uint32(HuntWindupMin+r.rng.Intn(HuntWindupMax-HuntWindupMin+1))
+	p.aiWindupDir = r.bestGreedyDir(p, tx, ty)
+}
+
+// releaseHunt gives the booked hunter slot back. Called on every exit from
+// aiMode 2, on bot death and on respawn.
+func (r *Room) releaseHunt(p *Player) {
+	if p == nil || p.aiHuntWho == 0 {
+		return
+	}
+	if r.huntersOn != nil {
+		if n := r.huntersOn[p.aiHuntWho]; n > 1 {
+			r.huntersOn[p.aiHuntWho] = n - 1
+		} else {
+			delete(r.huntersOn, p.aiHuntWho)
+		}
+	}
+	p.aiHuntWho = 0
+	p.aiWindupUntil = 0
+}
+
+// leaveHunt drops out of aiMode 2 cleanly.
+func (r *Room) leaveHunt(p *Player) {
+	r.releaseHunt(p)
+	p.aiMode = 0
+	p.aiModeUntil = 0
+}
+
+// botTrailBudget is the trail length this bot is willing to run before heading
+// home. baitSense multiplies rather than subtracts, so the whole 6..26 range
+// stays reachable instead of collapsing onto the lower clamp (G3).
+func (r *Room) botTrailBudget(p *Player, localRisk, localCaution float32) int {
+	base := p.aiTrailBudget
+	if base <= 0 {
+		base = p.aiBravery
+	}
+	if base <= 0 {
+		base = 12
+	}
+	f := 1.30 - 0.50*p.aiBaitSense
+	budget := int(float32(base)*f + 0.5)
+	budget += int(4 * localRisk)
+	if localCaution > 0.70 {
+		budget -= 2
+	}
+	if p.contractType == ContractCapture {
+		budget += 4
+	}
+	if r.mutatorType == MutatorDoubleCapture {
+		budget -= 2
+	}
+	if budget < 6 {
+		budget = 6
+	}
+	if budget > 26 {
+		budget = 26
+	}
+	return budget
 }
 
 func (r *Room) botStep(p *Player) {
@@ -5435,79 +6067,50 @@ func (r *Room) botStep(p *Player) {
 		return
 	}
 	r.recordRecentPos(p, p.x, p.y)
-	if p.aiRecentN >= 4 {
-		ix0 := int(p.aiRecentI) - 1
-		ix1 := int(p.aiRecentI) - 2
-		ix2 := int(p.aiRecentI) - 3
-		ix3 := int(p.aiRecentI) - 4
-		for ix0 < 0 {
-			ix0 += aiRecentCap
-		}
-		for ix1 < 0 {
-			ix1 += aiRecentCap
-		}
-		for ix2 < 0 {
-			ix2 += aiRecentCap
-		}
-		for ix3 < 0 {
-			ix3 += aiRecentCap
-		}
-		ix0 = ix0 % aiRecentCap
-		ix1 = ix1 % aiRecentCap
-		ix2 = ix2 % aiRecentCap
-		ix3 = ix3 % aiRecentCap
-		x0, y0 := p.aiRecentX[ix0], p.aiRecentY[ix0]
-		x1, y1 := p.aiRecentX[ix1], p.aiRecentY[ix1]
-		x2, y2 := p.aiRecentX[ix2], p.aiRecentY[ix2]
-		x3, y3 := p.aiRecentX[ix3], p.aiRecentY[ix3]
-		if x0 == x2 && y0 == y2 && x1 == x3 && y1 == y3 && (x0 != x1 || y0 != y1) {
-			cand := []Dir{turnLeft(p.dir), turnRight(p.dir), p.dir}
-			best := p.dir
-			bestScore := int32(-1 << 30)
-			bestOk := false
-			for _, d := range cand {
-				if isOpposite(p.dir, d) {
-					continue
-				}
-				dx, dy := dirToDelta(d)
-				nx := p.x + dx
-				ny := p.y + dy
-				if !inBounds(nx, ny) {
-					continue
-				}
-				i := r.idx(nx, ny)
-				if r.trailOwner[i] == p.num {
-					continue
-				}
-				if r.lookaheadBad(p, d, 2, 0) {
-					continue
-				}
-				sc := int32(0)
-				if d == p.dir {
-					sc += 1
-				}
-				if pen := r.recentPenalty(p, nx, ny); pen > 0 {
-					sc -= pen * 3
-				}
-				if sc > bestScore {
-					bestScore = sc
-					best = d
-					bestOk = true
-				}
+	if p.inPositionCycle() {
+		cand := []Dir{turnLeft(p.dir), turnRight(p.dir), p.dir}
+		best := p.dir
+		bestScore := int32(-1 << 30)
+		bestOk := false
+		for _, d := range cand {
+			if isOpposite(p.dir, d) {
+				continue
 			}
-			if bestOk {
-				r.botTrySetDir(p, best, true)
-				p.aiNextDecisionTick = 0
-				p.aiMode = 1
-				p.aiModeUntil = 0
-				p.aiExpandPhase = 0
-				return
+			dx, dy := dirToDelta(d)
+			nx := p.x + dx
+			ny := p.y + dy
+			if !inBounds(nx, ny) {
+				continue
 			}
+			i := r.idx(nx, ny)
+			if r.trailOwner[i] == p.num {
+				continue
+			}
+			if r.lookaheadBad(p, d, 2, 0) {
+				continue
+			}
+			sc := int32(0)
+			if d == p.dir {
+				sc += 1
+			}
+			if pen := r.recentPenalty(p, nx, ny); pen > 0 {
+				sc -= pen * 3
+			}
+			if sc > bestScore {
+				bestScore = sc
+				best = d
+				bestOk = true
+			}
+		}
+		if bestOk {
+			r.botTrySetDir(p, best, true)
+			p.aiNextDecisionTick = 0
+			r.leaveHunt(p)
+			p.aiMode = 1
+			p.aiExpandPhase = 0
+			return
 		}
 	}
-
-	outsideHint := DirUp
-	outsideHintOk := false
 
 	onOwn := false
 	if inBounds(p.x, p.y) {
@@ -5515,13 +6118,11 @@ func (r *Room) botStep(p *Player) {
 	}
 	outside := len(p.trail) > 0 && !onOwn
 	if outside {
-		if len(p.trail) >= 14 {
+		// Hard stop tied to this bot's own budget instead of a flat 14, which
+		// used to cap even the long-loop farmers.
+		if len(p.trail) >= r.botTrailBudget(p, p.aiRiskiness, p.aiCaution)+4 {
+			r.leaveHunt(p)
 			p.aiMode = 1
-			p.aiModeUntil = 0
-		}
-		if d, ok := r.botPickDirOutside(p); ok {
-			outsideHint = d
-			outsideHintOk = true
 		}
 	}
 
@@ -5548,6 +6149,11 @@ doFullBot:
 
 	s := r.senseBot(p)
 	urgent := s.enemyHeadDist <= 2
+	// G4: the coward bolts from any head it can see, which is what makes it
+	// readable as a coward.
+	if p.aiArchetype == ArchCoward && s.enemyHeadDist <= 10 {
+		urgent = true
+	}
 
 	// Points-aware AI overlay: bots that are behind focus pressure on the leader;
 	// bots that are leading play safer (shorter trails, less risky hunts).
@@ -5621,16 +6227,13 @@ doFullBot:
 		ny := p.y + dy
 		imminentWall := false
 		imminentSelf := false
-		imminentOther := false
 		if !inBounds(nx, ny) {
 			imminentWall = true
-		} else {
-			i := r.idx(nx, ny)
-			if r.trailOwner[i] == p.num {
-				imminentSelf = true
-			} else if r.trailOwner[i] != 0 && p.aiMode != 2 && localAgg < 0.65 {
-				imminentOther = true
-			}
+		}
+		// G6: an enemy trail ahead is no longer treated as a threat. Stepping
+		// on it kills the owner, and swerving away looked like a bug.
+		if !imminentWall && r.trailOwner[r.idx(nx, ny)] == p.num {
+			imminentSelf = true
 		}
 		if imminentWall || imminentSelf {
 			dirs := []Dir{DirUp, DirDown, DirLeft, DirRight}
@@ -5638,6 +6241,10 @@ doFullBot:
 			bestOk := false
 			bestScore := int32(-1 << 30)
 			for _, d := range dirs {
+				// G5: bots turn under the same rule as humans. No 180s.
+				if isOpposite(p.dir, d) {
+					continue
+				}
 				dx, dy := dirToDelta(d)
 				x2 := p.x + dx
 				y2 := p.y + dy
@@ -5652,9 +6259,7 @@ doFullBot:
 				if d == moveDir {
 					sc += 2
 				}
-				if r.trailOwner[i2] != 0 {
-					sc += 1
-				}
+				sc += r.freeKillBonus(p, i2) / 8
 				bd := x2
 				if y2 < bd {
 					bd = y2
@@ -5685,9 +6290,6 @@ doFullBot:
 				return
 			}
 		}
-		if imminentOther {
-			urgent = true
-		}
 	}
 
 	onOwn = false
@@ -5701,13 +6303,10 @@ doFullBot:
 			t := r.players[r.bountyTarget]
 			if t != nil && t.alive {
 				dd := manhattan(p.x, p.y, t.x, t.y)
-				if dd <= 22 {
-					p.aiMode = 2
-					p.aiTargetX = t.x
-					p.aiTargetY = t.y
-					p.aiHuntTarget = t.num
-					p.aiModeUntil = r.tick + uint32(10+r.rng.Intn(10))
-					p.aiExpandPhase = 0
+				// G1/G2: a bounty no longer overrides the hunter cap or the
+				// archetype, so a marked human still faces at most two bots.
+				if dd <= 22 && r.canHunt(p, t, t.x, t.y, dd) {
+					r.enterHunt(p, t.num, t.x, t.y, t.num, uint32(10+r.rng.Intn(10)))
 				}
 			}
 		}
@@ -5719,13 +6318,8 @@ doFullBot:
 				leaderOnOwn := r.gridOwner[r.idx(t.x, t.y)] == t.num
 				if !leaderOnOwn {
 					dd := manhattan(p.x, p.y, t.x, t.y)
-					if dd <= 22 {
-						p.aiMode = 2
-						p.aiTargetX = t.x
-						p.aiTargetY = t.y
-						p.aiHuntTarget = 0
-						p.aiModeUntil = r.tick + uint32(8+r.rng.Intn(10))
-						p.aiExpandPhase = 0
+					if dd <= 22 && r.canHunt(p, t, t.x, t.y, dd) {
+						r.enterHunt(p, t.num, t.x, t.y, 0, uint32(8+r.rng.Intn(10)))
 					}
 				}
 			}
@@ -5837,6 +6431,7 @@ doFullBot:
 	}
 
 	if urgent {
+		r.releaseHunt(p)
 		p.aiMode = 3
 		p.aiModeUntil = r.tick + uint32(r.randInt(6, 12))
 		p.aiTargetX = p.x - (s.enemyHeadX - p.x)
@@ -5846,32 +6441,29 @@ doFullBot:
 
 	if p.aiLastSeenTick != 0 && r.tick-p.aiLastSeenTick <= 18 && (!outside || len(p.trail) <= huntTrailMax) {
 		if p.aiLastSeenType == 1 {
-			p.aiMode = 2
-			p.aiTargetX = p.aiLastSeenX
-			p.aiTargetY = p.aiLastSeenY
-			p.aiHuntTarget = p.aiLastSeenNum
-			p.aiModeUntil = r.tick + uint32(8+r.rng.Intn(10))
-			p.aiExpandPhase = 0
+			enemy := r.players[p.aiLastSeenNum]
+			dd := manhattan(p.x, p.y, p.aiLastSeenX, p.aiLastSeenY)
+			// G2: this branch used to have no gate at all, so a single long
+			// loop pulled every bot that could see it. Now it rolls the tier
+			// gate and still has to fit under the hunter cap.
+			gate := p.aiHuntGate * (0.35 + 0.50*localAgg)
+			if r.rng.Float32() < gate && r.canHunt(p, enemy, p.aiLastSeenX, p.aiLastSeenY, dd) {
+				r.enterHunt(p, enemy.num, p.aiLastSeenX, p.aiLastSeenY, p.aiLastSeenNum, uint32(8+r.rng.Intn(10)))
+			}
 		} else if p.aiLastSeenType == 2 {
 			enemy := r.players[p.aiLastSeenNum]
 			if enemy != nil && enemy.alive {
 				enemyOnOwn := r.gridOwner[r.idx(enemy.x, enemy.y)] == enemy.num
 				if !enemyOnOwn {
+					dd := manhattan(p.x, p.y, p.aiLastSeenX, p.aiLastSeenY)
 					gate := (0.10 + 0.55*localRisk) * (0.35 + 0.65*localAgg)
-					if r.rng.Float32() < gate {
-						p.aiMode = 2
-						p.aiTargetX = p.aiLastSeenX
-						p.aiTargetY = p.aiLastSeenY
-						p.aiHuntTarget = 0
-						p.aiModeUntil = r.tick + uint32(6+r.rng.Intn(8))
-						p.aiExpandPhase = 0
+					if r.rng.Float32() < gate && r.canHunt(p, enemy, p.aiLastSeenX, p.aiLastSeenY, dd) {
+						r.enterHunt(p, enemy.num, p.aiLastSeenX, p.aiLastSeenY, 0, uint32(6+r.rng.Intn(8)))
 					}
 				}
 			}
 		}
 	}
-	_ = outsideHint
-	_ = outsideHintOk
 
 	if outside && len(p.trail) > 0 {
 		closeD := r.estimateReturnSteps(p.num, p.x, p.y)
@@ -5881,8 +6473,8 @@ doFullBot:
 			margin += 1
 		}
 		if minCut+margin < closeD {
+			r.leaveHunt(p)
 			p.aiMode = 1
-			p.aiModeUntil = 0
 			p.aiExpandPhase = 0
 		}
 	}
@@ -5892,38 +6484,21 @@ doFullBot:
 	} else {
 		p.aiModeUntil = 0
 		tryHunt := func(maxBotDist int) bool {
+			// G17: the full trail scan is the single most expensive thing a
+			// bot does. Run it every few ticks, not every decision, and give
+			// each bot its own phase so they do not all scan the same tick.
+			if p.aiHuntScanTick != 0 && r.tick-p.aiHuntScanTick < BotHuntScanEvery {
+				return false
+			}
+			p.aiHuntScanTick = r.tick + uint32(r.rng.Intn(2))
 			bestScore := -9999
 			bestOwner := uint16(0)
 			bestX := -1
 			bestY := -1
 			bestDist := 9999
-			rw := ROIWidth
-			rh := ROIHeight
-			if rw > W {
-				rw = W
-			}
-			if rh > H {
-				rh = H
-			}
-			rx := p.x - rw/2
-			ry := p.y - rh/2
-			if rx < 0 {
-				rx = 0
-			}
-			if ry < 0 {
-				ry = 0
-			}
-			if rx+rw > W {
-				rx = W - rw
-			}
-			if ry+rh > H {
-				ry = H - rh
-			}
-			minX := rx
-			minY := ry
-			maxX := rx + rw
-			maxY := ry + rh
-			for yy := minY; yy < maxY; yy++ {
+			minX, minY, maxX, maxY := r.botROIBounds(p)
+			probes := 0
+			for yy := minY; yy < maxY && probes < BotHuntMaxProbes; yy++ {
 				row := yy * W
 				for xx := minX; xx < maxX; xx++ {
 					i := row + xx
@@ -5935,6 +6510,21 @@ doFullBot:
 					if enemy == nil || !enemy.alive {
 						continue
 					}
+					// BFS distance is never below the manhattan distance, so
+					// this prefilter is free and prunes most of the ROI.
+					if manhattan(p.x, p.y, xx, yy) > maxBotDist {
+						continue
+					}
+					if !r.botMayHunt(p, xx, yy, manhattan(p.x, p.y, xx, yy)) {
+						continue
+					}
+					if !r.canHunt(p, enemy, xx, yy, manhattan(p.x, p.y, xx, yy)) {
+						continue
+					}
+					probes++
+					if probes > BotHuntMaxProbes {
+						break
+					}
 					botDist := r.bfsToCell(p.x, p.y, i, o, 26)
 					if botDist >= 9999 {
 						continue
@@ -5942,14 +6532,23 @@ doFullBot:
 					if botDist > maxBotDist {
 						continue
 					}
-					enemyReturn := r.estimateReturnSteps(enemy.num, enemy.x, enemy.y)
+					// G9: no exact knowledge of the enemy's way home; only
+					// what the bot can see inside its own ROI.
+					enemyReturn := r.visibleReturnEstimate(p, enemy, minX, minY, maxX, maxY)
 					margin := 2 + int(5*float32(p.aiCaution))
+					if p.aiArchetype == ArchCoward {
+						// Cowards only take fights they cannot lose.
+						margin += 4
+					}
 					win := enemyReturn - (botDist + margin)
 					aggr := 0
 					if p.contractType == ContractKills {
 						aggr = 4
 					} else if localAgg > 0.35 {
 						aggr = 2
+					}
+					if p.aiArchetype == ArchCoward {
+						aggr = 0
 					}
 					if win < -aggr {
 						continue
@@ -5973,12 +6572,7 @@ doFullBot:
 				}
 			}
 			if bestOwner != 0 && bestDist <= maxBotDist {
-				p.aiMode = 2
-				p.aiTargetX = bestX
-				p.aiTargetY = bestY
-				p.aiHuntTarget = bestOwner
-				p.aiModeUntil = r.tick + uint32(10+r.rng.Intn(12))
-				p.aiExpandPhase = 0
+				r.enterHunt(p, bestOwner, bestX, bestY, bestOwner, uint32(10+r.rng.Intn(12)))
 				return true
 			}
 			return false
@@ -5991,8 +6585,14 @@ doFullBot:
 			if len(p.trail) < k {
 				k = len(p.trail)
 			}
+			// G9: same ROI gate as worstCaseCutDistToTrail — a bot must not
+			// retreat from someone it cannot see.
+			cminX, cminY, cmaxX, cmaxY := r.botROIBounds(p)
 			for _, o := range r.players {
 				if o == nil || !o.alive || o.num == p.num {
+					continue
+				}
+				if o.x < cminX || o.x >= cmaxX || o.y < cminY || o.y >= cmaxY {
 					continue
 				}
 				for i := len(p.trail) - 1; i >= 0 && i >= len(p.trail)-k; i-- {
@@ -6010,15 +6610,17 @@ doFullBot:
 			}
 			margin := 2 + int(5*float32(p.aiCaution))
 			if minCut+margin < closeD {
+				r.leaveHunt(p)
 				p.aiMode = 1
 				p.aiExpandPhase = 0
 			} else {
-				p.aiMode = 0
+				r.leaveHunt(p)
 				if len(p.trail) <= huntTrailMax {
 					_ = tryHunt(22)
 				}
 			}
 		} else {
+			r.leaveHunt(p)
 			if !tryHunt(18) {
 				p.aiMode = 0
 			}
@@ -6055,28 +6657,39 @@ doFullBot:
 	}
 
 	if p.aiMode == 2 {
-		if p.aiHuntTarget != 0 {
+		if v := r.players[p.aiHuntWho]; p.aiHuntWho != 0 && (v == nil || !v.alive) {
+			r.leaveHunt(p)
+		}
+		if p.aiMode == 2 && p.aiHuntTarget != 0 {
 			enemy := r.players[p.aiHuntTarget]
 			if enemy == nil || !enemy.alive {
-				p.aiMode = 0
-				p.aiModeUntil = 0
+				r.leaveHunt(p)
 			} else if !inBounds(p.aiTargetX, p.aiTargetY) {
-				p.aiMode = 0
-				p.aiModeUntil = 0
+				r.leaveHunt(p)
 			} else {
 				targetI := r.idx(p.aiTargetX, p.aiTargetY)
 				if r.trailOwner[targetI] != p.aiHuntTarget {
-					p.aiMode = 0
-					p.aiModeUntil = 0
+					r.leaveHunt(p)
 				} else if r.bfsToCell(p.x, p.y, targetI, p.aiHuntTarget, 24) >= 9999 {
-					p.aiMode = 0
-					p.aiModeUntil = 0
+					r.leaveHunt(p)
 				}
 			}
 		}
 		if p.aiMode != 2 {
 			p.aiExpandPhase = 0
 		} else {
+			// G14: hold a straight line at the target for a few ticks before
+			// the chase proper, so the player gets a visible windup.
+			if p.aiWindupUntil != 0 {
+				if r.tick < p.aiWindupUntil {
+					wd := p.aiWindupDir
+					if !isOpposite(p.dir, wd) && !r.lookaheadBad(p, wd, 2, p.aiHuntTarget) {
+						r.botTrySetDir(p, wd, true)
+						return
+					}
+				}
+				p.aiWindupUntil = 0
+			}
 			targetI := r.idx(p.aiTargetX, p.aiTargetY)
 			d, ok := r.pickDirToCell(p, targetI, p.aiHuntTarget)
 			if !ok {
@@ -6111,55 +6724,37 @@ doFullBot:
 	// expand: prefer going forward, but occasionally turn to grow area
 	if outside {
 		trailLen := len(p.trail)
-		budget := p.aiBravery
-		if budget < 8 {
-			budget = 8
-		}
-		budget += int(6 * float32(localRisk))
-		budget -= int(7 * float32(p.aiBaitSense))
-		if localCaution > 0.55 {
-			budget -= 2
-		}
-		if p.contractType == ContractCapture {
-			budget += 4
-		}
-		if r.mutatorType == MutatorDoubleCapture {
-			budget -= 2
-		}
+		budget := r.botTrailBudget(p, localRisk, localCaution)
 		if isLeader && lead >= 20 {
 			budget -= 3
 		}
-		if budget < 7 {
-			budget = 7
+		if budget < 6 {
+			budget = 6
 		}
-		if budget > 26 {
-			budget = 26
-		}
-		closeStart := int(float32(budget)*0.62) + 1
+		// closeStart scales with the budget instead of bottoming out at a
+		// flat 6, which used to make a third of the roster behave identically.
+		closeStart := int(float32(budget)*0.72) + 1
 		if p.contractType == ContractCapture {
 			closeStart += 2
 		}
-		if closeStart < 6 {
-			closeStart = 6
+		if closeStart < 4 {
+			closeStart = 4
 		}
 		if closeStart > budget {
 			closeStart = budget
 		}
 		if isLeader && lead >= 20 {
 			closeStart -= 2
-			if closeStart < 5 {
-				closeStart = 5
-			}
 		}
 		if r.mutatorType == MutatorDoubleCapture {
 			closeStart -= 2
-			if closeStart < 5 {
-				closeStart = 5
-			}
+		}
+		if closeStart < 4 {
+			closeStart = 4
 		}
 		if trailLen >= closeStart {
+			r.leaveHunt(p)
 			p.aiMode = 1
-			p.aiModeUntil = 0
 			if gi, ok := r.pickCloseGateCell(p); ok {
 				p.aiTargetX = gi % W
 				p.aiTargetY = gi / W
@@ -6183,7 +6778,7 @@ doFullBot:
 			r.botTrySetDir(p, dmm, urgent)
 			return
 		}
-		if len(p.trail) > p.aiBravery {
+		if len(p.trail) > budget {
 			d := r.pickDirToOwned(p)
 			r.botTrySetDir(p, d, urgent)
 			return
@@ -6317,6 +6912,8 @@ doFullBot:
 		} else if owner != p.num {
 			score += 10
 		}
+		// G6: take the free kill instead of steering around it.
+		score += r.freeKillBonus(p, i)
 		if d == p.dir {
 			score += 4
 		}
@@ -6385,8 +6982,10 @@ doFullBot:
 			best = d
 		}
 	}
-	if outside && outsideHintOk && p.aiMode == 0 && p.aiExpandPhase == 0 {
-		if !r.lookaheadBad(p, outsideHint, 3, 0) {
+	// G17: this is the only consumer of botPickDirOutside, so compute it here
+	// instead of on every decision tick and throwing it away.
+	if outside && p.aiMode == 0 && p.aiExpandPhase == 0 {
+		if outsideHint, ok := r.botPickDirOutside(p); ok && !r.lookaheadBad(p, outsideHint, 3, 0) {
 			best = outsideHint
 		}
 	}
@@ -6652,47 +7251,37 @@ func (r *Room) stepPlayer(p *Player) {
 			best := moveDir
 			bestScore := int32(-1 << 30)
 			bestOk := false
-			for pass := 0; pass < 2; pass++ {
-				for _, d := range dirs {
-					if pass == 0 && isOpposite(moveDir, d) {
-						continue
-					}
-					dx2, dy2 := dirToDelta(d)
-					x2 := p.x + dx2
-					y2 := p.y + dy2
-					if !inBounds(x2, y2) {
-						continue
-					}
-					i2 := r.idx(x2, y2)
-					if r.trailOwner[i2] == p.num {
-						continue
-					}
-					if r.lookaheadBad(p, d, 3, allowTrailOwner) {
-						continue
-					}
-					sc := int32(0)
-					if d == moveDir {
-						sc += 3
-					}
-					to := r.trailOwner[i2]
-					if to != 0 {
-						if allowTrailOwner != 0 && to == allowTrailOwner {
-							sc += 3
-						} else {
-							sc -= 2
-						}
-					}
-					if pen := r.recentPenalty(p, x2, y2); pen > 0 {
-						sc -= pen
-					}
-					if sc > bestScore {
-						bestScore = sc
-						best = d
-						bestOk = true
-					}
+			// G5: single pass only. A human cannot escape by reversing, so a
+			// bot may not either — the second pass used to allow a free 180.
+			for _, d := range dirs {
+				if isOpposite(moveDir, d) {
+					continue
 				}
-				if bestOk {
-					break
+				dx2, dy2 := dirToDelta(d)
+				x2 := p.x + dx2
+				y2 := p.y + dy2
+				if !inBounds(x2, y2) {
+					continue
+				}
+				i2 := r.idx(x2, y2)
+				if r.trailOwner[i2] == p.num {
+					continue
+				}
+				if r.lookaheadBad(p, d, 3, allowTrailOwner) {
+					continue
+				}
+				sc := int32(0)
+				if d == moveDir {
+					sc += 3
+				}
+				sc += r.freeKillBonus(p, i2) / 8
+				if pen := r.recentPenalty(p, x2, y2); pen > 0 {
+					sc -= pen
+				}
+				if sc > bestScore {
+					bestScore = sc
+					best = d
+					bestOk = true
 				}
 			}
 			if bestOk {
@@ -6703,7 +7292,8 @@ func (r *Room) stepPlayer(p *Player) {
 				p.aiAvoidTo = best
 				p.aiAvoidReason = avoidReason
 				p.aiNextDecisionTick = 0
-				p.aiExpandPhase = 0
+				// G12: keep the expansion phase. Wiping it forced a full
+				// replan next tick, which is what made bots dither at edges.
 			}
 		}
 	}
@@ -6775,13 +7365,20 @@ func (r *Room) applyMove(p *Player) {
 		// stale decisions; try to avoid stepping into own trail.
 		if p.nextI >= 0 && r.trailOwner[p.nextI] == p.num {
 			moveDir := p.dir
+			allowTrailOwner := uint16(0)
+			if p.aiMode == 2 && p.aiHuntTarget != 0 {
+				allowTrailOwner = p.aiHuntTarget
+			}
 			dirs := []Dir{DirUp, DirDown, DirLeft, DirRight}
 			best := moveDir
 			bestScore := int32(-1 << 30)
 			bestOk := false
+			// G11: pass 0 also demands a clean 2-step lookahead, so the last
+			// resort cannot dump the bot into a dead end or a wall. Pass 1
+			// drops that requirement but never the no-180 rule (G5).
 			for pass := 0; pass < 2; pass++ {
 				for _, d := range dirs {
-					if pass == 0 && isOpposite(moveDir, d) {
+					if isOpposite(moveDir, d) {
 						continue
 					}
 					dx, dy := dirToDelta(d)
@@ -6794,13 +7391,14 @@ func (r *Room) applyMove(p *Player) {
 					if r.trailOwner[ii] == p.num {
 						continue
 					}
+					if pass == 0 && r.lookaheadBad(p, d, 2, allowTrailOwner) {
+						continue
+					}
 					sc := int32(0)
 					if d == moveDir {
 						sc += 3
 					}
-					if r.trailOwner[ii] != 0 {
-						sc -= 1
-					}
+					sc += r.freeKillBonus(p, ii) / 8
 					if sc > bestScore {
 						bestScore = sc
 						best = d
@@ -6810,6 +7408,7 @@ func (r *Room) applyMove(p *Player) {
 				if bestOk {
 					break
 				}
+				bestScore = int32(-1 << 30)
 			}
 			if bestOk {
 				p.dir = best
@@ -7124,6 +7723,10 @@ func (r *Room) step() {
 	}
 
 	botStartedAt := time.Now()
+	// G2: rebuild the hunter census from live state before any bot decides.
+	// Recomputing beats incremental bookkeeping here: a stuck counter would
+	// silently switch bot aggression off for the rest of the match.
+	r.recomputeHuntersLocked()
 	for _, p := range alive {
 		if p.bot {
 			r.botStep(p)
