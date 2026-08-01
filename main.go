@@ -77,9 +77,27 @@ const (
 	SendBackpressureTimeout = 100 * time.Millisecond
 )
 
-var allowedWSOrigins = map[string]struct{}{
-	"https://snakes.samoy.love": {},
-	"http://snakes.samoy.love":  {},
+// allowedWSOrigins is the WebSocket origin allowlist. It is seeded from the
+// WS_ORIGINS env var (comma-separated), falling back to the production host.
+// Without this, any deployment on a different domain — including Docker — is
+// rejected at the handshake.
+var allowedWSOrigins = loadAllowedWSOrigins()
+
+func loadAllowedWSOrigins() map[string]struct{} {
+	out := make(map[string]struct{})
+	raw := strings.TrimSpace(os.Getenv("WS_ORIGINS"))
+	if raw == "" {
+		out["https://snakes.samoy.love"] = struct{}{}
+		out["http://snakes.samoy.love"] = struct{}{}
+		return out
+	}
+	for _, part := range strings.Split(raw, ",") {
+		o := strings.TrimRight(strings.TrimSpace(part), "/")
+		if o != "" {
+			out[o] = struct{}{}
+		}
+	}
+	return out
 }
 
 // CosmeticsMaxID is the highest cosmetic id; the inventory mask is a uint8, so
