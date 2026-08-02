@@ -19,19 +19,17 @@ make fmt-check     # падает, если есть неотформатиро�
 make vet
 make build         # на Windows кладёт snakes.exe
 make test
-make test-race-docker   # -race в контейнере golang:1.22, gcc на хосте не нужен
+make test-race-docker   # -race в контейнере golang:1.25, gcc на хосте не нужен
 make node-check         # node --check по всем public/client*.js
-make test-client        # клиентские тесты бинарного протокола (Node 22+)
+make test-client        # клиентские тесты бинарного протокола (Node 24+)
 make test-all           # go test + node-check + test-client
 make golden             # перегенерировать эталон протокола после его изменения
-make docker-build
-make docker-up / make docker-down / make docker-logs
 make clean
 ```
 
 `make test-race` требует CGO и `gcc` в `PATH`. На типичной Windows-машине его
 нет — используйте `make test-race-docker`, он даёт ровно то же окружение, что и
-CI. Последний прогон `-race` (Linux, `golang:1.22`) прошёл чисто: `ok snakes 1.806s`.
+CI. Последний прогон `-race` (Linux, `golang:1.25`) прошёл чисто: `ok snakes 235.9s`.
 
 Внимание, Windows: нужен именно GNU make из chocolatey
 (`C:\ProgramData\chocolatey\bin\make.exe`). Make из чужой msys2-среды (например
