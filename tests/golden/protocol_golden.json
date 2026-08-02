@@ -1,6 +1,6 @@
 {
   "note": "Эталонные буферы бинарного протокола Snakes. Генерируется из Go-сериализаторов (golden_export_test.go), потребляется node-тестами в tests/. Не редактировать вручную.",
-  "regen": "UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport .",
+  "regen": "UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport ./internal/game",
   "consts": {
     "H": 140,
     "W": 200,

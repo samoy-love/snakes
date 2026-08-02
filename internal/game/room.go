@@ -1,6 +1,6 @@
 // room.go holds the room lifecycle: the hub and room registry, the tick loop,
 // movement/collision resolution, spawns, deaths and the match cycle.
-package main
+package game
 
 import (
 	"context"

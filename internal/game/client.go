@@ -1,6 +1,6 @@
 // client.go holds the per-connection client: its send queue and write loop,
 // room join/leave and the chat handler.
-package main
+package game
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"nhooyr.io/websocket"
 
+	"snakes/internal/metrics"
 	"snakes/internal/profiles"
 
 	"snakes/internal/sanitize"
@@ -34,7 +35,7 @@ func (c *Client) closeWith(code websocket.StatusCode, reason string) {
 		return
 	}
 	log.Printf("ws_close ip=%q pid=%q code=%d reason=%q", c.ip, profiles.ShortPID(c.pid), code, reason)
-	metrics.wsActive.Add(-1)
+	metrics.WSActive.Add(-1)
 	c.leaveRoom(context.Background())
 	close(c.sendCh)
 	_ = c.conn.Close(code, reason)
@@ -55,7 +56,7 @@ func (c *Client) writeLoop() {
 			err := c.conn.Write(ctx, m.msgType, m.data)
 			cancel()
 			if err != nil {
-				metrics.wsWriteErrors.Add(1)
+				metrics.WSWriteErrors.Add(1)
 				log.Printf("ws_write_error ip=%q err=%v", c.ip, err)
 				writeFailed = true
 				c.closeWith(websocket.StatusGoingAway, "write_error")
@@ -91,7 +92,7 @@ func (c *Client) enqueue(msgType websocket.MessageType, b []byte, pd *pooledData
 			return true
 		default:
 		}
-		metrics.wsDropped.Add(1)
+		metrics.WSDropped.Add(1)
 		decPooledRef(pd)
 		return false
 	}
@@ -115,7 +116,7 @@ func (c *Client) enqueue(msgType websocket.MessageType, b []byte, pd *pooledData
 		return true
 	case <-t.C:
 	}
-	metrics.wsDropped.Add(1)
+	metrics.WSDropped.Add(1)
 	decPooledRef(pd)
 	// Drop the laggard instead of blocking everyone else. Async because the
 	// caller may hold room locks that close() needs.

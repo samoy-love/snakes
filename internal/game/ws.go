@@ -1,7 +1,7 @@
 // ws.go — сессия игрока поверх WebSocket: рукопожатие, лимиты на входящие
 // команды и их разбор. Всё, что относится к транспорту и не знает про игру
 // (адрес за прокси, ведро rate-limit, allowlist Origin'ов), живёт в httpx.
-package main
+package game
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"nhooyr.io/websocket"
 
 	"snakes/internal/httpx"
+	"snakes/internal/metrics"
 
 	"snakes/internal/profiles"
 
@@ -51,8 +52,8 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	defer profiles.ReleasePID(pid)
 	profiles.TouchLastSeen(pid)
 	client.name.Store("Игрок")
-	metrics.wsConnections.Add(1)
-	metrics.wsActive.Add(1)
+	metrics.WSConnections.Add(1)
+	metrics.WSActive.Add(1)
 	go client.writeLoop()
 
 	defer client.close()
@@ -81,7 +82,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		"phaseTicks": []uint32{PhaseExpansionEndTick, PhaseConflictEndTick},
 		"phaseNames": []string{"expansion", "conflict", "final"},
 		"finalMult":  2,
-		"version":    Version,
+		"version":    buildVersion,
 	})
 	client.sendRooms(r.Context(), hub)
 

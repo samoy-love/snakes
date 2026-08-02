@@ -110,7 +110,7 @@ test-all: test node-check test-client
 # Перегенерация эталона после ОСОЗНАННОГО изменения протокола. После неё
 # обязательно прогнать test-client: клиент придётся править синхронно.
 golden:
-	UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport .
+	UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport ./internal/game
 	@echo "эталон обновлён; проверьте клиент: make test-client"
 
 vet:

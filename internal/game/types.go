@@ -1,7 +1,7 @@
 // types.go holds the core data structures shared by the whole server:
 // the room, the player, the persisted profile, the websocket client and the
 // small value types they are built from.
-package main
+package game
 
 import (
 	"encoding/json"
@@ -413,15 +413,6 @@ type outbound struct {
 	drop    bool
 	pd      *pooledData
 }
-
-type serverMetrics struct {
-	wsConnections atomic.Uint64
-	wsWriteErrors atomic.Uint64
-	wsDropped     atomic.Uint64
-	wsActive      atomic.Int64
-}
-
-var metrics serverMetrics
 
 type ClientMsg struct {
 	Type string          `json:"type"`
