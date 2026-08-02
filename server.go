@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,11 +15,38 @@ import (
 	"time"
 )
 
+// resolveListenAddr turns the BIND_ADDR setting and the port into the address
+// the HTTP server binds. An empty setting means loopback: see the comment in
+// main() for why that, and not 0.0.0.0, is the default.
+func resolveListenAddr(bindAddr, port string) string {
+	host := strings.TrimSpace(bindAddr)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "3000"
 	}
+
+	// Interface to bind. Loopback by DEFAULT: in production this is a systemd
+	// unit sitting behind the host's nginx, and nothing outside the machine has
+	// any business talking to the Go process directly.
+	//
+	// This used to be ":"+port, i.e. 0.0.0.0, so the game port was reachable
+	// from the internet — bypassing every rate limit, origin check and security
+	// header that live in the nginx config. deploy/nginx.snakes.conf claimed the
+	// process "listens on 127.0.0.1:8090 only"; that was simply not true.
+	//
+	// Containers opt out explicitly: under docker compose nginx runs in its own
+	// container and reaches the game across the compose network, where loopback
+	// is the container's own. Both compose files set BIND_ADDR=0.0.0.0 — there
+	// the exposure is deliberate and the network namespace is the boundary.
+	listenAddr := resolveListenAddr(os.Getenv("BIND_ADDR"), port)
+
 	roomLimit := RoomHumanLimitDefault
 	if v := os.Getenv("ROOM_LIMIT"); v != "" {
 		if n, err := parseInt(v); err == nil && n > 0 {
@@ -53,7 +81,7 @@ func main() {
 	mux.Handle("/", cacheStaticMiddleware(fs))
 
 	srv := &http.Server{
-		Addr:              ":" + port,
+		Addr:              listenAddr,
 		Handler:           securityHeadersMiddleware(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -61,7 +89,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("listening on http://localhost:%s\n", port)
+		log.Printf("listening on http://%s\n", listenAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server error: %v", err)
 		}
