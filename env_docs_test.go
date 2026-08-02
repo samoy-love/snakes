@@ -3,15 +3,16 @@ package main
 // Сверка «код ↔ документация» по переменным окружения.
 //
 // .env.example и README расходились с кодом уже не раз: переменную добавляли в
-// main.go/profiles.go, а в шаблон конфига не заносили — и на сервере её просто
-// никто не выставлял. Этот тест делает сверку автоматической: любая новая
+// код, а в шаблон конфига не заносили — и на сервере её просто никто не
+// выставлял. Этот тест делает сверку автоматической: любая новая
 // os.Getenv("X") в неотладочном коде обязана появиться и в .env.example, и в
-// README, и в docker-compose.yml.
+// README.
 //
 // Тестовые файлы не сканируются: переменные вроде UPDATE_GOLDEN — это ручка
 // самих тестов, а не конфигурация сервера.
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,21 +31,34 @@ var envDocExempt = map[string]string{}
 func collectEnvNames(t *testing.T) []string {
 	t.Helper()
 	names := map[string]struct{}{}
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("читаю корень репозитория: %v", err)
-	}
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".go" || strings.HasSuffix(e.Name(), "_test.go") {
-			continue
-		}
-		b, err := os.ReadFile(e.Name())
+	// Обход всего дерева, а не только корня: настройки читают и пакеты в
+	// internal/ (WS_ORIGINS в httpx, MAX_PROFILES в profiles). Пока сканировался
+	// один корень, вынос кода в пакет молча выключал бы проверку.
+	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			t.Fatalf("читаю %s: %v", e.Name(), err)
+			return err
+		}
+		if d.IsDir() {
+			// tools/node_modules и прочее чужое добро сканировать незачем.
+			if name := d.Name(); path != "." && (strings.HasPrefix(name, ".") || name == "node_modules") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
 		}
 		for _, m := range envRefRe.FindAllStringSubmatch(string(b), -1) {
 			names[m[1]] = struct{}{}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("обхожу дерево репозитория: %v", err)
 	}
 	out := make([]string, 0, len(names))
 	for n := range names {
