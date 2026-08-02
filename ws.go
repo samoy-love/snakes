@@ -14,6 +14,8 @@ import (
 	"nhooyr.io/websocket"
 
 	"snakes/internal/httpx"
+
+	"snakes/internal/profiles"
 )
 
 // wsIPLimiter — общий на процесс лимитер входящих команд: одно ведро на пару
@@ -40,12 +42,12 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	}
 	c.SetReadLimit(MaxClientWSMsgBytes)
 	// Signed identity: the legacy ?pid= parameter is never trusted, only ?t=.
-	pid, token := resolveProfileToken(r.URL.Query().Get("t"))
+	pid, token := profiles.ResolveToken(r.URL.Query().Get("t"))
 	client := &Client{conn: c, sendCh: make(chan outbound, 256), ip: httpx.ClientIP(r), pid: pid}
 	// G7: a profile held by a live connection is never an eviction candidate.
-	retainProfilePID(pid)
-	defer releaseProfilePID(pid)
-	touchProfileLastSeen(pid)
+	profiles.RetainPID(pid)
+	defer profiles.ReleasePID(pid)
+	profiles.TouchLastSeen(pid)
 	client.name.Store("Игрок")
 	metrics.wsConnections.Add(1)
 	metrics.wsActive.Add(1)
@@ -297,22 +299,22 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			bit := uint8(1) << id
 
 			// Ownership check, debit and grant happen in one critical section
-			// over the profile. Lock order stays rm.mu -> profilesMu.
+			// over the profile. Lock order stays rm.mu -> profiles.Mu.
 			//
 			// G8: this is a WRITE path, so the profile must be materialised with
-			// profileForKeyCreate. profileForKey hands back a transient object
+			// profiles.ForKeyCreate. profiles.ForKey hands back a transient object
 			// for a player with no stored profile yet, and a purchase through it
 			// is dropped on the floor while the client is told it succeeded —
 			// today only prices above zero hide the bug. The pointer is also
-			// taken under profilesMu: between a lookup and the debit the entry
+			// taken under profiles.Mu: between a lookup and the debit the entry
 			// could otherwise be evicted.
 			if rm != nil {
 				rm.mu.Lock()
 			}
-			profilesMu.Lock()
-			pr := profileForKeyCreateLocked(pid)
+			profiles.Mu.Lock()
+			pr := profiles.ForKeyCreateLocked(pid)
 			if pr == nil {
-				profilesMu.Unlock()
+				profiles.Mu.Unlock()
 				if rm != nil {
 					rm.mu.Unlock()
 				}
@@ -320,7 +322,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			ensureProfileCosmeticsLocked(pr)
-			inv := profileCosInvLocked(pr, cat)
+			inv := profiles.CosInvLocked(pr, cat)
 			var payload map[string]any
 			errMsg := ""
 			bought := false
@@ -336,7 +338,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			default:
 				pr.StyleBalance -= uint32(price)
 				*inv |= bit
-				profileSetEquippedLocked(pr, cat, id)
+				profiles.SetEquippedLocked(pr, cat, id)
 				pr.LastSeen = time.Now().Unix()
 				balAfter = pr.StyleBalance
 				bought = true
@@ -349,7 +351,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				}
 				payload = cosmeticsStatePayloadFromProfile(pr)
 			}
-			profilesMu.Unlock()
+			profiles.Mu.Unlock()
 			if rm != nil {
 				if bought {
 					// equip changes live in the player record, force a snapshot
@@ -362,9 +364,9 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if bought {
-				markProfilesDirty()
+				profiles.MarkDirty()
 				log.Printf("cosmetics_txn pid=%q cat=%q id=%d price=%d balance_before=%d balance_after=%d",
-					shortPID(pid), cat, id, price, balBefore, balAfter)
+					profiles.ShortPID(pid), cat, id, price, balBefore, balAfter)
 			}
 			client.sendJSON(r.Context(), "cosmetics", payload)
 			if bought && rm != nil {
@@ -397,14 +399,14 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 			// S5: NOT a create path. Equipping cannot unlock anything, so it
 			// must not mint a profile for every visitor who opens the
-			// wardrobe. See profileForKeyEquipLocked.
+			// wardrobe. See profiles.ForKeyEquipLocked.
 			if rm != nil {
 				rm.mu.Lock()
 			}
-			profilesMu.Lock()
-			pr, stored := profileForKeyEquipLocked(pid)
+			profiles.Mu.Lock()
+			pr, stored := profiles.ForKeyEquipLocked(pid)
 			if pr == nil {
-				profilesMu.Unlock()
+				profiles.Mu.Unlock()
 				if rm != nil {
 					rm.mu.Unlock()
 				}
@@ -412,20 +414,20 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			ensureProfileCosmeticsLocked(pr)
-			inv := profileCosInvLocked(pr, cat)
+			inv := profiles.CosInvLocked(pr, cat)
 			owned := inv != nil && (*inv&bit) != 0
 			var payload map[string]any
 			balance := pr.StyleBalance
-			changed := owned && profileEquippedLocked(pr, cat) != id
+			changed := owned && profiles.EquippedLocked(pr, cat) != id
 			if owned {
-				profileSetEquippedLocked(pr, cat, id)
+				profiles.SetEquippedLocked(pr, cat, id)
 				pr.LastSeen = time.Now().Unix()
 				if rm != nil {
 					applyProfileCosmeticsToPlayerLocked(pl, pr)
 				}
 				payload = cosmeticsStatePayloadFromProfile(pr)
 			}
-			profilesMu.Unlock()
+			profiles.Mu.Unlock()
 			if rm != nil {
 				if owned {
 					rm.forceFullSnapshot = true
@@ -440,9 +442,9 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			// log it, or a client at the rate limit turns the log into a
 			// firehose and the autosave into a treadmill.
 			if changed && stored {
-				markProfilesDirty()
+				profiles.MarkDirty()
 				log.Printf("cosmetics_txn pid=%q cat=%q id=%d price=%d balance_before=%d balance_after=%d",
-					shortPID(pid), "equip:"+cat, id, 0, balance, balance)
+					profiles.ShortPID(pid), "equip:"+cat, id, 0, balance, balance)
 			}
 			client.sendJSON(r.Context(), "cosmetics", payload)
 			if rm != nil {
@@ -465,15 +467,15 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			client.mu.Unlock()
 			pid := client.profileKey()
 
-			// Same lock order as the cosmetics branches: rm.mu -> profilesMu.
+			// Same lock order as the cosmetics branches: rm.mu -> profiles.Mu.
 			// S5: equip only, so no entry is created (see cosmeticsEquip).
 			if rm != nil {
 				rm.mu.Lock()
 			}
-			profilesMu.Lock()
-			pr, stored := profileForKeyEquipLocked(pid)
+			profiles.Mu.Lock()
+			pr, stored := profiles.ForKeyEquipLocked(pid)
 			if pr == nil {
-				profilesMu.Unlock()
+				profiles.Mu.Unlock()
 				if rm != nil {
 					rm.mu.Unlock()
 				}
@@ -493,7 +495,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				}
 				payload = cosmeticsStatePayloadFromProfile(pr)
 			}
-			profilesMu.Unlock()
+			profiles.Mu.Unlock()
 			if rm != nil {
 				rm.mu.Unlock()
 			}
@@ -502,8 +504,8 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if changed && stored {
-				markProfilesDirty()
-				log.Printf("title_equip pid=%q id=%d", shortPID(pid), p.ID)
+				profiles.MarkDirty()
+				log.Printf("title_equip pid=%q id=%d", profiles.ShortPID(pid), p.ID)
 			}
 			client.sendJSON(r.Context(), "cosmetics", payload)
 			if rm != nil {

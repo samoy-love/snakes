@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"nhooyr.io/websocket"
+
+	"snakes/internal/profiles"
 )
 
 // ---------------------------------------------------------------------------
@@ -32,11 +34,7 @@ func wsSmokeEnv(t *testing.T) (*Hub, string) {
 
 	// PROFILE_SECRET в тестах не задан: инициализируем эфемерный секрет один
 	// раз на весь пакет, иначе токены из разных подключений не сойдутся.
-	wsSmokeSecretOnce.Do(func() {
-		if len(profileSecret) == 0 {
-			initProfileSecret()
-		}
-	})
+	wsSmokeSecretOnce.Do(profiles.InitSecret)
 
 	// Лимитер per-IP — пакетный глобал, и все тесты ходят с 127.0.0.1. Без
 	// сброса повторный прогон (go test -count=N) упирается в бакет "join"
@@ -163,7 +161,7 @@ func TestWSSmokeJoinAndSnapshot(t *testing.T) {
 
 	// 1) hello
 	token := wsSmokeHello(ctx, t, c)
-	if _, ok := parseProfileToken(token); !ok {
+	if _, ok := profiles.ParseToken(token); !ok {
 		t.Fatalf("токен из hello не проходит проверку подписи: %q", token)
 	}
 
@@ -236,7 +234,7 @@ func TestWSSmokeReconnectKeepsProfileID(t *testing.T) {
 		t.Fatalf("dial #1: %v", err)
 	}
 	token1 := wsSmokeHello(ctx, t, c1)
-	pid1, ok := parseProfileToken(token1)
+	pid1, ok := profiles.ParseToken(token1)
 	if !ok {
 		t.Fatalf("токен первого подключения невалиден: %q", token1)
 	}
@@ -251,7 +249,7 @@ func TestWSSmokeReconnectKeepsProfileID(t *testing.T) {
 	defer c2.Close(websocket.StatusNormalClosure, "test done")
 
 	token2 := wsSmokeHello(ctx, t, c2)
-	pid2, ok := parseProfileToken(token2)
+	pid2, ok := profiles.ParseToken(token2)
 	if !ok {
 		t.Fatalf("токен второго подключения невалиден: %q", token2)
 	}

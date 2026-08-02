@@ -6,7 +6,7 @@ import (
 )
 
 // addHumanPlayer — «человек» без profileKey: пути начисления в профиль на нём
-// молча выключены (profileForKeyCreate("") == nil), а логика ботов в
+// молча выключены (profiles.ForKeyCreate("") == nil), а логика ботов в
 // stepPlayer/applyMove не вмешивается в движение.
 func addHumanPlayer(r *Room, num uint16, x, y int, d Dir) *Player {
 	p := &Player{

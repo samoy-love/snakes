@@ -14,6 +14,7 @@ import (
 
 	"snakes/internal/envcfg"
 	"snakes/internal/httpx"
+	"snakes/internal/profiles"
 )
 
 func main() {
@@ -38,12 +39,12 @@ func main() {
 		}
 	}
 
-	initProfileSecret()
-	loadProfiles()
+	profiles.InitSecret()
+	profiles.Load(ensureProfileCosmeticsLocked)
 	log.Printf("limits roomLimit=%d maxRooms=%d maxProfiles=%d profileEmptyTTL=%s wsAllowLocalhost=%t botDeathLog=%t",
-		roomLimit, maxRoomsLimit, maxProfiles, profileEmptyTTL, httpx.WSAllowLocalhost(), debugBotDeathSnap)
+		roomLimit, maxRoomsLimit, profiles.MaxProfiles, profiles.EmptyTTL, httpx.WSAllowLocalhost(), debugBotDeathSnap)
 	autosaveStop := make(chan struct{})
-	startProfilesAutosave(autosaveStop)
+	profiles.StartAutosave(autosaveStop)
 
 	hub := &Hub{rooms: make(map[int]*Room), nextRoomID: 1, roomLimit: roomLimit}
 
@@ -91,7 +92,7 @@ func main() {
 	hub.mu.Unlock()
 
 	close(autosaveStop)
-	flushProfiles(true)
+	profiles.Flush(true)
 }
 
 func metricsHandler(w http.ResponseWriter, r *http.Request) {

@@ -3,6 +3,8 @@ package main
 import (
 	"math/rand"
 	"testing"
+
+	"snakes/internal/profiles"
 )
 
 // ---------------------------------------------------------------------------
@@ -10,6 +12,13 @@ import (
 // детерминированным ГСЧ. newTestRoom() из protocol_test.go оставляет
 // matchKills/matchStyleBy/... нулевыми, а экономика в них пишет.
 // ---------------------------------------------------------------------------
+
+// withEmptyProfileStore изолирует тест от накопленного соседями: карта
+// профилей одна на процесс.
+func withEmptyProfileStore(t *testing.T) {
+	t.Helper()
+	t.Cleanup(profiles.SwapStore())
+}
 
 func newRulesRoom(t *testing.T, seed int64) *Room {
 	t.Helper()
@@ -305,10 +314,10 @@ func TestFreeKillBonusOnlyForRealKills(t *testing.T) {
 // Ловит: пропажу слота, потерю сброса прогресса на новых сутках и поломку
 // логики стрика (самый частый источник «стрик обнулился ни за что»).
 func TestDailyRolloverResetsProgressAndAdvancesStreak(t *testing.T) {
-	today := dayStampNow()
+	today := profiles.DayStampNow()
 
 	// Первый вход: 3 слота выкатились, стрик = 1.
-	pr := &Profile{}
+	pr := &profiles.Profile{}
 	ensureProfileDailyLocked(pr, "pid-a")
 	if pr.Day != today {
 		t.Fatalf("Day = %d, ожидалось %d", pr.Day, today)
@@ -363,7 +372,7 @@ func TestDailyStreakMultiplierIsCapped(t *testing.T) {
 	}
 	table := map[uint32]float32{0: 1.0, 1: 1.0, 2: 1.25, 3: 1.5, 5: 2.0, 100: 2.0}
 	for days, want := range table {
-		pr := &Profile{StreakDays: days}
+		pr := &profiles.Profile{StreakDays: days}
 		if got := dailyStreakMultLocked(pr); got != want {
 			t.Fatalf("стрик %d дал множитель %v, ожидалось %v", days, got, want)
 		}
@@ -398,7 +407,7 @@ func TestDailyGoalsSlotOrdering(t *testing.T) {
 func TestDailyProgressCompletesExactlyOnce(t *testing.T) {
 	r := newRulesRoom(t, 11)
 	p := addBotPlayer(r, 1)
-	pr := &Profile{Day: dayStampNow()}
+	pr := &profiles.Profile{Day: profiles.DayStampNow()}
 	pr.DailyType1 = DailyKills
 	pr.DailyGoal1 = 3
 	pr.DailyType2 = DailyPickups
@@ -462,9 +471,9 @@ func TestGrantDailyRewardsScalesWithStreakAndDoesNotFeedItself(t *testing.T) {
 	r.players[2] = h
 	r.scores[2] = 0
 	r.points[2] = 0
-	pr := profileForKeyCreate("streak-pid")
-	profilesMu.Lock()
-	pr.Day = dayStampNow()
+	pr := profiles.ForKeyCreate("streak-pid")
+	profiles.Mu.Lock()
+	pr.Day = profiles.DayStampNow()
 	pr.StreakDays = 3
 	pr.StreakLastDay = pr.Day
 	// Слот «набери Стиль» открыт: выплата за ежедневку не должна его двигать.
@@ -473,16 +482,16 @@ func TestGrantDailyRewardsScalesWithStreakAndDoesNotFeedItself(t *testing.T) {
 	pr.DailyProg1 = 0
 	pr.DailyType2, pr.DailyGoal2 = DailyKills, 5
 	pr.DailyType3, pr.DailyGoal3 = DailyKills, 5
-	profilesMu.Unlock()
+	profiles.Mu.Unlock()
 
 	r.grantDailyRewards(h, 1)
 	want := uint16(float32(StyleDailyReward)*1.5 + 0.5)
 	if got := r.matchStyleBy[2][StyleDaily]; got != want {
 		t.Fatalf("человеку со стриком 3 выдано %d Стиля, ожидалось %d", got, want)
 	}
-	profilesMu.Lock()
+	profiles.Mu.Lock()
 	prog := pr.DailyProg1
-	profilesMu.Unlock()
+	profiles.Mu.Unlock()
 	if prog != 0 {
 		t.Fatalf("награда за ежедневку зачлась в квест «набери Стиль»: прогресс %d", prog)
 	}
@@ -530,11 +539,11 @@ func TestCheckAchievementsIsIdempotent(t *testing.T) {
 	withEmptyProfileStore(t)
 	r := newRulesRoom(t, 17)
 	p := addBotPlayer(r, 1)
-	pr := &Profile{TotalKills: 10}
+	pr := &profiles.Profile{TotalKills: 10}
 
-	profilesMu.Lock()
+	profiles.Mu.Lock()
 	n := r.checkAchievementsLocked(p, pr)
-	profilesMu.Unlock()
+	profiles.Mu.Unlock()
 	if n != 1 {
 		t.Fatalf("выдано %d ачивок, ожидалась 1 (AchvKills10)", n)
 	}
@@ -542,18 +551,18 @@ func TestCheckAchievementsIsIdempotent(t *testing.T) {
 		t.Fatal("бит AchvKills10 не выставлен")
 	}
 
-	profilesMu.Lock()
+	profiles.Mu.Lock()
 	n = r.checkAchievementsLocked(p, pr)
-	profilesMu.Unlock()
+	profiles.Mu.Unlock()
 	if n != 0 {
 		t.Fatalf("повторный проход выдал ещё %d ачивок", n)
 	}
 
 	// Переход сразу через несколько порогов выдаёт их все и ровно по разу.
 	pr.TotalKills = 1000
-	profilesMu.Lock()
+	profiles.Mu.Lock()
 	n = r.checkAchievementsLocked(p, pr)
-	profilesMu.Unlock()
+	profiles.Mu.Unlock()
 	if n != 2 {
 		t.Fatalf("выдано %d ачивок, ожидалось 2 (100 и 1000)", n)
 	}
@@ -566,9 +575,9 @@ func TestCheckAchievementsIsIdempotent(t *testing.T) {
 	}
 
 	// nil-профиль и nil-игрок не роняют и ничего не выдают.
-	profilesMu.Lock()
+	profiles.Mu.Lock()
 	zero := r.checkAchievementsLocked(p, nil) + r.checkAchievementsLocked(nil, pr)
-	profilesMu.Unlock()
+	profiles.Mu.Unlock()
 	if zero != 0 {
 		t.Fatalf("nil-аргументы выдали %d ачивок", zero)
 	}
@@ -962,10 +971,10 @@ func TestPlacementAndSurvivalRewards(t *testing.T) {
 				t.Fatalf("StyleSurvive = %d, ожидалось %d", got, c.wantSurv)
 			}
 			// Бонус за первую победу за сутки — ровно один раз в сутки.
-			profilesMu.Lock()
-			pr := profiles["place-"+c.name]
-			gotFirst := pr != nil && pr.FirstWinDay == dayStampNow()
-			profilesMu.Unlock()
+			profiles.Mu.Lock()
+			pr := profiles.StoredLocked("place-" + c.name)
+			gotFirst := pr != nil && pr.FirstWinDay == profiles.DayStampNow()
+			profiles.Mu.Unlock()
 			if gotFirst != c.wantFirst {
 				t.Fatalf("отметка первой победы = %v, ожидалось %v", gotFirst, c.wantFirst)
 			}
@@ -992,9 +1001,9 @@ func TestFirstWinBonusIsOncePerDay(t *testing.T) {
 		t.Fatalf("бонус выдан второй раз за сутки: %d", got)
 	}
 	// Новые сутки — снова можно.
-	profilesMu.Lock()
-	profiles["fw"].FirstWinDay = dayStampNow() - 1
-	profilesMu.Unlock()
+	profiles.Mu.Lock()
+	profiles.StoredLocked("fw").FirstWinDay = profiles.DayStampNow() - 1
+	profiles.Mu.Unlock()
 	r.grantFirstWinBonus(h)
 	if got := r.matchStyleBy[1][StyleWin]; got != 2*first {
 		t.Fatalf("на новых сутках выдано %d, ожидалось %d", got, 2*first)
