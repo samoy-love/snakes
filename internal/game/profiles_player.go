@@ -2,7 +2,7 @@
 //
 // Живёт в игровом пакете, а не в internal/profiles: хранилище профилей ничего
 // не знает про Player и не должно.
-package main
+package game
 
 import "snakes/internal/profiles"
 

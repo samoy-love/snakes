@@ -1,4 +1,4 @@
-package main
+package game
 
 import (
 	"context"
@@ -1576,11 +1576,8 @@ func TestHelloCarriesVersion(t *testing.T) {
 	if hello.Version == nil || *hello.Version == "" {
 		t.Fatalf("в hello нет непустого version: %s", string(raw))
 	}
-	if *hello.Version != Version {
-		t.Fatalf("hello.version = %q, ожидалось %q", *hello.Version, Version)
-	}
-	if Version == "" || Commit == "" || BuildTime == "" {
-		t.Fatal("Version/Commit/BuildTime должны иметь значения по умолчанию")
+	if *hello.Version != buildVersion {
+		t.Fatalf("hello.version = %q, ожидалось %q", *hello.Version, buildVersion)
 	}
 }
 

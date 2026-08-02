@@ -1,6 +1,6 @@
 // bot_names.go — перепись имён, уже занятых в комнате. Сам генератор живёт в
 // internal/botnames; здесь остаётся только то, что смотрит в состояние комнаты.
-package main
+package game
 
 import "snakes/internal/botnames"
 

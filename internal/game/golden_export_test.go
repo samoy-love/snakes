@@ -1,4 +1,4 @@
-package main
+package game
 
 // Экспорт эталонных («золотых») буферов бинарного протокола в JSON, который
 // читают клиентские тесты на Node (tests/*.test.mjs).
@@ -18,7 +18,7 @@ package main
 //
 // Регенерация после осознанного изменения протокола:
 //
-//	UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport .
+//	UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport ./internal/game
 //
 // JSON — данные, а не код: node-тестам не нужен Go в момент запуска.
 
@@ -30,7 +30,10 @@ import (
 	"testing"
 )
 
-const goldenPath = "tests/golden/protocol_golden.json"
+// goldenPath — путь от каталога пакета (internal/game) к корню репозитория:
+// go test запускает тест с рабочей директорией пакета, а эталон читают
+// node-тесты из tests/ и лежать он обязан там же, где они.
+const goldenPath = "../../tests/golden/protocol_golden.json"
 
 // goldenField — одно поле payload события: буква поля структуры Event и его
 // ширина на проводе. Порядок в срезе — порядок записи в буфер.
@@ -145,7 +148,7 @@ func buildGolden(t *testing.T) goldenDoc {
 	doc := goldenDoc{
 		Note: "Эталонные буферы бинарного протокола Snakes. Генерируется из Go-сериализаторов " +
 			"(golden_export_test.go), потребляется node-тестами в tests/. Не редактировать вручную.",
-		Regen: "UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport .",
+		Regen: "UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport ./internal/game",
 		Consts: map[string]int{
 			"W":                      W,
 			"H":                      H,
@@ -369,13 +372,13 @@ func TestProtocolGoldenExport(t *testing.T) {
 
 	have, err := os.ReadFile(goldenPath)
 	if err != nil {
-		t.Fatalf("не читается %s: %v\nСгенерируйте: UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport .", goldenPath, err)
+		t.Fatalf("не читается %s: %v\nСгенерируйте: UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport ./internal/game", goldenPath, err)
 	}
 	// Нормализуем перевод строки: на Windows файл может быть выгружен с CRLF.
 	if normalizeNewlines(string(have)) != normalizeNewlines(string(out)) {
 		t.Fatalf("%s устарел относительно сериализаторов.\n"+
 			"Если протокол менялся осознанно — обновите эталон и СИНХРОННО клиент:\n"+
-			"  UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport .\n"+
+			"  UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport ./internal/game\n"+
 			"  node --test tests/", goldenPath)
 	}
 }

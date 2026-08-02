@@ -1,6 +1,6 @@
 // bot_ai.go holds the bot brain: sensing, pathfinding, expansion planning,
 // hunting, the per-archetype personalities and the bot population manager.
-package main
+package game
 
 import "snakes/internal/botnames"
 

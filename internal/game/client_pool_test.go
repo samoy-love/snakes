@@ -1,9 +1,11 @@
-package main
+package game
 
 import (
 	"testing"
 
 	"nhooyr.io/websocket"
+
+	"snakes/internal/metrics"
 )
 
 func refsOf(pd *pooledData) int32 { return pd.Refs() }
@@ -128,7 +130,7 @@ func TestEnqueueDropPathReleasesRefAndCounts(t *testing.T) {
 		t.Fatalf("принятое сообщение потеряло ссылку: %d", got)
 	}
 
-	dropped := metrics.wsDropped.Load()
+	dropped := metrics.WSDropped.Load()
 	second := acquirePooledData(16)
 	second.B = append(second.B, 2)
 	if c.enqueue(websocket.MessageBinary, second.B, second, true) {
@@ -137,7 +139,7 @@ func TestEnqueueDropPathReleasesRefAndCounts(t *testing.T) {
 	if got := refsOf(second); got != 0 {
 		t.Fatalf("ссылок после дропа %d, ожидался 0 (утечка буфера)", got)
 	}
-	if metrics.wsDropped.Load() != dropped+1 {
+	if metrics.WSDropped.Load() != dropped+1 {
 		t.Fatal("дроп не посчитан в метриках")
 	}
 

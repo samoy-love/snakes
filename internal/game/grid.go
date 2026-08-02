@@ -1,7 +1,7 @@
 // grid.go holds the territory grid: cell ownership and trail writes, the
 // flood-fill capture, and the post-death "cooling" territory that a player can
 // reclaim.
-package main
+package game
 
 import "snakes/internal/profiles"
 

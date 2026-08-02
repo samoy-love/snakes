@@ -1,6 +1,6 @@
 // economy.go holds the reward economy: Style and match points, contracts,
 // dailies, achievements, titles and the cosmetics catalogue.
-package main
+package game
 
 import (
 	"context"
