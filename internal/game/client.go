@@ -8,7 +8,7 @@ import (
 	"log"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 
 	"snakes/internal/metrics"
 	"snakes/internal/profiles"

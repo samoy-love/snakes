@@ -2133,27 +2133,13 @@ let camY = null;
 
 const VIEW_CELLS_X = 40;
 const VIEW_CELLS_Y = 28;
-/* C1: окно ROI сервера сдвинуто вперёд по ходу движения (main.go ROILookahead)
-   и снапится по ROIStep, поэтому «хвост» экрана вылезал за него и закрашивался
-   туманом даже при правильном масштабе. Ведём камеру к центру ROI, но не
-   дальше CAM_LEAD_MAX от полуэкрана — иначе игрок уезжает от центра. */
-const CAM_LEAD_MAX = 0.22;
+/* Камера жёстко привязана к игроку и никуда не ведётся: смещение по ходу
+   движения заказчик отверг — взгляд уезжал на каждом повороте. Смещения
+   остаются нулями, чтобы не разносить эту правку по всему draw(); окно ROI
+   сервер тоже центрирует на голове (roiLookahead в protocol.go возвращает 0),
+   поэтому вьюпорт лежит внутри окна по построению. */
 let camLeadX = 0;
 let camLeadY = 0;
-
-/* Зеркало roiLookahead() из protocol.go: на сколько клеток сервер сдвигает
-   окно ROI вперёд по оси движения. Держим формулу идентичной, иначе камера
-   встанет не по центру окна и снова упрётся в его край. */
-const ROI_LOOKAHEAD_CAP = 8;
-const ROI_LOOKAHEAD_NUM = 1;
-const ROI_LOOKAHEAD_DEN = 4;
-
-function roiLeadCells(sizeAlongAxis) {
-  const half = Math.floor((Number(sizeAlongAxis) || 0) / 2);
-  if (half <= 0) return 0;
-  const la = Math.floor((half * ROI_LOOKAHEAD_NUM) / ROI_LOOKAHEAD_DEN);
-  return Math.max(0, Math.min(ROI_LOOKAHEAD_CAP, la));
-}
 /* C1: запас, который вычитается из фактического ROI при подборе масштаба.
    Сервер снапит окно по 8 клеток (main.go ROIStep) и сдвигает его на 12 клеток
    вперёд по направлению движения (ROILookahead), то есть относительно игрока

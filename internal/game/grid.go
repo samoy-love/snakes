@@ -13,8 +13,12 @@ import (
 // Скратч заливки: две карты размером с поле, которые capture берёт и
 // возвращает на каждом захвате. Без пула каждый захват территории стоил бы
 // 28000 байт и 28000 int мусора.
-var floodBytesPool = sync.Pool{New: func() any { return make([]byte, N) }}
-var floodIntPool = sync.Pool{New: func() any { return make([]int, N) }}
+// Пулы хранят УКАЗАТЕЛИ на срезы, а не срезы: sync.Pool.Put принимает any, и
+// срез при укладке боксится в интерфейс, то есть каждый Put сам аллоцирует
+// (staticcheck SA6002). Для capture(), которая по профилю занимает около 5%
+// CPU, это ровно та аллокация, ради устранения которой пул и заводили.
+var floodBytesPool = sync.Pool{New: func() any { s := make([]byte, N); return &s }}
+var floodIntPool = sync.Pool{New: func() any { s := make([]int, N); return &s }}
 
 func (r *Room) bonusTerritory(num uint16, cx, cy int, rad int) {
 	if rad <= 0 {
@@ -525,21 +529,26 @@ func (r *Room) floodFillOutside(blocked []byte, outside []byte, q []int) []byte 
 }
 
 func (r *Room) capture(playerNum uint16) {
-	blocked := floodBytesPool.Get().([]byte)
-	if len(blocked) != N {
-		blocked = make([]byte, N)
+	// Пулы отдают *[]T: класть в sync.Pool сам срез значит аллоцировать на
+	// каждом Put (SA6002), а capture() — горячий путь.
+	blockedP := floodBytesPool.Get().(*[]byte)
+	if len(*blockedP) != N {
+		*blockedP = make([]byte, N)
 	}
-	outside := floodBytesPool.Get().([]byte)
-	if len(outside) != N {
-		outside = make([]byte, N)
+	outsideP := floodBytesPool.Get().(*[]byte)
+	if len(*outsideP) != N {
+		*outsideP = make([]byte, N)
 	}
-	q := floodIntPool.Get().([]int)
-	if len(q) != N {
-		q = make([]int, N)
+	qP := floodIntPool.Get().(*[]int)
+	if len(*qP) != N {
+		*qP = make([]int, N)
 	}
-	defer floodBytesPool.Put(blocked)
-	defer floodBytesPool.Put(outside)
-	defer floodIntPool.Put(q)
+	defer floodBytesPool.Put(blockedP)
+	defer floodBytesPool.Put(outsideP)
+	defer floodIntPool.Put(qP)
+	blocked := *blockedP
+	outside := *outsideP
+	q := *qP
 
 	for i := 0; i < N; i++ {
 		blocked[i] = 0

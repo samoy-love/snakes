@@ -33,7 +33,7 @@ BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)
 
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-GO_IMAGE := golang:1.22
+GO_IMAGE := golang:1.25
 
 # Клиентские тесты: чистый Node без зависимостей (node:test + node:assert).
 # 22.x нужен и для `node --check` (сам определяет ES-модуль по синтаксису),

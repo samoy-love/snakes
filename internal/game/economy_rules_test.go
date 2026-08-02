@@ -20,7 +20,7 @@ func withEmptyProfileStore(t *testing.T) {
 	t.Cleanup(profiles.SwapStore())
 }
 
-func newRulesRoom(t *testing.T, seed int64) *Room {
+func newRulesRoom(t testing.TB, seed int64) *Room {
 	t.Helper()
 	r := newTestRoom()
 	r.rng = rand.New(rand.NewSource(seed))

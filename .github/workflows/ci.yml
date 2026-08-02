@@ -17,12 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: '1.22'
+          go-version: '1.25'
           cache: true
 
       - name: gofmt
@@ -37,6 +37,18 @@ jobs:
 
       - name: go vet
         run: go vet ./...
+
+      # go vet ловит только грубые ошибки. staticcheck добавляет проверки,
+      # которые в этом проекте уже были бы полезны: неиспользуемый код,
+      # бессмысленные сравнения, неверная работа с временем и строками.
+      # Отдельным шагом, а не через golangci-lint: одна зависимость вместо
+      # десятка, и версия фиксирована — линтер не должен краснеть сам по себе
+      # после чужого релиза.
+      - name: staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: "2025.1.1"
+          install-go: false
 
       - name: go build
         run: go build ./...
@@ -59,14 +71,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           # 22.x: `node --check` сам определяет ES-модуль по синтаксису.
           # На 20.x файлы с `export` (client_net.js и др.) падали бы как CJS.
-          node-version: '22'
+          node-version: '24'
 
       - name: node --check public/*.js
         run: |

@@ -1,5 +1,5 @@
 module snakes
 
-go 1.22
+go 1.25
 
-require nhooyr.io/websocket v1.8.11
+require github.com/coder/websocket v1.8.15
