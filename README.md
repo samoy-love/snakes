@@ -1,180 +1,177 @@
 # Snakes
 
-English · [Русский](README.ru.md)
+Русский · [English](README.en.md)
 
 [![CI](https://github.com/tr0llex/snakes/actions/workflows/ci.yml/badge.svg)](https://github.com/tr0llex/snakes/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/tr0llex/snakes/branch/main/graph/badge.svg)](https://codecov.io/gh/tr0llex/snakes)
-[![prod](https://img.shields.io/website?url=https%3A%2F%2Fsnakes.samoy.love&up_message=online&up_color=2ea043&down_message=offline&label=snakes.samoy.love)](https://snakes.samoy.love)
+[![прод](https://img.shields.io/website?url=https%3A%2F%2Fsnakes.samoy.love&up_message=online&up_color=2ea043&down_message=offline&label=snakes.samoy.love)](https://snakes.samoy.love)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Multiplayer territory capture in the browser, for anyone who wants a five-minute
-match without an account: **[snakes.samoy.love](https://snakes.samoy.love)**,
-one tab, arrow keys or a swipe.
+Многопользовательский захват территории в браузере — для тех, кому нужен матч
+на пять минут и без регистрации: **[snakes.samoy.love](https://snakes.samoy.love)**,
+одна вкладка, стрелки или свайп.
 
-Leave your own land and a trail follows your head; close the loop, come home,
-and everything inside the contour is yours. Let someone cross that trail and you
-lose the whole estate at once. Death does not wipe the land immediately — it
-**cools down** for fifteen seconds, and a reclaim during that window gives back
-55% of the connected patch, so losing is a short chance to strike back rather
-than a reset to zero.
+Выезжаешь за свою землю — за головой тянется след; замкнул петлю и вернулся
+домой — всё внутри контура твоё. Наехали на след — теряешь территорию целиком.
+Смерть стирает её не сразу: земля **остывает** пятнадцать секунд, и «Реклейм» в
+это окно возвращает 55% связной области. Поражение превращается в короткое окно
+на отыгрыш, а не в откат к нулю.
 
-| A match | The main menu |
+| Матч | Главное меню |
 |---|---|
-| ![A match: rival territories, a trail, the capture effect](docs/img/match.svg) | ![The main menu](docs/img/menu.svg) |
+| ![Матч: чужие территории, след, эффект захвата](docs/img/match.svg) | ![Главное меню](docs/img/menu.svg) |
 
-## How it works
+## Как устроено
 
-**A hand-rolled binary protocol, because the tick budget is 100 ms.** The field
-is 200×140 cells and every client is served on every tick; JSON of that shape
-would spend the budget on serialisation alone. Game state travels as binary
-frames — ROI, events, minimap chunks — with 21 kinds of game event. The main
-channel is ROI: a client receives only the window of the map around its own head
-(80×56 cells by default, fitted to its viewport), in full or as a delta against
-the tick it already acknowledged. The minimap ships as 10×10 chunks and
-afterwards only the changed ones.
+**Свой бинарный протокол — потому что бюджет тика 100 мс.** Поле 200×140
+клеток, и каждому клиенту надо ответить каждый тик; JSON такого объёма съел бы
+бюджет одной только сериализацией. Состояние ходит бинарными кадрами — ROI,
+события, чанки миникарты — с 21 типом игровых событий. Основной канал — ROI:
+клиент получает только окно карты вокруг своей головы (по умолчанию 80×56
+клеток, подогнано под вьюпорт), целиком или дельтой относительно тика, который
+он подтвердил. Миникарта раскатывается чанками 10×10, дальше уезжают только
+изменившиеся.
 
-**Protocol drift is caught from both sides, because it used to break the game
-silently.** The byte layout drifted between server and client three times over
-the life of the project: the page still opened, the killfeed and the balance
-just went quiet. Now the golden buffers are captured from the production Go
-serialisers and committed as data, an independent JS decoder replays them field
-by field, and `public/client.js` is additionally checked against the golden
-statically — every event kind has a handler, read widths and offset sums add up.
-A Go test fails if the golden lags behind the serialisers; the node tests fail if
-the client lags behind the golden.
+**Рассинхрон протокола ловится с двух сторон — потому что он ломал игру
+молча.** Байтовая раскладка трижды за проект расходилась между сервером и
+клиентом: страница открывалась, просто замолкали киллфид и баланс. Теперь
+эталонные буферы снимаются с боевых Go-сериализаторов и лежат в репозитории как
+данные, независимый JS-декодер прогоняет их поле за полем, а `public/client.js`
+дополнительно сверяется с эталоном статически: у каждого типа события есть
+обработчик, длины чтений и сумма смещений сходятся. Go-тест падает, если эталон
+отстал от сериализаторов; node-тесты — если от эталона отстал клиент.
 
-**A client with no build step, because the deploy is one artifact.** Vanilla JS
-(ES modules) and Canvas 2D: the browser loads the files as they are — no npm
-runtime, no bundler, no framework. The only third-party library, twemoji, is
-vendored next to the code. Client and server share the binary protocol, so they
-ship together and cache busting is a query version stamped at deploy time; see
+**Клиент без сборки — потому что выкатка идёт одним артефактом.** Vanilla JS
+(ES-модули) и Canvas 2D: браузер грузит файлы как есть, ни npm-рантайма, ни
+бандлера, ни фреймворка. Единственная сторонняя библиотека, twemoji, лежит
+рядом в репозитории. Клиент и сервер делят бинарный протокол, поэтому едут
+вместе, а кэш ломается версией в query на выкатке — см.
 [docs/http.md](docs/http.md).
 
-**Identity without accounts, because a login form would cost more than it
-protects.** No passwords and no email: the server issues an HMAC-SHA256 signed
-token that the client presents when reconnecting. Progress — balance, cosmetics,
-achievements — survives a reload and cannot be forged into someone else's
-profile; see [docs/security.md](docs/security.md).
+**Личность без аккаунтов — потому что форма входа стоила бы дороже, чем
+защищает.** Ни паролей, ни почты: сервер выдаёт подписанный HMAC-SHA256 токен,
+клиент предъявляет его при переподключении. Прогресс — баланс, косметика,
+достижения — переживает перезагрузку страницы, а подделать чужой профиль
+нельзя, см. [docs/security.md](docs/security.md).
 
-**Bots that read as opponents, because an empty room is a dead product.** Free
-seats are filled with bots — 14 in an empty room, fewer as humans arrive, down
-to four — and they run three difficulty tiers and four behaviour archetypes
-(Farmer, Aggressor, Coward, Territorial), each with its own appetite for risk and
-loop length. Hunting is bounded on purpose: at most three hunters per victim, and
-a bot drives straight at its target for a few ticks before the strike, which is a
-visible wind-up a human can still react to.
+**Боты, которых читаешь как соперников, — потому что пустая комната это мёртвый
+продукт.** Свободные места добираются ботами: 14 при пустой комнате и тем
+меньше, чем больше пришло людей, до четырёх. У них три тира сложности и четыре
+архетипа поведения (Фермер, Агрессор, Трус, Территориальный), у каждого свой
+аппетит к риску и своя длина заходов. Охота намеренно ограничена: не больше
+трёх охотников на одну жертву, и перед броском бот несколько тиков идёт по
+прямой — это видимый замах, на который человек успевает среагировать.
 
-## Stack
+## Стек
 
-**Client** — vanilla JS (ES modules) and Canvas 2D, no build step; interface in
-Russian and English, 349 keys per dictionary.
+**Клиент** — vanilla JS (ES-модули) и Canvas 2D, без сборки; интерфейс на
+русском и английском, 349 ключей в каждом словаре.
 
-**Server** — Go 1.25 with `github.com/coder/websocket` as the only external
-dependency. No database: profiles live in a JSON file, match state in memory.
-Metrics are exposed in the Prometheus text format by 30-odd counters of our own,
-see [docs/metrics.md](docs/metrics.md).
+**Сервер** — Go 1.25, единственная внешняя зависимость
+`github.com/coder/websocket`. Никакой БД: профили лежат в JSON-файле, состояние
+матча — в памяти. Метрики отдаются в текстовом формате Prometheus тремя
+десятками собственных счётчиков, см. [docs/metrics.md](docs/metrics.md).
 
-**Production** — a `snakes.service` systemd unit behind the system nginx,
-released through [deploy-kit](https://github.com/tr0llex/deploy-kit).
+**Прод** — systemd-юнит `snakes.service` за системным nginx, релизы через
+[deploy-kit](https://github.com/tr0llex/deploy-kit).
 
-## Quick start
+## Быстрый старт
 
-Requires Go 1.25+.
+Нужен Go 1.25+.
 
 ```bash
 go run .
 ```
 
-Open <http://localhost:3000>. Static files are served from `./public` **relative
-to the working directory**, so run it from the repository root. `WS_ORIGINS` is
-not needed locally — loopback origins are allowed separately
-(`WS_ALLOW_LOCALHOST`) — and profiles land in `./data/profiles.json`.
+Открыть <http://localhost:3000>. Статика раздаётся из `./public`
+**относительно рабочей директории**, поэтому запускать надо из корня
+репозитория. `WS_ORIGINS` локально не нужен — loopback-origin разрешён отдельно
+(`WS_ALLOW_LOCALHOST`), — а профили лягут в `./data/profiles.json`.
 
-Every setting, its default and its reason: [docs/config.md](docs/config.md); the
-template to copy is `.env.example`.
+Все настройки, их дефолты и причины — в [docs/config.md](docs/config.md);
+шаблон для копирования — `.env.example`.
 
-## Layout
+## Структура
 
-| Path | Purpose |
+| Путь | Назначение |
 | --- | --- |
-| `main.go` | Entry point: environment, routing (`/ws`, `/healthz`, `/readyz`, `/metrics`, static), middleware, graceful shutdown |
-| `internal/game/` | The game core around `Room`: grid and capture (`grid.go`), matches and broadcast (`room.go`), bots (`bot_ai.go`), economy — pickups, contracts, dailies, achievements, cosmetics (`economy.go`), wire serialisation (`wire.go`), WebSocket commands (`ws.go`) |
-| `internal/protocol/` | The binary protocol: field geometry, event codes, byte layout |
-| `internal/httpx/` | Transport: origin allowlist, per-IP rate limits, client IP behind a proxy, headers and static caching |
-| `internal/profiles/` | Profiles: HMAC identity tokens, atomic writes, TTL, autosave, caps |
-| `internal/metrics/` | Counters and the Prometheus `/metrics` exposition |
-| `internal/botnames/` | Bot nickname pools and unique-name picking |
-| `internal/sanitize/` | One set of rules for names, chat, room titles and log fields |
-| `internal/envcfg/` | Parsing settings out of the environment |
-| `public/` | The client: rendering, input, UI, networking, effects, sound |
-| `tests/` | Client-side protocol tests on Node plus the golden buffers |
-| `tools/` | Offline visual harness; nothing here is ever served to a browser |
-| `scripts/backup_profiles.sh` | The snapshot script: the only safety net for player progress |
-| `deploy/systemd/` | Unit, drop-ins and the timer for hourly `profiles.json` snapshots |
-| `.deploy-kit/` | Deployment target description |
+| `main.go` | Точка входа: окружение, роутинг (`/ws`, `/healthz`, `/readyz`, `/metrics`, статика), middleware, graceful shutdown |
+| `internal/game/` | Игровое ядро вокруг `Room`: сетка и захват (`grid.go`), матчи и рассылка (`room.go`), боты (`bot_ai.go`), экономика — бонусы, контракты, ежедневки, ачивки, косметика (`economy.go`), сериализация на провод (`wire.go`), WebSocket-команды (`ws.go`) |
+| `internal/protocol/` | Бинарный протокол: геометрия поля, коды событий, побайтовая раскладка |
+| `internal/httpx/` | Транспорт: allowlist origin'ов, per-IP rate-limit, IP за прокси, заголовки и кэширование статики |
+| `internal/profiles/` | Профили: HMAC-токены личности, атомарная запись, TTL, автосейв, лимиты |
+| `internal/metrics/` | Счётчики и выдача `/metrics` в формате Prometheus |
+| `internal/botnames/` | Пулы ников ботов и подбор уникального имени |
+| `internal/sanitize/` | Единые правила чистки имён, чата, названий комнат и полей лога |
+| `internal/envcfg/` | Разбор настроек из окружения |
+| `public/` | Клиент: рендер, ввод, UI, сетевой слой, эффекты, звук |
+| `tests/` | Клиентские тесты протокола на Node и эталонные буферы |
+| `tools/` | Офлайн-стенд визуальной проверки; в браузер отсюда ничего не едет |
+| `scripts/backup_profiles.sh` | Скрипт снимков: единственная защита прогресса игроков |
+| `deploy/systemd/` | Юнит, drop-in'ы и таймер часовых снимков `profiles.json` |
+| `.deploy-kit/` | Описание цели выкатки |
 
-More detail in [docs/](docs/): [protocol](docs/protocol.md),
-[HTTP and caching](docs/http.md), [security](docs/security.md),
-[configuration](docs/config.md), [metrics](docs/metrics.md),
-[testing](docs/testing.md). The documents are written in Russian.
+Подробности — в [docs/](docs/): [протокол](docs/protocol.md),
+[HTTP и кэширование](docs/http.md), [безопасность](docs/security.md),
+[конфигурация](docs/config.md), [метрики](docs/metrics.md),
+[тесты](docs/testing.md).
 
-## Tests
+## Тесты
 
-187 Go tests (398 including subtests) and 242 client-side checks in `tests/`.
-Coverage is 75.7% of statements overall and 81.5% in `internal/game`; the number
-in the badge comes from Codecov, not from this file.
-
-```bash
-make test-all          # go test + node --check + client protocol tests
-make test-race-docker  # -race in a container, no gcc needed on the host
-make golden            # regenerate the protocol golden after changing it
-```
-
-CI gates gofmt, `go vet`, staticcheck, the build, `go test -race -short` plus a
-full non-race run, `node --check` over the client, and the 58 protocol checks
-that keep client and server in sync. A red run stops the deploy. Details,
-including Windows quirks, are in [docs/testing.md](docs/testing.md).
-
-## Deployment
+187 Go-тестов (398 вместе с подтестами) и 242 клиентские проверки в `tests/`.
+Покрытие — 75.7% операторов в целом и 81.5% в `internal/game`; цифра в бейдже
+берётся из Codecov, а не из этого файла.
 
 ```bash
-dk deploy snakes          # deploy
-dk rollback snakes --list # list releases on the server
+make test-all          # go test + node --check + клиентские тесты протокола
+make test-race-docker  # -race в контейнере, gcc на хосте не нужен
+make golden            # перегенерировать эталон протокола после его изменения
 ```
 
-Atomic releases with automatic rollback; client and server ship as **one
-artifact**, because versions that drift apart break packet parsing. The nginx
-configuration and the release scripts live in
-[deploy-kit](https://github.com/tr0llex/deploy-kit); this repository only holds
-the target description in `.deploy-kit/prod.env`.
+Гейт CI: gofmt, `go vet`, staticcheck, сборка, `go test -race -short` и полный
+прогон без детектора, `node --check` по клиенту и 58 протокольных проверок,
+которые держат клиент и сервер в согласии. Красный прогон останавливает
+выкатку. Подробности и особенности Windows — [docs/testing.md](docs/testing.md).
 
-Player profiles are the only data that exists nowhere else. A systemd timer
-snapshots them: 48 hourly copies and 14 daily ones, and a snapshot with broken
-JSON is rejected.
+## Выкатка
 
-## Part of samoy.love
+```bash
+dk deploy snakes          # выкатить
+dk rollback snakes --list # какие релизы лежат на сервере
+```
 
-`samoy.love` reads as the owner's surname, Samoylov. One domain, one server, one
-release pipeline, one status page.
+Атомарные релизы с автооткатом; клиент и сервер едут **одним артефактом** —
+разъехавшиеся версии ломают разбор пакетов. Конфигурация nginx и сами скрипты
+релиза — в [deploy-kit](https://github.com/tr0llex/deploy-kit); в этом
+репозитории лежит только описание цели `.deploy-kit/prod.env`.
 
-| Service | What it is | Repository |
+Профили игроков — единственные данные, которых нет больше нигде. Их снимает
+systemd-таймер: 48 часовых копий и 14 суточных, снимок с битым JSON
+отвергается.
+
+## Часть samoy.love
+
+`samoy.love` читается как фамилия владельца — Самойлов. Один домен, один
+сервер, один релизный пайплайн, одна статус-страница.
+
+| Сервис | Что это | Репозиторий |
 | --- | --- | --- |
-| [samoy.love](https://samoy.love) | Personal page and project showcase | [tr0llex/samoy.love](https://github.com/tr0llex/samoy.love) |
-| [snakes.samoy.love](https://snakes.samoy.love) | This game | [tr0llex/snakes](https://github.com/tr0llex/snakes) |
-| [metro.samoy.love](https://metro.samoy.love) | Offline PWA with the Moscow Metro diagram | [tr0llex/metro-map](https://github.com/tr0llex/metro-map) |
-| [launcher.samoy.love](https://launcher.samoy.love) | ChillHub, a game launcher for Windows | [tr0llex/chillhub](https://github.com/tr0llex/chillhub) |
-| [status.samoy.love](https://status.samoy.love) | Uptime, versions, incidents | [tr0llex/status.samoy.love](https://github.com/tr0llex/status.samoy.love) |
-| Monitoring | Prometheus, Grafana, traffic from nginx logs | [tr0llex/metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love) |
+| [samoy.love](https://samoy.love) | Личная страница и витрина проектов | [tr0llex/samoy.love](https://github.com/tr0llex/samoy.love) |
+| [snakes.samoy.love](https://snakes.samoy.love) | Эта игра | [tr0llex/snakes](https://github.com/tr0llex/snakes) |
+| [metro.samoy.love](https://metro.samoy.love) | Офлайн-PWA со схемой московского метро | [tr0llex/metro-map](https://github.com/tr0llex/metro-map) |
+| [launcher.samoy.love](https://launcher.samoy.love) | ChillHub, лаунчер игр для Windows | [tr0llex/chillhub](https://github.com/tr0llex/chillhub) |
+| [status.samoy.love](https://status.samoy.love) | Аптайм, версии, инциденты | [tr0llex/status.samoy.love](https://github.com/tr0llex/status.samoy.love) |
+| Мониторинг | Prometheus, Grafana, посещаемость из логов nginx | [tr0llex/metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love) |
 
-They all ship through one tool,
-[deploy-kit](https://github.com/tr0llex/deploy-kit): one target description in
-the repository, one `release.sh` on the server, one nginx configuration for
-everything. Adding a service to the row costs a single `.deploy-kit/*.env` file.
+Все они едут одним инструментом,
+[deploy-kit](https://github.com/tr0llex/deploy-kit): одно описание цели в
+репозитории, один `release.sh` на сервере, одна конфигурация nginx на всех.
+Добавить в этот ряд новый сервис стоит одного файла `.deploy-kit/*.env`.
 
-## Contacts and license
+## Контакты и лицензия
 
-Alexey Samoylov — <alex@samoy.love>, [t.me/tr0llex](https://t.me/tr0llex),
+Алексей Самойлов — <alex@samoy.love>, [t.me/tr0llex](https://t.me/tr0llex),
 [github.com/tr0llex](https://github.com/tr0llex).
 
-MIT, see [LICENSE](LICENSE). Bundled third-party assets keep their own terms:
-[docs/notices.md](docs/notices.md).
+MIT, см. [LICENSE](LICENSE). Сторонние ресурсы в поставке сохраняют свои
+условия: [docs/notices.md](docs/notices.md).
