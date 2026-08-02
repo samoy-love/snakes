@@ -1,5 +1,5 @@
 module snakes
 
-go 1.25
+go 1.25.12
 
 require github.com/coder/websocket v1.8.15
