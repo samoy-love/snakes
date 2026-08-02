@@ -41,9 +41,7 @@ func wsSmokeEnv(t *testing.T) (*Hub, string) {
 	// Лимитер per-IP — пакетный глобал, и все тесты ходят с 127.0.0.1. Без
 	// сброса повторный прогон (go test -count=N) упирается в бакет "join"
 	// и получает close(1008, rate_limited).
-	wsIPLimiter.mu.Lock()
-	wsIPLimiter.buckets = make(map[string]*tokenBucket)
-	wsIPLimiter.mu.Unlock()
+	wsIPLimiter.Reset()
 
 	hub := &Hub{rooms: make(map[int]*Room), nextRoomID: 1, roomLimit: RoomHumanLimitDefault}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

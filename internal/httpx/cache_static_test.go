@@ -1,4 +1,4 @@
-package main
+package httpx
 
 // V1: кэширование статики. client.js (~490 КБ) и style.css (~180 КБ) качались
 // заново на каждый F5, потому что отдавались с Cache-Control: no-store.
@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -22,7 +23,7 @@ func TestCacheStaticMiddleware(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("body"))
 	})
-	h := cacheStaticMiddleware(next)
+	h := CacheStaticMiddleware(next)
 
 	cases := []struct {
 		name string
@@ -36,7 +37,7 @@ func TestCacheStaticMiddleware(t *testing.T) {
 
 		{"js без query — no-store", "/client.js", "no-store"},
 		{"js с пустым v — no-store", "/client.js?v=", "no-store"},
-		{"js с неподменённым литералом — no-store", "/client.js?v=" + buildPlaceholder, "no-store"},
+		{"js с неподменённым литералом — no-store", "/client.js?v=" + BuildPlaceholder, "no-store"},
 		{"js с релизом — immutable", "/client.js?v=20260802-010203-deadbee", immutableCacheControl},
 		{"вендоренный js с релизом — immutable", "/vendor/twemoji.min.js?v=rel-1", immutableCacheControl},
 
@@ -62,22 +63,22 @@ func TestCacheStaticMiddleware(t *testing.T) {
 	}
 }
 
-// Литерал в index.html и константа в server.go обязаны совпадать: иначе
+// Литерал в index.html и константа BuildPlaceholder обязаны совпадать: иначе
 // незаштампованный index.html получит immutable и намертво залипнет.
 func TestBuildPlaceholderMatchesIndexHTML(t *testing.T) {
-	b, err := os.ReadFile("public/index.html")
+	b, err := os.ReadFile(filepath.Join("..", "..", "public", "index.html"))
 	if err != nil {
 		t.Skipf("public/index.html недоступен: %v", err)
 	}
 	src := string(b)
-	if !strings.Contains(src, buildPlaceholder) {
+	if !strings.Contains(src, BuildPlaceholder) {
 		t.Fatalf("в public/index.html нет литерала %s — версионирование статики выключено; "+
-			"ссылки на собственную статику должны иметь ?v=%s", buildPlaceholder, buildPlaceholder)
+			"ссылки на собственную статику должны иметь ?v=%s", BuildPlaceholder, BuildPlaceholder)
 	}
 	// Ровно те ссылки, ради которых всё затевалось.
 	for _, want := range []string{
-		"/client.js?v=" + buildPlaceholder,
-		"/style.css?v=" + buildPlaceholder,
+		"/client.js?v=" + BuildPlaceholder,
+		"/style.css?v=" + BuildPlaceholder,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("в public/index.html нет ссылки %s", want)

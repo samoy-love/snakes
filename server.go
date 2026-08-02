@@ -5,26 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
-)
 
-// resolveListenAddr turns the BIND_ADDR setting and the port into the address
-// the HTTP server binds. An empty setting means loopback: see the comment in
-// main() for why that, and not 0.0.0.0, is the default.
-func resolveListenAddr(bindAddr, port string) string {
-	host := strings.TrimSpace(bindAddr)
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	return net.JoinHostPort(host, port)
-}
+	"snakes/internal/envcfg"
+	"snakes/internal/httpx"
+)
 
 func main() {
 	port := os.Getenv("PORT")
@@ -38,18 +28,12 @@ func main() {
 	//
 	// This used to be ":"+port, i.e. 0.0.0.0, so the game port was reachable
 	// from the internet — bypassing every rate limit, origin check and security
-	// header that live in the nginx config. deploy/nginx.snakes.conf claimed the
-	// process "listens on 127.0.0.1:8090 only"; that was simply not true.
-	//
-	// Containers opt out explicitly: under docker compose nginx runs in its own
-	// container and reaches the game across the compose network, where loopback
-	// is the container's own. Both compose files set BIND_ADDR=0.0.0.0 — there
-	// the exposure is deliberate and the network namespace is the boundary.
-	listenAddr := resolveListenAddr(os.Getenv("BIND_ADDR"), port)
+	// header that live in the nginx config.
+	listenAddr := httpx.ResolveListenAddr(os.Getenv("BIND_ADDR"), port)
 
 	roomLimit := RoomHumanLimitDefault
 	if v := os.Getenv("ROOM_LIMIT"); v != "" {
-		if n, err := parseInt(v); err == nil && n > 0 {
+		if n, err := envcfg.ParseInt(v); err == nil && n > 0 {
 			roomLimit = n
 		}
 	}
@@ -57,7 +41,7 @@ func main() {
 	initProfileSecret()
 	loadProfiles()
 	log.Printf("limits roomLimit=%d maxRooms=%d maxProfiles=%d profileEmptyTTL=%s wsAllowLocalhost=%t botDeathLog=%t",
-		roomLimit, maxRoomsLimit, maxProfiles, profileEmptyTTL, wsAllowLocalhost, debugBotDeathSnap)
+		roomLimit, maxRoomsLimit, maxProfiles, profileEmptyTTL, httpx.WSAllowLocalhost(), debugBotDeathSnap)
 	autosaveStop := make(chan struct{})
 	startProfilesAutosave(autosaveStop)
 
@@ -67,22 +51,19 @@ func main() {
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		handleWS(hub, w, r)
 	})
-	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(http.StatusNoContent)
-	})
-	// Liveness/readiness for container orchestration and HEALTHCHECK.
-	mux.HandleFunc("/healthz", healthzHandler)
-	mux.HandleFunc("/readyz", readyzHandler)
+	mux.HandleFunc("/favicon.ico", httpx.FaviconHandler)
+	// Liveness/readiness for systemd and whatever sits in front of it.
+	mux.HandleFunc("/healthz", httpx.HealthzHandler)
+	mux.HandleFunc("/readyz", httpx.ReadyzHandler)
 	mux.HandleFunc("/metrics", metricsHandler)
 
 	publicDir := filepath.Join(mustCwd(), "public")
 	fs := http.FileServer(http.Dir(publicDir))
-	mux.Handle("/", cacheStaticMiddleware(fs))
+	mux.Handle("/", httpx.CacheStaticMiddleware(fs))
 
 	srv := &http.Server{
 		Addr:              listenAddr,
-		Handler:           securityHeadersMiddleware(mux),
+		Handler:           httpx.SecurityHeadersMiddleware(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -113,24 +94,6 @@ func main() {
 	flushProfiles(true)
 }
 
-// The three probe handlers are named functions rather than literals inside
-// main() so tests can drive them through httptest: as closures they were
-// unreachable from anywhere but a live listener.
-
-func healthzHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok\n"))
-}
-
-func readyzHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ready\n"))
-}
-
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -143,95 +106,12 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	)))
 }
 
+// mustCwd — статика раздаётся относительно рабочей директории процесса, и
+// сервер обязан подняться даже если её не удалось определить.
 func mustCwd() string {
 	wd, err := os.Getwd()
 	if err != nil {
 		return "."
 	}
 	return wd
-}
-
-func parseInt(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
-}
-
-// buildPlaceholder — литерал, который стоит в public/index.html вместо
-// идентификатора релиза. Его подменяет scripts/deploy.sh в копии, уезжающей на
-// сервер (см. «versioned static» там же); в репозитории литерал остаётся как
-// есть, поэтому `go run .` и docker-сборка из исходников кэша не включают.
-const buildPlaceholder = "__BUILD__"
-
-const immutableCacheControl = "public, max-age=31536000, immutable"
-
-// isVersionedAsset — запрос к статике с настоящим идентификатором релиза в
-// query (?v=20260802-abc1234). Пустой v и неподменённый литерал __BUILD__ не
-// считаются: в обоих случаях URL не меняется от релиза к релизу, и immutable
-// намертво залипил бы у пользователя старый файл.
-func isVersionedAsset(r *http.Request) bool {
-	v := r.URL.Query().Get("v")
-	return v != "" && v != buildPlaceholder
-}
-
-func cacheStaticMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		// HTML — всегда no-store: это единственное место, где записан текущий
-		// ?v=..., и закэшированный index.html навсегда прибил бы клиента к
-		// старому релизу.
-		if path == "/" || path == "/index.html" || strings.HasSuffix(path, ".html") {
-			w.Header().Set("Cache-Control", "no-store")
-			next.ServeHTTP(w, r)
-			return
-		}
-		if strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".css") {
-			// V1: client.js ~490 КБ и style.css ~180 КБ качались заново на
-			// каждый F5. С ?v=<релиз> URL меняется при каждом деплое, поэтому
-			// immutable безопасен: новый релиз — новый URL — новый запрос.
-			//
-			// ВАЖНО. Соседние ES-модули (client_errors/audio/fx/net.js)
-			// импортируются из client.js по относительным путям, query из
-			// <script src> на них НЕ наследуется, и они приходят сюда без v —
-			// то есть остаются на no-store. Это осознанно: суммарно они ~20 КБ.
-			if isVersionedAsset(r) {
-				w.Header().Set("Cache-Control", immutableCacheControl)
-			} else {
-				w.Header().Set("Cache-Control", "no-store")
-			}
-			next.ServeHTTP(w, r)
-			return
-		}
-		if strings.HasPrefix(path, "/emoji-64/") && strings.HasSuffix(path, ".png") {
-			w.Header().Set("Cache-Control", immutableCacheControl)
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func securityHeadersMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
-		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
-		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-		// CSP: everything is same-origin. twemoji is vendored at
-		// public/vendor/twemoji.min.js, so no CDN exception is needed.
-		// Note: client uses inline styles (element.style), so style-src includes 'unsafe-inline'.
-		w.Header().Set(
-			"Content-Security-Policy",
-			"default-src 'self'; "+
-				"script-src 'self'; "+
-				"style-src 'self' 'unsafe-inline'; "+
-				"img-src 'self' data: https:; "+
-				"connect-src 'self' ws: wss:; "+
-				"font-src 'self' data:; "+
-				"base-uri 'self'; "+
-				"form-action 'self'; "+
-				"frame-ancestors 'none'",
-		)
-		next.ServeHTTP(w, r)
-	})
 }

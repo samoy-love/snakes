@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,61 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 )
-
-// ---------------------------------------------------------------------------
-// Trusted proxies (X-Forwarded-For handling)
-// ---------------------------------------------------------------------------
-
-const defaultTrustedProxies = "127.0.0.1/8,::1"
-
-var trustedProxyNets []*net.IPNet
-
-func init() {
-	initTrustedProxies(os.Getenv("TRUSTED_PROXIES"))
-}
-
-// initTrustedProxies parses a comma separated list of CIDRs / bare IPs.
-func initTrustedProxies(spec string) {
-	spec = strings.TrimSpace(spec)
-	if spec == "" {
-		spec = defaultTrustedProxies
-	}
-	nets := make([]*net.IPNet, 0, 4)
-	for _, part := range strings.Split(spec, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if _, n, err := net.ParseCIDR(part); err == nil {
-			nets = append(nets, n)
-			continue
-		}
-		ip := net.ParseIP(part)
-		if ip == nil {
-			log.Printf("trusted_proxy_invalid entry=%q", part)
-			continue
-		}
-		bits := 32
-		if ip.To4() == nil {
-			bits = 128
-		}
-		nets = append(nets, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
-	}
-	trustedProxyNets = nets
-}
-
-func isTrustedProxy(host string) bool {
-	ip := net.ParseIP(strings.TrimSpace(host))
-	if ip == nil {
-		return false
-	}
-	for _, n := range trustedProxyNets {
-		if n.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
 
 // ---------------------------------------------------------------------------
 // Signed anonymous identity tokens

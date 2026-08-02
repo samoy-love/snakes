@@ -1,4 +1,4 @@
-package main
+package httpx
 
 import (
 	"strings"
@@ -16,12 +16,12 @@ import (
 // If this test ever fails, the hole is open again.
 func TestDefaultBindIsLoopbackOnly(t *testing.T) {
 	for _, unset := range []string{"", "   ", "\t"} {
-		got := resolveListenAddr(unset, "8090")
+		got := ResolveListenAddr(unset, "8090")
 		if got != "127.0.0.1:8090" {
-			t.Fatalf("resolveListenAddr(%q) = %q; the process must not listen on every interface by default", unset, got)
+			t.Fatalf("ResolveListenAddr(%q) = %q; the process must not listen on every interface by default", unset, got)
 		}
 		if strings.HasPrefix(got, ":") || strings.HasPrefix(got, "0.0.0.0") {
-			t.Fatalf("resolveListenAddr(%q) = %q — that is every interface", unset, got)
+			t.Fatalf("ResolveListenAddr(%q) = %q — that is every interface", unset, got)
 		}
 	}
 }
@@ -35,8 +35,8 @@ func TestExplicitBindAddressIsHonoured(t *testing.T) {
 		{"127.0.0.1", "8090", "127.0.0.1:8090"},
 		{"192.168.1.10", "3000", "192.168.1.10:3000"},
 	} {
-		if got := resolveListenAddr(tc.bind, tc.port); got != tc.want {
-			t.Errorf("resolveListenAddr(%q, %q) = %q, want %q", tc.bind, tc.port, got, tc.want)
+		if got := ResolveListenAddr(tc.bind, tc.port); got != tc.want {
+			t.Errorf("ResolveListenAddr(%q, %q) = %q, want %q", tc.bind, tc.port, got, tc.want)
 		}
 	}
 }
@@ -44,15 +44,15 @@ func TestExplicitBindAddressIsHonoured(t *testing.T) {
 // An IPv6 literal has to come out bracketed, or ListenAndServe cannot parse the
 // address and the service fails to start at all.
 func TestIPv6LiteralIsBracketed(t *testing.T) {
-	if got := resolveListenAddr("::1", "8090"); got != "[::1]:8090" {
-		t.Fatalf("resolveListenAddr(\"::1\") = %q, want [::1]:8090", got)
+	if got := ResolveListenAddr("::1", "8090"); got != "[::1]:8090" {
+		t.Fatalf("ResolveListenAddr(\"::1\") = %q, want [::1]:8090", got)
 	}
 }
 
 // Surrounding whitespace comes free with .env files and systemd Environment=
 // lines; it must not turn into a host name that fails to resolve.
 func TestWhitespaceAroundTheAddressIsIgnored(t *testing.T) {
-	if got := resolveListenAddr("  0.0.0.0  ", "3000"); got != "0.0.0.0:3000" {
-		t.Fatalf("resolveListenAddr = %q, want 0.0.0.0:3000", got)
+	if got := ResolveListenAddr("  0.0.0.0  ", "3000"); got != "0.0.0.0:3000" {
+		t.Fatalf("ResolveListenAddr = %q, want 0.0.0.0:3000", got)
 	}
 }
