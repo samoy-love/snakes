@@ -24,7 +24,7 @@
 | Где | Что |
 | --- | --- |
 | `server.go`, `isVersionedAsset` / `cacheStaticMiddleware` | Когда статику отдаёт сам Go-процесс |
-| `deploy/nginx*.conf`, map'ы `$snakes_asset_cc` / `$snakes_asset_pragma` / `$snakes_asset_expires` | Когда статику отдаёт nginx (в проде — всегда: он читает `public/` с диска и делает `proxy_hide_header Cache-Control`) |
+| Конфигурация nginx в deploy-kit, map'ы `$snakes_asset_cc` / `$snakes_asset_pragma` / `$snakes_asset_expires` | Когда статику отдаёт nginx (в проде — всегда: он читает `public/` с диска и делает `proxy_hide_header Cache-Control`) |
 
 Проверка (значение `v` произвольное, лишь бы не пустое и не `__BUILD__`):
 

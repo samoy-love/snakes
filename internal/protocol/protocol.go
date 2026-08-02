@@ -142,7 +142,15 @@ func (pd *PooledData) Refs() int32 {
 }
 
 var pooledDataPool = sync.Pool{New: func() any { return &PooledData{B: make([]byte, 0, 64*1024)} }}
-var pooledU32Pool = sync.Pool{New: func() any { return make([]uint32, 0, 2048) }}
+
+// Пул хранит УКАЗАТЕЛЬ на срез, а не срез.
+//
+// sync.Pool.Put принимает any, и срез при укладке боксится в интерфейс — то
+// есть каждый Put сам по себе аллоцирует (staticcheck SA6002). Для пула,
+// который дёргается в горячем пути (буферы ROI — каждый тик на каждого
+// клиента), это ровно та аллокация, ради устранения которой пул и заводили.
+// С *[]T укладка бесплатна.
+var pooledU32Pool = sync.Pool{New: func() any { s := make([]uint32, 0, 2048); return &s }}
 
 func AcquirePooledData(minCap int) *PooledData {
 	pd := pooledDataPool.Get().(*PooledData)
@@ -183,8 +191,12 @@ func DecPooledRef(pd *PooledData) {
 }
 
 func AcquireU32(minCap int) []uint32 {
-	s := pooledU32Pool.Get().([]uint32)
+	p := pooledU32Pool.Get().(*[]uint32)
+	s := *p
 	if cap(s) < minCap {
+		// Мелкий буфер из пула не подходит — возвращаем его обратно, иначе
+		// пул пустеет и следующий Get снова аллоцирует.
+		pooledU32Pool.Put(p)
 		return make([]uint32, 0, minCap)
 	}
 	return s[:0]
@@ -197,7 +209,8 @@ func ReleaseU32(s []uint32) {
 	if cap(s) > 1_000_000 {
 		return
 	}
-	pooledU32Pool.Put(s[:0])
+	s = s[:0]
+	pooledU32Pool.Put(&s)
 }
 
 func AppendU16LE(dst []byte, v uint16) []byte {

@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-label="Место для скриншота главного меню">
+  <!--
+    ПЛЕЙСХОЛДЕР. Заменить на настоящий кадр главного меню.
+
+    Меню — это DOM поверх канваса, стенд в tools/ снимает только канвас,
+    поэтому здесь нужен обычный скриншот браузера:
+        go run .   →   http://localhost:3000   →   снять окно 1200x675
+    Сохранить как menu.webp рядом и поправить ссылку в README.
+  -->
+  <defs>
+    <linearGradient id="mbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0f14"/>
+      <stop offset="1" stop-color="#0a0d13"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="675" fill="url(#mbg)"/>
+
+  <!-- Карточка меню -->
+  <rect x="270" y="110" width="660" height="440" rx="16" fill="#111823" stroke="#1e2733" stroke-width="1"/>
+
+  <!-- Заголовок и подзаголовок -->
+  <rect x="320" y="160" width="230" height="30" rx="6" fill="#2b3542"/>
+  <rect x="320" y="204" width="420" height="14" rx="5" fill="#1c2531"/>
+
+  <!-- Поле ника и главная кнопка -->
+  <rect x="320" y="256" width="440" height="44" rx="9" fill="#151d28" stroke="#232e3c" stroke-width="1"/>
+  <rect x="320" y="320" width="560" height="52" rx="10" fill="#e0457b" opacity="0.85"/>
+  <rect x="320" y="388" width="560" height="44" rx="10" fill="#161f2b" stroke="#232e3c" stroke-width="1"/>
+
+  <!-- Три шага «как играть» -->
+  <g fill="#1a2330">
+    <rect x="320" y="452" width="176" height="56" rx="9"/>
+    <rect x="512" y="452" width="176" height="56" rx="9"/>
+    <rect x="704" y="452" width="176" height="56" rx="9"/>
+  </g>
+
+  <text x="600" y="600" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif"
+        font-size="19" fill="#5b6675" letter-spacing="0.14em">СКРИНШОТ МЕНЮ · ПЛЕЙСХОЛДЕР</text>
+  <text x="600" y="629" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, monospace"
+        font-size="14" fill="#3f4854">go run . → localhost:3000</text>
+</svg>

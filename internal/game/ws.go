@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 
 	"snakes/internal/httpx"
 	"snakes/internal/metrics"

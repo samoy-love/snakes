@@ -3,7 +3,7 @@ package game
 import (
 	"testing"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 
 	"snakes/internal/metrics"
 )
