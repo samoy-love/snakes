@@ -2,7 +2,10 @@
 // hunting, the per-archetype personalities and the bot population manager.
 package game
 
-import "snakes/internal/botnames"
+import (
+	"snakes/internal/botnames"
+	"snakes/internal/metrics"
+)
 
 // recentAt returns the position `back` steps ago from the anti-loop ring.
 func (p *Player) recentAt(back int) (int, int, bool) {
@@ -1035,6 +1038,7 @@ func (r *Room) newBotLocked(used, usedStarts, usedEn, usedStartsEn map[string]st
 	name := botnames.PickUnique(r.rng, botnames.PoolsRU, used, usedStarts, fallbackN)
 	nameEn := botnames.PickUnique(r.rng, botnames.PoolsEN, usedEn, usedStartsEn, fallbackN)
 	hue := r.allocUniqueHue()
+	metrics.JoinsTotal.Inc(metrics.ActorLabel(true))
 	p := &Player{
 		num:             pnum,
 		name:            name,

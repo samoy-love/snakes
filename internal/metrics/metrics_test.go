@@ -151,24 +151,24 @@ func TestExpectedMetricNamesArePresent(t *testing.T) {
 func TestCountersFollowEvents(t *testing.T) {
 	before := scrape(t)
 	b1 := sample(t, before, "snakes_ws_connections_total")
-	b2 := sample(t, before, `snakes_deaths_total{reason="wall"}`)
-	b3 := sample(t, before, "snakes_cells_captured_total")
+	b2 := sample(t, before, `snakes_deaths_total{reason="wall",actor="player"}`)
+	b3 := sample(t, before, `snakes_cells_captured_total{actor="player"}`)
 	b4 := sample(t, before, `snakes_style_awarded_total{reason="capture"}`)
 
 	WSConnections.Inc()
-	DeathsTotal.Inc("wall")
-	CellsCapturedTotal.Add(17)
+	DeathsTotal.Inc("wall", "player")
+	CellsCapturedTotal.Add("player", 17)
 	StyleAwardedTotal.Add("capture", 5)
 
 	after := scrape(t)
 	if got := sample(t, after, "snakes_ws_connections_total"); got != b1+1 {
 		t.Errorf("snakes_ws_connections_total = %v, ожидалось %v", got, b1+1)
 	}
-	if got := sample(t, after, `snakes_deaths_total{reason="wall"}`); got != b2+1 {
-		t.Errorf(`snakes_deaths_total{reason="wall"} = %v, ожидалось %v`, got, b2+1)
+	if got := sample(t, after, `snakes_deaths_total{reason="wall",actor="player"}`); got != b2+1 {
+		t.Errorf(`snakes_deaths_total{reason="wall",actor="player"} = %v, ожидалось %v`, got, b2+1)
 	}
-	if got := sample(t, after, "snakes_cells_captured_total"); got != b3+17 {
-		t.Errorf("snakes_cells_captured_total = %v, ожидалось %v", got, b3+17)
+	if got := sample(t, after, `snakes_cells_captured_total{actor="player"}`); got != b3+17 {
+		t.Errorf(`snakes_cells_captured_total{actor="player"} = %v, ожидалось %v`, got, b3+17)
 	}
 	if got := sample(t, after, `snakes_style_awarded_total{reason="capture"}`); got != b4+5 {
 		t.Errorf(`snakes_style_awarded_total{reason="capture"} = %v, ожидалось %v`, got, b4+5)
@@ -180,11 +180,18 @@ func TestCountersFollowEvents(t *testing.T) {
 func TestKnownLabelsAreExposedFromZero(t *testing.T) {
 	body := scrape(t)
 	for _, want := range []string{
-		`snakes_deaths_total{reason="self_trail"}`,
-		`snakes_deaths_total{reason="trail_cut"}`,
-		`snakes_deaths_total{reason="head_on"}`,
-		`snakes_powerup_pickups_total{type="shield"}`,
-		`snakes_powerup_pickups_total{type="mega_dash"}`,
+		`snakes_deaths_total{reason="self_trail",actor="player"}`,
+		`snakes_deaths_total{reason="self_trail",actor="bot"}`,
+		`snakes_deaths_total{reason="trail_cut",actor="player"}`,
+		`snakes_deaths_total{reason="head_on",actor="bot"}`,
+		`snakes_powerup_pickups_total{type="shield",actor="player"}`,
+		`snakes_powerup_pickups_total{type="mega_dash",actor="bot"}`,
+		`snakes_kills_total{actor="player"}`,
+		`snakes_kills_total{actor="bot"}`,
+		`snakes_cells_captured_total{actor="player"}`,
+		`snakes_loops_closed_total{actor="bot"}`,
+		`snakes_kill_matchups_total{killer="bot",victim="player"}`,
+		`snakes_kill_matchups_total{killer="player",victim="player"}`,
 		`snakes_mutators_activated_total{mutator="double_capture"}`,
 		`snakes_contracts_completed_total{type="capture"}`,
 		`snakes_dailies_completed_total{type="style"}`,
