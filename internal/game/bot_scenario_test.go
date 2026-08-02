@@ -106,7 +106,6 @@ func sortedNums(r *Room) []uint16 {
 //     долю на порядки, а перебалансировка весов её не двигает вовсе.
 func TestBotScenarioMovementSafety(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	type track struct {
 		x, y   int
 		dx, dy int
@@ -215,7 +214,6 @@ func abs(v int) int {
 // ветка, и её результат обязан не быть противоположен входному направлению.
 func TestBotEmergencyTurnNeverReverses(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	for _, seed := range scenarioSeeds {
 		r := newRulesRoom(t, seed)
 		r.tick = 1000
@@ -346,7 +344,6 @@ func TestBotEmergencyTurnNeverReverses(t *testing.T) {
 //     trail и owned, иначе его территория остаётся «призраком».
 func TestBotScenarioTrailIntegrity(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -422,7 +419,6 @@ func TestBotScenarioTrailIntegrity(t *testing.T) {
 //     клетки: рассинхрон там тихо теряет клетки при следующем захвате.
 func TestBotScenarioGridAccounting(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -500,7 +496,6 @@ func huntCensus(r *Room) map[uint16]int {
 //     huntersOn нет записей на несуществующих игроков.
 func TestBotScenarioHunterCapNeverExceeded(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -606,7 +601,6 @@ func forceHuntDeath(t *testing.T, r *Room, seed int64) *Player {
 // кого-нибудь убьёт, нельзя: см. forceHuntDeath.
 func TestBotScenarioHunterCensusMatchesState(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -673,7 +667,6 @@ func TestBotScenarioHunterCensusMatchesState(t *testing.T) {
 // enterHunt/releaseHunt. Без потолка на жертву сваливается вся комната.
 func TestBotHuntCapGate(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	for _, victimIsBot := range []bool{true, false} {
 		r := newRulesRoom(t, 20240)
 		victim := &Player{num: 1, alive: true, bot: victimIsBot, x: 100, y: 70, aiCoolCell: -1}
@@ -746,7 +739,6 @@ func TestBotHuntCapGate(t *testing.T) {
 //     недостижим ни для какого цикла длиной 6.
 func TestBotScenarioBotsStayAliveAndProductive(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -810,7 +802,6 @@ func TestBotScenarioBotsStayAliveAndProductive(t *testing.T) {
 //     игрока, а вместе с ними и забронированный слот охоты на него.
 func TestBotScenarioPopulationFollowsHumans(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	for _, seed := range scenarioSeeds[:2] {
 		r := newBotScenarioRoom(t, seed)
 
@@ -921,7 +912,6 @@ func TestBotScenarioPopulationFollowsHumans(t *testing.T) {
 //     ботом, и заметить это без теста нельзя.
 func TestBotScenarioRoomCompositionAndTierParams(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -997,7 +987,6 @@ func TestBotScenarioRoomCompositionAndTierParams(t *testing.T) {
 // на 15%, что переживает любую разумную перебалансировку.
 func TestBotScenarioFarmerLoopsLongerThanAggressor(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	sum := make([]int, ArchCount)
 	cnt := make([]int, ArchCount)
 
@@ -1047,7 +1036,6 @@ func TestBotScenarioFarmerLoopsLongerThanAggressor(t *testing.T) {
 // здесь особенно неприятна: она переживает весь следующий матч.
 func TestBotScenarioMatchResetClearsBotState(t *testing.T) {
 	skipLongScenario(t)
-	t.Parallel()
 	for _, seed := range scenarioSeeds[:2] {
 		r := newBotScenarioRoom(t, seed)
 		// Короткий матч вместо MatchDurationTicks: тест не должен быть медленным.
