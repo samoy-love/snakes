@@ -2089,15 +2089,47 @@ let createRoomPending = false;
 
 let roomsAutoRefreshAt = 0;
 
+/* Счётчики шагов до игры: нажал «Играть», создал комнату, обновил список.
+   Игровые события (заходы, убийства, захват) считает сервер сам — здесь
+   только то, что происходит ДО подключения и потому серверу не видно.
+
+   Вместе с серверным snakes_joins_total это даёт воронку: сколько нажало
+   «Играть» против того, сколько реально подключилось. Расхождение между
+   ними — сорвавшиеся подключения, и увидеть его больше негде.
+
+   Что уходит: пустой POST на /e/<имя>. Ни тела, ни параметров, ни cookie,
+   ни идентификатора. Сервер отвечает 204 и пишет строку без IP и
+   User-Agent — их нет в log_format. Связать два события одного игрока
+   не по чему.
+
+   Список имён закрыт на стороне экспортёра (nginxlog.yml в
+   metrics.samoy.love): незнакомое сворачивается в ряд "other". Добавляя
+   событие здесь, добавьте его и там.
+
+   Запись в localStorage осталась от прежней версии: она никем не читается —
+   ни здесь, ни на сервере, — но и не мешает, а на отладке в консоли иногда
+   удобна. */
 function trackEvent(name) {
   const ev = String(name || '').trim();
   if (!ev) return;
+
   try {
     const key = `an_${ev}`;
     const cur = Number(localStorage.getItem(key)) || 0;
     localStorage.setItem(key, String(cur + 1));
   } catch {
-    // ignore
+    // Приватный режим, переполненное хранилище — счётчик не важнее игры.
+  }
+
+  try {
+    const url = `/e/${ev}`;
+    if (typeof navigator.sendBeacon === 'function') {
+      navigator.sendBeacon(url, new Blob([], { type: 'text/plain' }));
+    } else if (typeof fetch === 'function') {
+      fetch(url, { method: 'POST', keepalive: true }).catch(() => {});
+    }
+  } catch {
+    // Блокировщик, офлайн — событие теряется молча.
   }
 }
 
