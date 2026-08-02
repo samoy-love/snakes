@@ -331,6 +331,7 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	rm.points[pnum] = 0
 	rm.clients[c] = struct{}{}
 	rm.humanCount++
+	metrics.JoinsTotal.Inc(metrics.ActorLabel(false))
 	rm.forceFullSnapshot = true
 	rm.cancelCleanupLocked()
 	// G7: thin the bot field out so a busy room is not a mob.
@@ -405,6 +406,7 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 }
 
 func (c *Client) handleChat(ctx context.Context, text string) {
+	metrics.ChatMessagesTotal.Inc()
 	c.mu.Lock()
 	rm := c.room
 	pl := c.player

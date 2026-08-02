@@ -1265,9 +1265,18 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 	if r.matchDeaths != nil {
 		r.matchDeaths[num] = r.matchDeaths[num] + 1
 	}
-	metrics.DeathsTotal.Inc(reason)
+	victimActor := metrics.ActorLabel(p.bot)
+	metrics.DeathsTotal.Inc(reason, victimActor)
 	if killer != 0 && killer != num {
-		metrics.KillsTotal.Inc()
+		// Убийца может уже покинуть комнату — тогда сторону не установить,
+		// и врать «player» нельзя: это исказило бы ровно ту картину, ради
+		// которой метка заводилась.
+		killerActor := "unknown"
+		if k, ok := r.players[killer]; ok {
+			killerActor = metrics.ActorLabel(k.bot)
+		}
+		metrics.KillsTotal.Inc(killerActor)
+		metrics.KillMatchupsTotal.Inc(killerActor, victimActor)
 		if r.matchKills != nil {
 			r.matchKills[killer] = r.matchKills[killer] + 1
 		}
@@ -1981,7 +1990,7 @@ func (r *Room) applyMove(p *Player) {
 			r.removePowerUpAtIndex(idx)
 			r.metaDirty = true
 			r.pushEvent(Event{Kind: EventPowerupPickup, A: p.num, B: pu.ID, D: pu.Type, X: uint16(p.x), Y: uint16(p.y)})
-			metrics.PowerupPickupsTotal.Inc(powerupLabel(pu.Type))
+			metrics.PowerupPickupsTotal.Inc(powerupLabel(pu.Type), metrics.ActorLabel(p.bot))
 			r.ensureContract(p)
 			if p.contractType == ContractPickups {
 				r.addContractProgress(p, 1)
@@ -2118,6 +2127,7 @@ func (r *Room) step() {
 				}
 			}
 			metrics.MatchesTotal.Inc()
+			metrics.RoomPlayersAtStart.Observe(float64(r.humanCount))
 			metrics.MatchDurationSeconds.Observe(float64(r.matchElapsed()) * TickMS / 1000)
 			metrics.MatchSurvivors.Observe(float64(survivors))
 			// E3: rewards follow the ABSOLUTE place among every participant,

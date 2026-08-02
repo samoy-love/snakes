@@ -13,6 +13,19 @@ import (
 // метрики ломает все дашборды и алерты, которые на неё смотрят, поэтому имена
 // подбираются один раз.
 
+// actors — значения метки actor. Людей на поле втрое меньше ботов, и без
+// разделения все игровые счётчики показывают в основном работу ИИ.
+var actors = []string{"player", "bot"}
+
+// ActorLabel переводит признак «это бот» в значение метки. Одна точка правды:
+// разъехавшиеся написания дали бы две метрики вместо одной.
+func ActorLabel(bot bool) string {
+	if bot {
+		return "bot"
+	}
+	return "player"
+}
+
 // --- сборка ----------------------------------------------------------------
 
 var (
@@ -82,22 +95,50 @@ var (
 		"Время обсчёта одного игрового тика. Бюджет — 0.1 с, всё что рядом с ним означает, что комната не успевает за собственными часами.",
 		[]float64{0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.25})
 
-	CellsCapturedTotal = newCounter("snakes_cells_captured_total",
-		"Захвачено клеток территории суммарно.")
+	CellsCapturedTotal = newCounterVec("snakes_cells_captured_total",
+		"Захвачено клеток территории, отдельно людьми и ботами.",
+		"actor", actors...)
 
-	LoopsClosedTotal = newCounter("snakes_loops_closed_total",
-		"Замкнутых петель: сколько раз игрок довёл след до своей территории и получил захват.")
+	LoopsClosedTotal = newCounterVec("snakes_loops_closed_total",
+		"Замкнутых петель: сколько раз змейка довела след до своей территории и получила захват.",
+		"actor", actors...)
 
-	KillsTotal = newCounter("snakes_kills_total",
-		"Убийств: смертей, у которых есть виновник (срез след, лобовое).")
+	KillsTotal = newCounterVec("snakes_kills_total",
+		"Убийств: смертей, у которых есть виновник. Метка — кто убил.",
+		"actor", actors...)
 
-	DeathsTotal = newCounterVec("snakes_deaths_total",
+	DeathsTotal = newCounterVec2("snakes_deaths_total",
 		"Смертей по причинам: self_trail — свой след, trail_cut — чужой след, head_on — лобовое, wall — стена.",
-		"reason", "self_trail", "trail_cut", "head_on", "wall")
+		"reason", "actor",
+		[]string{"self_trail", "trail_cut", "head_on", "wall"}, actors)
 
-	PowerupPickupsTotal = newCounterVec("snakes_powerup_pickups_total",
-		"Подобранных бонусов по типам.",
-		"type", "shield", "dash", "nova", "mega_dash")
+	// Кто кого убивает. Отдельно от snakes_kills_total: там видно только
+	// сторону убийцы, а вопрос «боты вообще убивают людей или только друг
+	// друга» решает именно эта пара меток — по ней и настраивается сложность.
+	KillMatchupsTotal = newCounterVec2("snakes_kill_matchups_total",
+		"Убийств в разрезе «кто кого»: killer — убийца, victim — жертва.",
+		"killer", "victim", actors, actors)
+
+	// Вход в комнату — единственная точка, где видно живой спрос: гейдж
+	// snakes_players показывает, сколько сейчас, но не сколько людей вообще
+	// заходило за день.
+	JoinsTotal = newCounterVec("snakes_joins_total",
+		"Входов в комнату, отдельно людьми и ботами.",
+		"actor", actors...)
+
+	// Чат отделён от игровых действий намеренно: он показывает не активность,
+	// а то, живая ли комната — в пустой комнате никто не пишет.
+	ChatMessagesTotal = newCounter("snakes_chat_messages_total",
+		"Сообщений в чате, отправленных людьми.")
+
+	RoomPlayersAtStart = newHistogram("snakes_room_players_at_start",
+		"Сколько людей было в комнате в момент старта матча.",
+		[]float64{0, 1, 2, 4, 8, 12, 16})
+
+	PowerupPickupsTotal = newCounterVec2("snakes_powerup_pickups_total",
+		"Подобранных бонусов по типам, отдельно людьми и ботами.",
+		"type", "actor",
+		[]string{"shield", "dash", "nova", "mega_dash"}, actors)
 
 	MutatorsActivatedTotal = newCounterVec("snakes_mutators_activated_total",
 		"Срабатываний мутаторов матча по типам.",
