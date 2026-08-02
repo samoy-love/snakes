@@ -370,27 +370,20 @@ func clampViewport(w, h int) (int, int) {
 }
 
 // roiLookahead is how far ahead of the head the window is pushed along the
-// movement axis. It is a fraction of the window's half-extent on that axis and
-// never exceeds ROILookahead, so the rear margin cannot collapse the way a flat
-// offset made it collapse on short windows.
+// movement axis.
+//
+// It is 0 on purpose: the client pins the camera to the player and never leads
+// it (a leading camera swung the view on every turn, which the product owner
+// rejected). With a fixed camera the viewport is centred on the head, so the
+// window must be centred on the head too — any forward push would move the
+// spare margin ahead of the player and starve the trailing edge, painting fog
+// right behind the snake.
+//
+// The parameters are kept so the shift can be reintroduced per-axis without
+// touching call sites; ROILookahead/Num/Den still bound it if it ever returns.
 func roiLookahead(rw, rh, dx, dy int) int {
-	half := 0
-	switch {
-	case dx != 0:
-		half = rw / 2
-	case dy != 0:
-		half = rh / 2
-	default:
-		return 0
-	}
-	la := half * ROILookaheadNum / ROILookaheadDen
-	if la > ROILookahead {
-		la = ROILookahead
-	}
-	if la < 0 {
-		la = 0
-	}
-	return la
+	_, _, _, _ = rw, rh, dx, dy
+	return 0
 }
 
 func packChange(i uint16, owner uint16) uint32 {
