@@ -11,6 +11,8 @@ import (
 	"nhooyr.io/websocket"
 
 	"snakes/internal/profiles"
+
+	"snakes/internal/sanitize"
 )
 
 func (c *Client) profileKey() string {
@@ -409,7 +411,7 @@ func (c *Client) handleChat(ctx context.Context, text string) {
 		return
 	}
 
-	msgText := sanitizeChat(text)
+	msgText := sanitize.Chat(text)
 	if msgText == "" {
 		return
 	}

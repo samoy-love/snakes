@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"snakes/internal/profiles"
+
+	"snakes/internal/sanitize"
 )
 
 // F4: a match runs through three phases derived from r.tick-r.matchStartTick.
@@ -188,7 +190,7 @@ func (h *Hub) pickRoomForJoin() *Room {
 // createRoom makes a room on client request. It returns nil once maxRoomsLimit
 // is reached; the caller reports "rooms_limit_reached".
 func (h *Hub) createRoom(title string) *Room {
-	name := sanitizeRoomName(title)
+	name := sanitize.RoomName(title)
 	if name == "" {
 		name = "Комната"
 	}
@@ -861,11 +863,11 @@ func (r *Room) pruneKnownNamesLocked() {
 // needs an English twin just like a bot nickname does — otherwise "Игрок"
 // shows up in an English UI.
 func fallbackPlayerName(num uint16) string {
-	return sanitizeName(fmt.Sprintf("Игрок %d", num))
+	return sanitize.Name(fmt.Sprintf("Игрок %d", num))
 }
 
 func fallbackPlayerNameEn(num uint16) string {
-	return sanitizeName(fmt.Sprintf("Player %d", num))
+	return sanitize.Name(fmt.Sprintf("Player %d", num))
 }
 
 // offlineSuffix / offlineSuffixEn mark a name whose owner has left but whose
@@ -881,7 +883,7 @@ func (r *Room) setKnownNameLocalizedLocked(num uint16, name, nameEn string, onli
 	if r.knownNames == nil {
 		r.knownNames = make(map[uint16]KnownName)
 	}
-	base := sanitizeName(name)
+	base := sanitize.Name(name)
 	if base == "" {
 		base = fallbackPlayerName(num)
 	}
@@ -890,7 +892,7 @@ func (r *Room) setKnownNameLocalizedLocked(num uint16, name, nameEn string, onli
 		r.knownNameSeq++
 		seq = r.knownNameSeq
 	}
-	r.knownNames[num] = KnownName{Name: base, NameEn: sanitizeName(nameEn), Online: online, OfflineSeq: seq}
+	r.knownNames[num] = KnownName{Name: base, NameEn: sanitize.Name(nameEn), Online: online, OfflineSeq: seq}
 	if !online {
 		r.pruneKnownNamesLocked()
 	}
@@ -1318,9 +1320,9 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 		if k := r.players[killer]; k != nil {
 			killerName = k.name
 		}
-		pn := sanitizeLogField(p.name)
-		kn := sanitizeLogField(killerName)
-		rs := sanitizeLogField(reason)
+		pn := sanitize.LogField(p.name)
+		kn := sanitize.LogField(killerName)
+		rs := sanitize.LogField(reason)
 		log.Printf(
 			"bot_death room=%d tick=%d victim=%d name=%q killer=%d killerName=%q reason=%q cells=%d bbox=%dx%d dens=%.3f per=%d trail=%d head=%dx%d prev=%dx%d next=%dx%d hit=%dx%d hitI=%d hitTrailOwner=%d hitGridOwner=%d dir=%d pending=%d speedUntil=%d speedActive=%t aiAvoidTick=%d aiAvoidAge=%d aiAvoidFrom=%d aiAvoidTo=%d aiAvoidReason=%d aiMode=%d aiPhase=%d aiIntent=%d aiPrefer=%d aiTarget=%dx%d aiExpandDir=%d aiExpandTurn=%d outLeft=%d sideLeft=%d aiNextDecision=%d lastSeenType=%d lastSeen=%dx%d lastSeenNum=%d lastSeenTick=%d lastSeenDist=%d snap=%q",
 			r.id,
