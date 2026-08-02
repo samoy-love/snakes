@@ -157,9 +157,14 @@ func (c *Client) broadcastNameUpdate(ctx context.Context) {
 	pl.name = name
 	rm.setKnownNameLocked(pl.num, name, true)
 	display := rm.displayNameLocked(pl.num)
+	displayEn := rm.displayNameEnLocked(pl.num)
 	rm.mu.Unlock()
 
-	rm.broadcastJSON(ctx, "nameUpdate", map[string]any{"n": pl.num, "nm": display})
+	payload := map[string]any{"n": pl.num, "nm": display}
+	if displayEn != "" {
+		payload["nmEn"] = displayEn
+	}
+	rm.broadcastJSON(ctx, "nameUpdate", payload)
 }
 
 func (c *Client) leaveRoom(ctx context.Context) {
@@ -186,9 +191,11 @@ func (c *Client) leaveRoomInternal(ctx context.Context, notify bool) {
 	}
 
 	offlineUpdate := ""
+	offlineUpdateEn := ""
 	num := pl.num
 	rm.setKnownNameLocked(num, pl.name, false)
 	offlineUpdate = rm.displayNameLocked(num)
+	offlineUpdateEn = rm.displayNameEnLocked(num)
 	rm.removePlayer(num)
 	// G5: removePlayer drops the player's territory and trail outright (a
 	// leaver leaves nothing to reclaim), so there is nothing on the map left to
@@ -208,7 +215,11 @@ func (c *Client) leaveRoomInternal(ctx context.Context, notify bool) {
 	rm.mu.Unlock()
 
 	if offlineUpdate != "" {
-		rm.broadcastJSON(ctx, "nameUpdate", map[string]any{"n": num, "nm": offlineUpdate})
+		payload := map[string]any{"n": num, "nm": offlineUpdate}
+		if offlineUpdateEn != "" {
+			payload["nmEn"] = offlineUpdateEn
+		}
+		rm.broadcastJSON(ctx, "nameUpdate", payload)
 	}
 	if !shouldCleanup {
 		// The refill above may have added bots; cosExtra is what carries their

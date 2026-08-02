@@ -150,7 +150,9 @@ type Room struct {
 type matchResult struct {
 	N  uint16 `json:"n"`
 	Nm string `json:"nm"`
-	// NmEn is the English twin of a bot nickname (G25); omitted for humans.
+	// NmEn is the English twin of the label: a bot nickname (G25), or the
+	// server-written parts of a human label ("Игрок N", the offline suffix).
+	// Omitted when the name is the user's own and reads the same everywhere.
 	NmEn  string `json:"nmEn,omitempty"`
 	Bot   bool   `json:"bot"`
 	P     uint16 `json:"p"`

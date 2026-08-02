@@ -291,6 +291,9 @@ func (r *Room) buildMatchResultsLocked() []matchResult {
 			nameEn = p.nameEn
 		} else {
 			name = r.displayNameLocked(num)
+			// Humans get a twin too when the label is server-written
+			// ("Игрок N", the offline suffix); it stays empty for a chosen name.
+			nameEn = r.displayNameEnLocked(num)
 		}
 		se := uint16(0)
 		if v := r.matchStyleEarned[num]; v > 0 {
@@ -828,6 +831,25 @@ func (r *Room) pruneKnownNamesLocked() {
 	}
 }
 
+// fallbackPlayerName is what a client that never sent a name is labelled with.
+// It is server-generated text that reaches the leaderboard verbatim, so it
+// needs an English twin just like a bot nickname does — otherwise "Игрок"
+// shows up in an English UI.
+func fallbackPlayerName(num uint16) string {
+	return sanitizeName(fmt.Sprintf("Игрок %d", num))
+}
+
+func fallbackPlayerNameEn(num uint16) string {
+	return sanitizeName(fmt.Sprintf("Player %d", num))
+}
+
+// offlineSuffix / offlineSuffixEn mark a name whose owner has left but whose
+// cells are still cooling on the map.
+const (
+	offlineSuffix   = " (отключен)"
+	offlineSuffixEn = " (offline)"
+)
+
 // setKnownNameLocalizedLocked stores a name plus its optional English twin
 // (G25). nameEn is only ever non-empty for bots.
 func (r *Room) setKnownNameLocalizedLocked(num uint16, name, nameEn string, online bool) {
@@ -836,7 +858,7 @@ func (r *Room) setKnownNameLocalizedLocked(num uint16, name, nameEn string, onli
 	}
 	base := sanitizeName(name)
 	if base == "" {
-		base = sanitizeName(fmt.Sprintf("Игрок %d", num))
+		base = fallbackPlayerName(num)
 	}
 	seq := uint64(0)
 	if !online {
@@ -850,31 +872,46 @@ func (r *Room) setKnownNameLocalizedLocked(num uint16, name, nameEn string, onli
 }
 
 // displayNameEnLocked returns the English twin of a name, or "" when there is
-// none and the client should just use "nm".
+// none and the client should just use "nm". A twin is produced whenever any
+// part of the label was written by the server (the "Игрок N" placeholder, the
+// offline suffix), not only for bots: those literals are Russian and used to
+// reach the English leaderboard untranslated.
 func (r *Room) displayNameEnLocked(num uint16) string {
 	kn, ok := r.knownNames[num]
-	if !ok || kn.NameEn == "" {
-		return ""
+	if !ok {
+		return fallbackPlayerNameEn(num)
+	}
+	en := kn.NameEn
+	if en == "" {
+		switch {
+		case kn.Name == "" || kn.Name == fallbackPlayerName(num):
+			en = fallbackPlayerNameEn(num)
+		case kn.Online:
+			// A name the user chose himself reads the same in every locale.
+			return ""
+		default:
+			en = kn.Name
+		}
 	}
 	if kn.Online {
-		return kn.NameEn
+		return en
 	}
-	return kn.NameEn + " (offline)"
+	return en + offlineSuffixEn
 }
 
 func (r *Room) displayNameLocked(num uint16) string {
 	kn, ok := r.knownNames[num]
 	if !ok {
-		return sanitizeName(fmt.Sprintf("Игрок %d", num))
+		return fallbackPlayerName(num)
 	}
 	name := kn.Name
 	if name == "" {
-		name = sanitizeName(fmt.Sprintf("Игрок %d", num))
+		name = fallbackPlayerName(num)
 	}
 	if kn.Online {
 		return name
 	}
-	return name + " (отключен)"
+	return name + offlineSuffix
 }
 
 func (r *Room) start() {
