@@ -11,7 +11,10 @@ import (
 // matchKills/matchStyleBy/... нулевыми, а экономика в них пишет.
 // ---------------------------------------------------------------------------
 
-func newRulesRoom(t *testing.T, seed int64) *Room {
+// Принимает testing.TB, а не *testing.T: тем же помощником пользуются
+// бенчмарки комнат (bench_rooms_test.go), а *testing.B под *testing.T не
+// подходит.
+func newRulesRoom(t testing.TB, seed int64) *Room {
 	t.Helper()
 	r := newTestRoom()
 	r.rng = rand.New(rand.NewSource(seed))
