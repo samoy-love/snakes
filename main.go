@@ -6,9 +6,7 @@ package main
 import (
 	"log"
 	"os"
-	"strings"
 	"time"
-	"unicode"
 
 	"snakes/internal/envcfg"
 )
@@ -39,11 +37,8 @@ func init() {
 
 const (
 	RoomHumanLimitDefault = 16
-	ChatMaxLen            = 180
 	ChatHistoryMax        = 80
 	ChatMinInterval       = 500 * time.Millisecond
-	NameMaxLen            = 18
-	RoomNameMaxLen        = 32
 )
 
 const (
@@ -64,36 +59,6 @@ var (
 
 func init() {
 	log.Printf("snakes build version=%s commit=%s buildTime=%s", Version, Commit, BuildTime)
-}
-
-func sanitizeRoomName(name string) string {
-	raw := strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(name))
-	if raw == "" {
-		return ""
-	}
-	out := make([]rune, 0, len(raw))
-	for _, ch := range raw {
-		if len(out) >= RoomNameMaxLen {
-			break
-		}
-		if ch < 0x20 || ch == '<' || ch == '>' {
-			continue
-		}
-		out = append(out, ch)
-	}
-	res := strings.TrimSpace(string(out))
-	if res == "" {
-		return ""
-	}
-	return res
-}
-
-func runeLen(s string) int {
-	n := 0
-	for range s {
-		n++
-	}
-	return n
 }
 
 func isOpposite(a, b Dir) bool {
@@ -170,68 +135,6 @@ func parseDir(s string) (Dir, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func sanitizeLogField(s string) string {
-	raw := strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(s))
-	if raw == "" {
-		return ""
-	}
-	out := make([]rune, 0, len(raw))
-	for _, ch := range raw {
-		if len(out) >= 200 {
-			break
-		}
-		if unicode.IsControl(ch) {
-			continue
-		}
-		out = append(out, ch)
-	}
-	return strings.TrimSpace(string(out))
-}
-
-func sanitizeName(name string) string {
-	raw := strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(name))
-	if raw == "" {
-		return ""
-	}
-	out := make([]rune, 0, len(raw))
-	for _, ch := range raw {
-		if len(out) >= NameMaxLen {
-			break
-		}
-		if ch < 0x20 || ch == '<' || ch == '>' {
-			continue
-		}
-		out = append(out, ch)
-	}
-	res := strings.TrimSpace(string(out))
-	if res == "" {
-		return ""
-	}
-	return res
-}
-
-func sanitizeChat(text string) string {
-	raw := strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(text))
-	if raw == "" {
-		return ""
-	}
-	out := make([]rune, 0, len(raw))
-	for _, ch := range raw {
-		if len(out) >= ChatMaxLen {
-			break
-		}
-		if ch < 0x20 || ch == '<' || ch == '>' {
-			continue
-		}
-		out = append(out, ch)
-	}
-	res := strings.TrimSpace(string(out))
-	if res == "" {
-		return ""
-	}
-	return res
 }
 
 func (r *Room) randInt(min int, max int) int {

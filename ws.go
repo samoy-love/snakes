@@ -16,6 +16,8 @@ import (
 	"snakes/internal/httpx"
 
 	"snakes/internal/profiles"
+
+	"snakes/internal/sanitize"
 )
 
 // wsIPLimiter — общий на процесс лимитер входящих команд: одно ведро на пару
@@ -161,7 +163,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			if json.Unmarshal(msg.Data, &p) != nil {
 				continue
 			}
-			nm := sanitizeName(p.Name)
+			nm := sanitize.Name(p.Name)
 			if nm == "" {
 				continue
 			}
@@ -196,7 +198,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			if json.Unmarshal(msg.Data, &p) != nil {
 				continue
 			}
-			title := sanitizeRoomName(p.Title)
+			title := sanitize.RoomName(p.Title)
 			if title == "" {
 				client.sendJSON(r.Context(), "error", map[string]any{"message": "room_title_invalid"})
 				continue

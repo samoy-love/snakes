@@ -1,4 +1,4 @@
-package main
+package sanitize
 
 import (
 	"strings"
@@ -21,7 +21,7 @@ type sanitizer struct {
 	name   string
 	fn     func(string) string
 	maxLen int
-	// stripsAngle: вырезает ли санитайзер '<' и '>'. sanitizeLogField этого
+	// stripsAngle: вырезает ли санитайзер '<' и '>'. LogField этого
 	// намеренно не делает — он готовит строку для лога, а не для HTML, и там
 	// угловые скобки безопасны и полезны для читаемости.
 	stripsAngle bool
@@ -29,10 +29,10 @@ type sanitizer struct {
 
 func allSanitizers() []sanitizer {
 	return []sanitizer{
-		{"sanitizeName", sanitizeName, NameMaxLen, true},
-		{"sanitizeChat", sanitizeChat, ChatMaxLen, true},
-		{"sanitizeRoomName", sanitizeRoomName, RoomNameMaxLen, true},
-		{"sanitizeLogField", sanitizeLogField, 200, false},
+		{"Name", Name, NameMaxLen, true},
+		{"Chat", Chat, ChatMaxLen, true},
+		{"RoomName", RoomName, RoomNameMaxLen, true},
+		{"LogField", LogField, LogFieldMaxLen, false},
 	}
 }
 
@@ -95,7 +95,7 @@ func TestSanitizersStripForbiddenOnly(t *testing.T) {
 						want = "script"
 					}
 				} else {
-					// sanitizeLogField сохраняет угловые скобки, вырезая только control-символы.
+					// LogField сохраняет угловые скобки, вырезая только control-символы.
 					want = strings.Map(func(r rune) rune {
 						if r < 0x20 || r == 0x7f {
 							return -1
@@ -135,7 +135,7 @@ func TestSanitizersStripControlAndAngleBrackets(t *testing.T) {
 			t.Run(s.name+"/"+tc.name, func(t *testing.T) {
 				want := tc.want
 				if !s.stripsAngle {
-					// sanitizeLogField оставляет '<' и '>' как есть.
+					// LogField оставляет '<' и '>' как есть.
 					want = tc.in
 					want = strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(want)
 					want = strings.Map(func(r rune) rune {
@@ -156,30 +156,30 @@ func TestSanitizersStripControlAndAngleBrackets(t *testing.T) {
 	}
 }
 
-// sanitizeLogField отдельно: он вырезает ВСЕ unicode-control (включая U+007F
+// LogField отдельно: он вырезает ВСЕ unicode-control (включая U+007F
 // и C1-диапазон), тогда как остальные санитайзеры фильтруют только ch < 0x20.
 func TestSanitizeLogFieldStripsAllControls(t *testing.T) {
-	if got := sanitizeLogField("ab"); got != "ab" {
-		t.Fatalf("sanitizeLogField DEL = %q, ожидалось %q", got, "ab")
+	if got := LogField("ab"); got != "ab" {
+		t.Fatalf("LogField DEL = %q, ожидалось %q", got, "ab")
 	}
-	if got := sanitizeLogField("ab"); got != "ab" {
-		t.Fatalf("sanitizeLogField NEL = %q, ожидалось %q", got, "ab")
+	if got := LogField("ab"); got != "ab" {
+		t.Fatalf("LogField NEL = %q, ожидалось %q", got, "ab")
 	}
-	// Угловые скобки sanitizeLogField НЕ вырезает — это лог, не HTML.
-	if got := sanitizeLogField("a<b>"); got != "a<b>" {
-		t.Fatalf("sanitizeLogField(%q) = %q", "a<b>", got)
+	// Угловые скобки LogField НЕ вырезает — это лог, не HTML.
+	if got := LogField("a<b>"); got != "a<b>" {
+		t.Fatalf("LogField(%q) = %q", "a<b>", got)
 	}
 }
 
 // TestSanitizeLogFieldKeepsAngleBrackets документирует расхождение из теста
-// выше: allSanitizers() включает sanitizeLogField, поэтому проверка скобок
+// выше: allSanitizers() включает LogField, поэтому проверка скобок
 // вынесена сюда, а общий тест использует только те кейсы, где поведение
 // совпадает. См. TestSanitizersStripControlAndAngleBrackets.
 func TestSanitizeLogFieldMaxLen(t *testing.T) {
 	in := strings.Repeat("я", 500)
-	got := sanitizeLogField(in)
-	if runeLen(got) != 200 {
-		t.Fatalf("runeLen = %d, ожидалось 200", runeLen(got))
+	got := LogField(in)
+	if RuneLen(got) != 200 {
+		t.Fatalf("RuneLen = %d, ожидалось 200", RuneLen(got))
 	}
 	if !utf8.ValidString(got) {
 		t.Fatal("результат не является валидным UTF-8")
@@ -212,7 +212,7 @@ func TestSanitizersTruncateByRunes(t *testing.T) {
 				if !utf8.ValidString(got) {
 					t.Fatalf("результат не валидный UTF-8: %q", got)
 				}
-				if n := runeLen(got); n != s.maxLen {
+				if n := RuneLen(got); n != s.maxLen {
 					t.Fatalf("%s: длина в рунах = %d, ожидалось %d", s.name, n, s.maxLen)
 				}
 				// Многобайтовый символ не должен резаться посередине:
@@ -239,8 +239,8 @@ func TestSanitizersLengthIsRunesNotBytes(t *testing.T) {
 		t.Run(s.name, func(t *testing.T) {
 			in := strings.Repeat("😀", s.maxLen)
 			if got := s.fn(in); got != in {
-				t.Fatalf("%s: строка из %d эмодзи обрезана: runeLen = %d",
-					s.name, s.maxLen, runeLen(got))
+				t.Fatalf("%s: строка из %d эмодзи обрезана: RuneLen = %d",
+					s.name, s.maxLen, RuneLen(got))
 			}
 		})
 	}
@@ -263,11 +263,11 @@ func TestSanitizerLimitConstants(t *testing.T) {
 // TestSanitizersTruncationCountsOnlyKeptRunes: запрещённые символы не
 // «съедают» бюджет длины — счётчик увеличивается только на сохранённых рунах.
 func TestSanitizersTruncationCountsOnlyKeptRunes(t *testing.T) {
-	s := sanitizer{"sanitizeName", sanitizeName, NameMaxLen, true}
+	s := sanitizer{"Name", Name, NameMaxLen, true}
 	in := strings.Repeat("<a>", NameMaxLen*2)
 	got := s.fn(in)
-	if runeLen(got) != NameMaxLen {
-		t.Fatalf("runeLen = %d, ожидалось %d (%q)", runeLen(got), NameMaxLen, got)
+	if RuneLen(got) != NameMaxLen {
+		t.Fatalf("RuneLen = %d, ожидалось %d (%q)", RuneLen(got), NameMaxLen, got)
 	}
 	if got != strings.Repeat("a", NameMaxLen) {
 		t.Fatalf("получено %q", got)
@@ -315,7 +315,7 @@ func TestSanitizersIdempotent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// runeLen
+// RuneLen
 // ---------------------------------------------------------------------------
 
 func TestRuneLen(t *testing.T) {
@@ -335,22 +335,22 @@ func TestRuneLen(t *testing.T) {
 		{" \t\n", 3},
 	}
 	for _, tc := range tests {
-		if got := runeLen(tc.in); got != tc.want {
-			t.Fatalf("runeLen(%q) = %d, ожидалось %d", tc.in, got, tc.want)
+		if got := RuneLen(tc.in); got != tc.want {
+			t.Fatalf("RuneLen(%q) = %d, ожидалось %d", tc.in, got, tc.want)
 		}
 	}
 
-	// runeLen должен совпадать с utf8.RuneCountInString на валидном UTF-8.
+	// RuneLen должен совпадать с utf8.RuneCountInString на валидном UTF-8.
 	for _, s := range []string{"", "hello", "привет мир", "😀😀😀", "漢字テスト", "a b"} {
-		if got, want := runeLen(s), utf8.RuneCountInString(s); got != want {
-			t.Fatalf("runeLen(%q) = %d, utf8.RuneCountInString = %d", s, got, want)
+		if got, want := RuneLen(s), utf8.RuneCountInString(s); got != want {
+			t.Fatalf("RuneLen(%q) = %d, utf8.RuneCountInString = %d", s, got, want)
 		}
 	}
 
 	// Битый UTF-8: range по строке выдаёт по одной RuneError на невалидный байт,
 	// что совпадает с поведением utf8.RuneCountInString.
 	broken := string([]byte{0xff, 0xfe, 'a'})
-	if got, want := runeLen(broken), utf8.RuneCountInString(broken); got != want {
-		t.Fatalf("runeLen на битом UTF-8 = %d, ожидалось %d", got, want)
+	if got, want := RuneLen(broken), utf8.RuneCountInString(broken); got != want {
+		t.Fatalf("RuneLen на битом UTF-8 = %d, ожидалось %d", got, want)
 	}
 }

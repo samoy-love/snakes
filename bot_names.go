@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"snakes/internal/sanitize"
 )
 
 var botNickAdjRu = []string{
@@ -241,7 +243,7 @@ func botNameStartKey(nm string) string {
 				continue
 			}
 			if strings.HasPrefix(s, w) {
-				if runeLen(w) > runeLen(best) {
+				if sanitize.RuneLen(w) > sanitize.RuneLen(best) {
 					best = w
 				}
 			}
@@ -354,19 +356,19 @@ func pickUniqueBotName(rng *rand.Rand, pools botNamePools, used map[string]struc
 		}
 
 		raw := assemble(adj, w1, w2, suf, digits, dec, decPrefix)
-		if runeLen(raw) > NameMaxLen {
+		if sanitize.RuneLen(raw) > sanitize.NameMaxLen {
 			raw = assemble(adj, w1, w2, suf, digits, "", decPrefix)
 		}
-		if runeLen(raw) > NameMaxLen {
+		if sanitize.RuneLen(raw) > sanitize.NameMaxLen {
 			raw = assemble(adj, w1, w2, "", digits, "", decPrefix)
 		}
-		if runeLen(raw) > NameMaxLen {
+		if sanitize.RuneLen(raw) > sanitize.NameMaxLen {
 			raw = assemble(adj, w1, "", "", digits, "", decPrefix)
 		}
-		if runeLen(raw) > NameMaxLen {
+		if sanitize.RuneLen(raw) > sanitize.NameMaxLen {
 			raw = assemble("", w1, "", "", digits, "", decPrefix)
 		}
-		if runeLen(raw) > NameMaxLen {
+		if sanitize.RuneLen(raw) > sanitize.NameMaxLen {
 			if len(digits) == 3 {
 				digits = fmt.Sprintf("%d", rng.Intn(90)+10)
 			} else if len(digits) == 2 {
@@ -376,15 +378,15 @@ func pickUniqueBotName(rng *rand.Rand, pools botNamePools, used map[string]struc
 			}
 			raw = assemble("", w1, "", "", digits, "", decPrefix)
 		}
-		if runeLen(raw) > NameMaxLen {
+		if sanitize.RuneLen(raw) > sanitize.NameMaxLen {
 			continue
 		}
 
-		nm := sanitizeName(raw)
+		nm := sanitize.Name(raw)
 		if nm == "" {
 			continue
 		}
-		if runeLen(nm) > NameMaxLen {
+		if sanitize.RuneLen(nm) > sanitize.NameMaxLen {
 			continue
 		}
 		if _, ok := used[nm]; ok {
@@ -402,9 +404,9 @@ func pickUniqueBotName(rng *rand.Rand, pools botNamePools, used map[string]struc
 		return nm
 	}
 
-	nm := sanitizeName(fmt.Sprintf("%s%d", pools.fallback, fallbackN))
+	nm := sanitize.Name(fmt.Sprintf("%s%d", pools.fallback, fallbackN))
 	if nm == "" {
-		return sanitizeName(fmt.Sprintf("%s%d", pools.fallback2, fallbackN))
+		return sanitize.Name(fmt.Sprintf("%s%d", pools.fallback2, fallbackN))
 	}
 	return nm
 }
