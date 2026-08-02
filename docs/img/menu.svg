@@ -35,8 +35,10 @@
     <rect x="704" y="452" width="176" height="56" rx="9"/>
   </g>
 
-  <text x="600" y="600" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif"
-        font-size="19" fill="#5b6675" letter-spacing="0.14em">СКРИНШОТ МЕНЮ · ПЛЕЙСХОЛДЕР</text>
-  <text x="600" y="629" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, monospace"
+  <text x="600" y="596" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif"
+        font-size="19" fill="#5b6675" letter-spacing="0.14em">PLACEHOLDER · MENU SCREENSHOT</text>
+  <text x="600" y="624" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif"
+        font-size="19" fill="#5b6675" letter-spacing="0.14em">ЗАГЛУШКА · СКРИНШОТ МЕНЮ</text>
+  <text x="600" y="650" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, monospace"
         font-size="14" fill="#3f4854">go run . → localhost:3000</text>
 </svg>
