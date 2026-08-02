@@ -46,6 +46,20 @@ import (
 // детерминирован, и одна траектория ничего не доказывает.
 var scenarioSeeds = []int64{1, 7, 42, 1337}
 
+// skipLongScenario снимает сценарий с прогона под -short.
+//
+// Сценарии — детерминированные симуляции на десятки тысяч тиков, и все они
+// однопоточные: ни горутин, ни каналов, ни sync внутри нет. Детектору гонок
+// здесь нечего искать, зато он замедляет прогон настолько, что пакет
+// перестаёт укладываться в таймаут. Поэтому CI гоняет их отдельным шагом
+// без -race, а прогон с детектором идёт с -short.
+func skipLongScenario(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("длинная симуляция: гоняется отдельным шагом без -race")
+	}
+}
+
 // newBotScenarioRoom собирает комнату с полным штатом ботов и без клиентов.
 // humanCount выставляется ПОСЛЕ расстановки ботов: r.step() досрочно выходит
 // из пустой комнаты (G11), а состав популяции пересчитывается только на
@@ -91,6 +105,7 @@ func sortedNums(r *Room) []uint16 {
 //     isOpposite-барьеров (stepPlayer, applyMove, botPickDirOutside) поднимает
 //     долю на порядки, а перебалансировка весов её не двигает вовсе.
 func TestBotScenarioMovementSafety(t *testing.T) {
+	skipLongScenario(t)
 	type track struct {
 		x, y   int
 		dx, dy int
@@ -198,6 +213,7 @@ func abs(v int) int {
 // равен dir: тогда единственный источник смены направления — сама аварийная
 // ветка, и её результат обязан не быть противоположен входному направлению.
 func TestBotEmergencyTurnNeverReverses(t *testing.T) {
+	skipLongScenario(t)
 	for _, seed := range scenarioSeeds {
 		r := newRulesRoom(t, seed)
 		r.tick = 1000
@@ -327,6 +343,7 @@ func TestBotEmergencyTurnNeverReverses(t *testing.T) {
 //   - незачищенное состояние мёртвого бота: у трупа обязаны быть пустые
 //     trail и owned, иначе его территория остаётся «призраком».
 func TestBotScenarioTrailIntegrity(t *testing.T) {
+	skipLongScenario(t)
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -401,6 +418,7 @@ func TestBotScenarioTrailIntegrity(t *testing.T) {
 //   - поломку обратного индекса gridPos, на котором держится O(1) удаление
 //     клетки: рассинхрон там тихо теряет клетки при следующем захвате.
 func TestBotScenarioGridAccounting(t *testing.T) {
+	skipLongScenario(t)
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -477,6 +495,7 @@ func huntCensus(r *Room) map[uint16]int {
 //     сумма забронированных слотов не может превысить число ботов и что в
 //     huntersOn нет записей на несуществующих игроков.
 func TestBotScenarioHunterCapNeverExceeded(t *testing.T) {
+	skipLongScenario(t)
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -530,6 +549,7 @@ func TestBotScenarioHunterCapNeverExceeded(t *testing.T) {
 // Сверка на каждом тике длинного прогона, в котором гарантированно есть
 // смерти и респавны.
 func TestBotScenarioHunterCensusMatchesState(t *testing.T) {
+	skipLongScenario(t)
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -577,6 +597,7 @@ func TestBotScenarioHunterCensusMatchesState(t *testing.T) {
 // Ловит: снятие проверки потолка в canHunt и потерю брони/возврата слота в
 // enterHunt/releaseHunt. Без потолка на жертву сваливается вся комната.
 func TestBotHuntCapGate(t *testing.T) {
+	skipLongScenario(t)
 	for _, victimIsBot := range []bool{true, false} {
 		r := newRulesRoom(t, 20240)
 		victim := &Player{num: 1, alive: true, bot: victimIsBot, x: 100, y: 70, aiCoolCell: -1}
@@ -648,6 +669,7 @@ func TestBotHuntCapGate(t *testing.T) {
 //     На эталоне каждый бот за 900 тиков видит 600+ разных клеток, порог 120
 //     недостижим ни для какого цикла длиной 6.
 func TestBotScenarioBotsStayAliveAndProductive(t *testing.T) {
+	skipLongScenario(t)
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -710,6 +732,7 @@ func TestBotScenarioBotsStayAliveAndProductive(t *testing.T) {
 //     территорию и след, иначе на карте остаются клетки несуществующего
 //     игрока, а вместе с ними и забронированный слот охоты на него.
 func TestBotScenarioPopulationFollowsHumans(t *testing.T) {
+	skipLongScenario(t)
 	for _, seed := range scenarioSeeds[:2] {
 		r := newBotScenarioRoom(t, seed)
 
@@ -819,6 +842,7 @@ func TestBotScenarioPopulationFollowsHumans(t *testing.T) {
 //     ничего не роняют — они просто стирают разницу между лёгким и тяжёлым
 //     ботом, и заметить это без теста нельзя.
 func TestBotScenarioRoomCompositionAndTierParams(t *testing.T) {
+	skipLongScenario(t)
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
@@ -893,6 +917,7 @@ func TestBotScenarioRoomCompositionAndTierParams(t *testing.T) {
 // клетки на петлю против 22-24 у Агрессора; требуется превосходство хотя бы
 // на 15%, что переживает любую разумную перебалансировку.
 func TestBotScenarioFarmerLoopsLongerThanAggressor(t *testing.T) {
+	skipLongScenario(t)
 	sum := make([]int, ArchCount)
 	cnt := make([]int, ArchCount)
 
@@ -941,6 +966,7 @@ func TestBotScenarioFarmerLoopsLongerThanAggressor(t *testing.T) {
 // охоты, а счёт обязан сойтись со свежими 3x3 спавнами. Утечка слота охоты
 // здесь особенно неприятна: она переживает весь следующий матч.
 func TestBotScenarioMatchResetClearsBotState(t *testing.T) {
+	skipLongScenario(t)
 	for _, seed := range scenarioSeeds[:2] {
 		r := newBotScenarioRoom(t, seed)
 		// Короткий матч вместо MatchDurationTicks: тест не должен быть медленным.
