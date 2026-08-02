@@ -537,6 +537,22 @@ func (r *Room) capture(playerNum uint16) {
 	}
 	outside = r.floodFillOutside(blocked, outside, q)
 
+	// The owned-cell snapshot MUST be taken before the fill below: that loop
+	// already hands the enclosed interior to the player, so a snapshot taken
+	// after it made `delta` equal the trail length instead of the captured
+	// area. Everything downstream (the "+N" popup, capturePoints and the Style
+	// payout) is specified in area, so the whole capture reward was being
+	// computed from the perimeter — a 12x12 loop (area 144, perimeter 44) paid
+	// capturePoints(44)=5 instead of capturePoints(144)=14. Because points then
+	// grew as L^0.75 against a cost of L ticks, income per tick FELL as loops
+	// got bigger, which is exactly the nibbling incentive CaptureMinCells was
+	// added to kill.
+	p := r.players[playerNum]
+	ownedBefore := 0
+	if p != nil {
+		ownedBefore = len(p.owned)
+	}
+
 	for i := 0; i < N; i++ {
 		if blocked[i] == 0 && outside[i] == 0 {
 			r.setGrid(i, playerNum)
@@ -544,9 +560,7 @@ func (r *Room) capture(playerNum uint16) {
 		}
 	}
 
-	p := r.players[playerNum]
 	if p != nil {
-		ownedBefore := len(p.owned)
 		trailLen := len(p.trail)
 		for _, i := range p.trail {
 			r.setGrid(i, playerNum)
