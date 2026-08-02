@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"snakes/internal/profiles"
 )
 
 // CosmeticsMaxID is the highest cosmetic id; the inventory mask is a uint8, so
@@ -206,7 +208,7 @@ func dailyGoalFor(slot uint8, t uint8) uint16 {
 
 // dailyRollType picks a quest type for a slot from the profile id and the day.
 // It has to be deterministic: the quests sent at join are rolled on a transient
-// profile (profileForKey), and the stored profile created later on the first
+// profile (profiles.ForKey), and the stored profile created later on the first
 // real grant must come up with exactly the same set, otherwise the client shows
 // quests that nothing is counting towards.
 func dailyRollType(pid string, day int64, slot uint8) uint8 {
@@ -225,11 +227,11 @@ func dailyRollType(pid string, day int64, slot uint8) uint8 {
 	return uint8(1 + h%4)
 }
 
-func ensureProfileDailyLocked(p *Profile, pid string) {
+func ensureProfileDailyLocked(p *profiles.Profile, pid string) {
 	if p == nil {
 		return
 	}
-	today := dayStampNow()
+	today := profiles.DayStampNow()
 	if p.Day != today {
 		p.Day = today
 		p.DailyType1 = 0
@@ -266,8 +268,8 @@ func ensureProfileDailyLocked(p *Profile, pid string) {
 }
 
 // dailyStreakMultLocked returns the daily reward multiplier: 1 + 0.25*(streak-1),
-// capped at x2. Caller holds profilesMu.
-func dailyStreakMultLocked(pr *Profile) float32 {
+// capped at x2. Caller holds profiles.Mu.
+func dailyStreakMultLocked(pr *profiles.Profile) float32 {
 	if pr == nil || pr.StreakDays <= 1 {
 		return 1.0
 	}
@@ -282,7 +284,7 @@ func (r *Room) sendDailyStateToPlayer(p *Player) {
 	if p == nil || p.bot {
 		return
 	}
-	pr := profileForKey(p.profileKey)
+	pr := profiles.ForKey(p.profileKey)
 	if pr == nil {
 		return
 	}
@@ -292,7 +294,7 @@ func (r *Room) sendDailyStateToPlayer(p *Player) {
 		goal uint16
 		prog uint16
 	}
-	profilesMu.Lock()
+	profiles.Mu.Lock()
 	ensureProfileDailyLocked(pr, p.profileKey)
 	slots := [3]slotState{
 		{1, pr.DailyType1, pr.DailyGoal1, pr.DailyProg1},
@@ -301,10 +303,10 @@ func (r *Room) sendDailyStateToPlayer(p *Player) {
 	}
 	// pr may be a transient profile (nothing earned yet): rolling its quests
 	// changes nothing on disk, so do not wake the autosave for it.
-	stored := profiles[p.profileKey] != nil
-	profilesMu.Unlock()
+	stored := profiles.StoredLocked(p.profileKey) != nil
+	profiles.Mu.Unlock()
 	if stored {
-		markProfilesDirty()
+		profiles.MarkDirty()
 	}
 
 	for _, s := range slots {
@@ -314,9 +316,9 @@ func (r *Room) sendDailyStateToPlayer(p *Player) {
 
 // checkAchievementsLocked unlocks every achievement whose profile counter has
 // reached its threshold and returns how many were newly unlocked. The caller
-// must pay out the rewards AFTER releasing profilesMu (addStyle takes it).
-// Caller holds profilesMu.
-func (r *Room) checkAchievementsLocked(p *Player, pr *Profile) int {
+// must pay out the rewards AFTER releasing profiles.Mu (addStyle takes it).
+// Caller holds profiles.Mu.
+func (r *Room) checkAchievementsLocked(p *Player, pr *profiles.Profile) int {
 	if p == nil || pr == nil {
 		return 0
 	}
@@ -347,8 +349,8 @@ type achvProgressEntry struct {
 
 // achvProgressLocked snapshots the progress of every achievement, unlocked
 // ones included: the client draws a bar per title and had no numbers at all for
-// the rows it could not fill from achvMask. Caller holds profilesMu.
-func achvProgressLocked(pr *Profile) []achvProgressEntry {
+// the rows it could not fill from achvMask. Caller holds profiles.Mu.
+func achvProgressLocked(pr *profiles.Profile) []achvProgressEntry {
 	out := make([]achvProgressEntry, 0, len(achvRules))
 	if pr == nil {
 		return out
@@ -368,7 +370,7 @@ func achvProgressLocked(pr *Profile) []achvProgressEntry {
 }
 
 // grantAchievementRewards pays out unlocks found by checkAchievementsLocked.
-// Must be called without profilesMu held.
+// Must be called without profiles.Mu held.
 func (r *Room) grantAchievementRewards(p *Player, count int) {
 	for i := 0; i < count; i++ {
 		r.addStyle(p, StyleAchvReward, StyleAchievement)
@@ -376,7 +378,7 @@ func (r *Room) grantAchievementRewards(p *Player, count int) {
 }
 
 // grantDailyRewards pays out completed daily slots, scaled by the login streak.
-// Must be called without profilesMu held. dailyRewardDepth keeps the payout
+// Must be called without profiles.Mu held. dailyRewardDepth keeps the payout
 // from feeding the "earn Style" daily back into itself (see addStyle).
 func (r *Room) grantDailyRewards(p *Player, count int) {
 	if p == nil || count <= 0 {
@@ -384,10 +386,10 @@ func (r *Room) grantDailyRewards(p *Player, count int) {
 	}
 	mult := float32(1.0)
 	if !p.bot {
-		if pr := profileForKey(p.profileKey); pr != nil {
-			profilesMu.Lock()
+		if pr := profiles.ForKey(p.profileKey); pr != nil {
+			profiles.Mu.Lock()
 			mult = dailyStreakMultLocked(pr)
-			profilesMu.Unlock()
+			profiles.Mu.Unlock()
 		}
 	}
 	reward := uint16(float32(StyleDailyReward)*mult + 0.5)
@@ -408,21 +410,21 @@ func (r *Room) grantFirstWinBonus(p *Player) {
 	if p == nil || p.bot {
 		return
 	}
-	pr := profileForKeyCreate(p.profileKey)
+	pr := profiles.ForKeyCreate(p.profileKey)
 	if pr == nil {
 		return
 	}
-	today := dayStampNow()
-	profilesMu.Lock()
+	today := profiles.DayStampNow()
+	profiles.Mu.Lock()
 	eligible := pr.FirstWinDay != today
 	if eligible {
 		pr.FirstWinDay = today
 	}
-	profilesMu.Unlock()
+	profiles.Mu.Unlock()
 	if !eligible {
 		return
 	}
-	markProfilesDirty()
+	profiles.MarkDirty()
 	r.addStyle(p, StyleFirstWinBonus, StyleWin)
 }
 
@@ -430,19 +432,19 @@ func (r *Room) addDailyProgress(p *Player, kind uint8, inc uint16) {
 	if p == nil || p.bot || inc == 0 {
 		return
 	}
-	pr := profileForKeyCreate(p.profileKey)
+	pr := profiles.ForKeyCreate(p.profileKey)
 	if pr == nil {
 		return
 	}
-	profilesMu.Lock()
+	profiles.Mu.Lock()
 	ensureProfileDailyLocked(pr, p.profileKey)
 	rewardCount := r.addDailyProgressLocked(p, pr, kind, inc)
-	profilesMu.Unlock()
-	markProfilesDirty()
+	profiles.Mu.Unlock()
+	profiles.MarkDirty()
 	r.grantDailyRewards(p, rewardCount)
 }
 
-func (r *Room) addDailyProgressLocked(p *Player, pr *Profile, kind uint8, inc uint16) int {
+func (r *Room) addDailyProgressLocked(p *Player, pr *profiles.Profile, kind uint8, inc uint16) int {
 	if p == nil || pr == nil || inc == 0 {
 		return 0
 	}
@@ -571,19 +573,6 @@ const (
 	// StyleSurviveReward: paid to every human alive at the final tick.
 	StyleSurviveReward = 5
 
-	// E13: soft daily income ceiling; everything past it pays 40%.
-	// Raised 600 -> 800 after the "terr" and
-	// "death" categories added 4750 Style to the full collection (14865 total):
-	// at 600 the average player needed ~24 days to close the shop instead of
-	// the intended 2-3 weeks. Reclaim itself does not inflate income — the
-	// reclaim path bypasses the capture Style award, which is capped anyway.
-	// G20/G23 raised the capture budget 25 -> 70 and extended placement pay to
-	// 8th place plus a 5 survival consolation, which adds ~40 Style to a good
-	// match. The soft cap absorbs most of it: a measured average session still
-	// lands near 1000 Style/day, i.e. ~15 days for the 14865 full collection.
-	StyleDaySoftCap    = 800
-	StyleOverCapNumer  = 2
-	StyleOverCapDenom  = 5
 	MaxContractsMatch  = 4 // E5
 	StyleAddMaxDepth   = 4 // E12: hard bound on addStyle re-entrancy
 	SpawnGraceTicks    = 15
@@ -629,7 +618,7 @@ const (
 	DailyStyle   = 4
 )
 
-// Achievement codes. They index bits of Profile.AchvMask (uint32), so the
+// Achievement codes. They index bits of profiles.Profile.AchvMask (uint32), so the
 // highest usable code is 31. Codes 1-5 are the original set and must not move.
 const (
 	AchvKills10    = 1
@@ -660,34 +649,34 @@ const (
 type achvRule struct {
 	code uint8
 	need uint32
-	get  func(pr *Profile) uint32
+	get  func(pr *profiles.Profile) uint32
 }
 
 var achvRules = []achvRule{
-	{AchvKills10, 10, func(pr *Profile) uint32 { return pr.TotalKills }},
-	{AchvKills100, 100, func(pr *Profile) uint32 { return pr.TotalKills }},
-	{AchvKills1000, 1000, func(pr *Profile) uint32 { return pr.TotalKills }},
-	{AchvContracts3, 3, func(pr *Profile) uint32 { return pr.TotalContracts }},
-	{AchvContracts25, 25, func(pr *Profile) uint32 { return pr.TotalContracts }},
-	{AchvContracts100, 100, func(pr *Profile) uint32 { return pr.TotalContracts }},
-	{AchvCapture1k, 1000, func(pr *Profile) uint32 { return pr.TotalCapture }},
-	{AchvCapture10k, 10000, func(pr *Profile) uint32 { return pr.TotalCapture }},
-	{AchvCapture100k, 100000, func(pr *Profile) uint32 { return pr.TotalCapture }},
-	{AchvBounty3, 3, func(pr *Profile) uint32 { return pr.TotalBounty }},
-	{AchvBounty15, 15, func(pr *Profile) uint32 { return pr.TotalBounty }},
-	{AchvRevenge3, 3, func(pr *Profile) uint32 { return pr.TotalRevenge }},
-	{AchvRevenge15, 15, func(pr *Profile) uint32 { return pr.TotalRevenge }},
-	{AchvStyle200, 200, func(pr *Profile) uint32 { return pr.TotalStyleGained }},
-	{AchvStyle2000, 2000, func(pr *Profile) uint32 { return pr.TotalStyleGained }},
-	{AchvStyle10000, 10000, func(pr *Profile) uint32 { return pr.TotalStyleGained }},
-	{AchvPickups25, 25, func(pr *Profile) uint32 { return pr.TotalPickups }},
-	{AchvPickups250, 250, func(pr *Profile) uint32 { return pr.TotalPickups }},
-	{AchvStreak3, 3, func(pr *Profile) uint32 { return pr.StreakDays }},
-	{AchvStreak7, 7, func(pr *Profile) uint32 { return pr.StreakDays }},
-	{AchvStreak30, 30, func(pr *Profile) uint32 { return pr.StreakDays }},
+	{AchvKills10, 10, func(pr *profiles.Profile) uint32 { return pr.TotalKills }},
+	{AchvKills100, 100, func(pr *profiles.Profile) uint32 { return pr.TotalKills }},
+	{AchvKills1000, 1000, func(pr *profiles.Profile) uint32 { return pr.TotalKills }},
+	{AchvContracts3, 3, func(pr *profiles.Profile) uint32 { return pr.TotalContracts }},
+	{AchvContracts25, 25, func(pr *profiles.Profile) uint32 { return pr.TotalContracts }},
+	{AchvContracts100, 100, func(pr *profiles.Profile) uint32 { return pr.TotalContracts }},
+	{AchvCapture1k, 1000, func(pr *profiles.Profile) uint32 { return pr.TotalCapture }},
+	{AchvCapture10k, 10000, func(pr *profiles.Profile) uint32 { return pr.TotalCapture }},
+	{AchvCapture100k, 100000, func(pr *profiles.Profile) uint32 { return pr.TotalCapture }},
+	{AchvBounty3, 3, func(pr *profiles.Profile) uint32 { return pr.TotalBounty }},
+	{AchvBounty15, 15, func(pr *profiles.Profile) uint32 { return pr.TotalBounty }},
+	{AchvRevenge3, 3, func(pr *profiles.Profile) uint32 { return pr.TotalRevenge }},
+	{AchvRevenge15, 15, func(pr *profiles.Profile) uint32 { return pr.TotalRevenge }},
+	{AchvStyle200, 200, func(pr *profiles.Profile) uint32 { return pr.TotalStyleGained }},
+	{AchvStyle2000, 2000, func(pr *profiles.Profile) uint32 { return pr.TotalStyleGained }},
+	{AchvStyle10000, 10000, func(pr *profiles.Profile) uint32 { return pr.TotalStyleGained }},
+	{AchvPickups25, 25, func(pr *profiles.Profile) uint32 { return pr.TotalPickups }},
+	{AchvPickups250, 250, func(pr *profiles.Profile) uint32 { return pr.TotalPickups }},
+	{AchvStreak3, 3, func(pr *profiles.Profile) uint32 { return pr.StreakDays }},
+	{AchvStreak7, 7, func(pr *profiles.Profile) uint32 { return pr.StreakDays }},
+	{AchvStreak30, 30, func(pr *profiles.Profile) uint32 { return pr.StreakDays }},
 }
 
-func ensureProfileCosmeticsLocked(pr *Profile) {
+func ensureProfileCosmeticsLocked(pr *profiles.Profile) {
 	if pr == nil {
 		return
 	}
@@ -758,8 +747,8 @@ func titlesPayload() []map[string]any {
 }
 
 // titleMaskLocked returns the bitmask of unlocked title ids. Bit 0 ("no title")
-// is always set. Caller holds profilesMu.
-func titleMaskLocked(pr *Profile) uint32 {
+// is always set. Caller holds profiles.Mu.
+func titleMaskLocked(pr *profiles.Profile) uint32 {
 	mask := uint32(1)
 	if pr == nil {
 		return mask
@@ -773,8 +762,8 @@ func titleMaskLocked(pr *Profile) uint32 {
 }
 
 // titleUnlockedLocked reports whether a title id may be equipped.
-// Caller holds profilesMu.
-func titleUnlockedLocked(pr *Profile, id uint8) bool {
+// Caller holds profiles.Mu.
+func titleUnlockedLocked(pr *profiles.Profile, id uint8) bool {
 	if id > TitleMaxID {
 		return false
 	}
@@ -788,12 +777,12 @@ func cosmeticsStatePayload(p *Player) map[string]any {
 	titleMask := uint32(1)
 	achvMask := uint32(0)
 	var achvProg []achvProgressEntry
-	if pr := profileForKey(p.profileKey); pr != nil {
-		profilesMu.Lock()
+	if pr := profiles.ForKey(p.profileKey); pr != nil {
+		profiles.Mu.Lock()
 		titleMask = titleMaskLocked(pr)
 		achvMask = pr.AchvMask
 		achvProg = achvProgressLocked(pr)
-		profilesMu.Unlock()
+		profiles.Mu.Unlock()
 	}
 	if achvProg == nil {
 		achvProg = []achvProgressEntry{}
@@ -870,7 +859,7 @@ func (r *Room) broadcastCosExtra(ctx context.Context) {
 	r.broadcastJSON(ctx, "cosExtra", payload)
 }
 
-func cosmeticsStatePayloadFromProfile(pr *Profile) map[string]any {
+func cosmeticsStatePayloadFromProfile(pr *profiles.Profile) map[string]any {
 	if pr == nil {
 		return map[string]any{}
 	}
@@ -1063,25 +1052,25 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 	// Player.style back into it, only apply atomic deltas and refresh the cache.
 	rewardCount := 0
 	achvCount := 0
-	var pr *Profile
+	var pr *profiles.Profile
 	if !p.bot {
-		pr = profileForKeyCreate(p.profileKey)
+		pr = profiles.ForKeyCreate(p.profileKey)
 	}
 	if pr != nil {
-		profilesMu.Lock()
+		profiles.Mu.Lock()
 		ensureProfileDailyLocked(pr, p.profileKey)
-		granted := styleIncomeGrantLocked(pr, p.profileKey, delta)
+		granted := profiles.StyleIncomeGrantLocked(pr, p.profileKey, delta)
 		if granted == 0 {
-			profilesMu.Unlock()
+			profiles.Mu.Unlock()
 			return
 		}
-		granted = styleDayIncomeGrantLocked(pr, granted)
+		granted = profiles.StyleDayIncomeGrantLocked(pr, granted)
 		if granted == 0 {
-			profilesMu.Unlock()
+			profiles.Mu.Unlock()
 			return
 		}
 		delta = granted
-		addProfileStyleLocked(pr, uint32(delta))
+		profiles.AddStyleLocked(pr, uint32(delta))
 		if pr.TotalStyleGained < ^uint32(0)-uint32(delta) {
 			pr.TotalStyleGained += uint32(delta)
 		} else {
@@ -1093,8 +1082,8 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 		achvCount = r.checkAchievementsLocked(p, pr)
 		pr.LastSeen = time.Now().Unix()
 		p.style = pr.StyleBalance
-		profilesMu.Unlock()
-		markProfilesDirty()
+		profiles.Mu.Unlock()
+		profiles.MarkDirty()
 	} else if p.style < ^uint32(0)-uint32(delta) {
 		p.style += uint32(delta)
 	} else {
@@ -1173,16 +1162,16 @@ func (r *Room) addContractProgress(p *Player, inc uint16) {
 		r.addStyle(p, StyleContractReward, StyleContract)
 		r.awardPoints(p.num, 16, PointsContract)
 		if !p.bot {
-			pr := profileForKeyCreate(p.profileKey)
+			pr := profiles.ForKeyCreate(p.profileKey)
 			if pr != nil {
-				profilesMu.Lock()
+				profiles.Mu.Lock()
 				ensureProfileDailyLocked(pr, p.profileKey)
 				if pr.TotalContracts < ^uint32(0) {
 					pr.TotalContracts++
 				}
 				achvCount := r.checkAchievementsLocked(p, pr)
-				profilesMu.Unlock()
-				markProfilesDirty()
+				profiles.Mu.Unlock()
+				profiles.MarkDirty()
 				r.grantAchievementRewards(p, achvCount)
 			}
 		}

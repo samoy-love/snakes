@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"nhooyr.io/websocket"
+
+	"snakes/internal/profiles"
 )
 
 func (c *Client) profileKey() string {
@@ -29,7 +31,7 @@ func (c *Client) closeWith(code websocket.StatusCode, reason string) {
 	if c.closed.Swap(true) {
 		return
 	}
-	log.Printf("ws_close ip=%q pid=%q code=%d reason=%q", c.ip, shortPID(c.pid), code, reason)
+	log.Printf("ws_close ip=%q pid=%q code=%d reason=%q", c.ip, profiles.ShortPID(c.pid), code, reason)
 	metrics.wsActive.Add(-1)
 	c.leaveRoom(context.Background())
 	close(c.sendCh)
@@ -306,17 +308,17 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 		cosFrame:        0,
 		profileKey:      c.profileKey(),
 	}
-	if pr := profileForKey(pl.profileKey); pr != nil {
-		profilesMu.Lock()
+	if pr := profiles.ForKey(pl.profileKey); pr != nil {
+		profiles.Mu.Lock()
 		ensureProfileCosmeticsLocked(pr)
 		pr.LastSeen = time.Now().Unix()
 		applyProfileCosmeticsToPlayerLocked(pl, pr)
 		// Only a stored profile has something to persist; a transient one is
 		// discarded with this call.
-		stored := profiles[pl.profileKey] != nil
-		profilesMu.Unlock()
+		stored := profiles.StoredLocked(pl.profileKey) != nil
+		profiles.Mu.Unlock()
 		if stored {
-			markProfilesDirty()
+			profiles.MarkDirty()
 		}
 	}
 

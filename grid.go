@@ -3,6 +3,8 @@
 // reclaim.
 package main
 
+import "snakes/internal/profiles"
+
 import "sync"
 
 // Скратч заливки: две карты размером с поле, которые capture берёт и
@@ -583,16 +585,16 @@ func (r *Room) capture(playerNum uint16) {
 			r.addDailyProgress(p, DailyCapture, uint16(trailLen))
 			// TotalCapture was declared but never fed; the capture achievements
 			// need it.
-			if pr := profileForKeyCreate(p.profileKey); pr != nil && trailLen > 0 {
-				profilesMu.Lock()
+			if pr := profiles.ForKeyCreate(p.profileKey); pr != nil && trailLen > 0 {
+				profiles.Mu.Lock()
 				if pr.TotalCapture < ^uint32(0)-uint32(trailLen) {
 					pr.TotalCapture += uint32(trailLen)
 				} else {
 					pr.TotalCapture = ^uint32(0)
 				}
 				achvCount := r.checkAchievementsLocked(p, pr)
-				profilesMu.Unlock()
-				markProfilesDirty()
+				profiles.Mu.Unlock()
+				profiles.MarkDirty()
 				r.grantAchievementRewards(p, achvCount)
 			}
 		}

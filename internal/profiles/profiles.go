@@ -1,4 +1,13 @@
-package main
+// Package profiles — постоянное хранилище прогресса игроков и подписанная
+// анонимная личность, по которой этот прогресс находится.
+//
+// Пакет ничего не знает ни про комнату, ни про игрока: он оперирует записью
+// Profile и ключом. Перекладывание профиля в игрока живёт на стороне игры
+// (profiles_player.go) — иначе хранилище тянуло бы за собой всю механику.
+//
+// Единственный на пакет мьютекс Mu защищает карту и любые изменения записей.
+// Порядок захвата всегда rm.mu -> profiles.Mu; обратный порядок — дедлок.
+package profiles
 
 import (
 	"crypto/hmac"
@@ -32,8 +41,8 @@ const (
 
 var profileSecret []byte
 
-// initProfileSecret loads PROFILE_SECRET or generates an ephemeral dev secret.
-func initProfileSecret() {
+// InitSecret loads PROFILE_SECRET or generates an ephemeral dev secret.
+func InitSecret() {
 	if s := strings.TrimSpace(os.Getenv("PROFILE_SECRET")); s != "" {
 		profileSecret = []byte(s)
 		return
@@ -79,8 +88,8 @@ func validProfilePID(pid string) bool {
 	return err == nil
 }
 
-// parseProfileToken verifies signature and age, returning the carried pid.
-func parseProfileToken(tok string) (string, bool) {
+// ParseToken verifies signature and age, returning the carried pid.
+func ParseToken(tok string) (string, bool) {
 	tok = strings.TrimSpace(tok)
 	if tok == "" || len(tok) > 512 {
 		return "", false
@@ -120,17 +129,17 @@ func parseProfileToken(tok string) (string, bool) {
 	return pid, true
 }
 
-// resolveProfileToken returns the pid to use plus a freshly minted token.
+// ResolveToken returns the pid to use plus a freshly minted token.
 // The token is always re-issued so that the client's expiry keeps sliding.
-func resolveProfileToken(tok string) (string, string) {
-	pid, ok := parseProfileToken(tok)
+func ResolveToken(tok string) (string, string) {
+	pid, ok := ParseToken(tok)
 	if !ok {
 		pid = newProfilePID()
 	}
 	return pid, issueProfileToken(pid)
 }
 
-func shortPID(pid string) string {
+func ShortPID(pid string) string {
 	if len(pid) > 8 {
 		return pid[:8]
 	}
@@ -141,8 +150,8 @@ func shortPID(pid string) string {
 // Balance helpers (profile is the single source of truth)
 // ---------------------------------------------------------------------------
 
-// addProfileStyleLocked applies a saturating delta. Caller holds profilesMu.
-func addProfileStyleLocked(pr *Profile, delta uint32) {
+// AddStyleLocked applies a saturating delta. Caller holds Mu.
+func AddStyleLocked(pr *Profile, delta uint32) {
 	if pr == nil || delta == 0 {
 		return
 	}
@@ -153,33 +162,9 @@ func addProfileStyleLocked(pr *Profile, delta uint32) {
 	}
 }
 
-// applyProfileCosmeticsToPlayerLocked refreshes the player's read-only render
-// cache from the profile. Caller holds profilesMu (and rm.mu when pl is live).
-func applyProfileCosmeticsToPlayerLocked(pl *Player, pr *Profile) {
-	if pl == nil || pr == nil {
-		return
-	}
-	pl.style = pr.StyleBalance
-	pl.cosInvCaptureFx = pr.CosInvCaptureFx
-	pl.cosInvHead = pr.CosInvHead
-	pl.cosInvSeg = pr.CosInvSeg
-	pl.cosInvNameplate = pr.CosInvNameplate
-	pl.cosInvFrame = pr.CosInvFrame
-	pl.cosCaptureFx = pr.CosEqCaptureFx
-	pl.cosHead = pr.CosEqHead
-	pl.cosSeg = pr.CosEqSeg
-	pl.cosNameplate = pr.CosEqNameplate
-	pl.cosFrame = pr.CosEqFrame
-	pl.cosInvTerr = pr.CosInvTerr
-	pl.cosInvDeath = pr.CosInvDeath
-	pl.cosTerr = pr.CosEqTerr
-	pl.cosDeath = pr.CosEqDeath
-	pl.titleID = pr.TitleID
-}
-
-// profileCosInvLocked returns a pointer to the inventory mask of a category,
-// or nil for an unknown category. Caller holds profilesMu.
-func profileCosInvLocked(pr *Profile, cat string) *uint8 {
+// CosInvLocked returns a pointer to the inventory mask of a category,
+// or nil for an unknown category. Caller holds Mu.
+func CosInvLocked(pr *Profile, cat string) *uint8 {
 	if pr == nil {
 		return nil
 	}
@@ -202,9 +187,9 @@ func profileCosInvLocked(pr *Profile, cat string) *uint8 {
 	return nil
 }
 
-// profileEquippedLocked returns the id currently equipped in a category, or 0
-// for an unknown category. Caller holds profilesMu.
-func profileEquippedLocked(pr *Profile, cat string) uint8 {
+// EquippedLocked returns the id currently equipped in a category, or 0
+// for an unknown category. Caller holds Mu.
+func EquippedLocked(pr *Profile, cat string) uint8 {
 	if pr == nil {
 		return 0
 	}
@@ -227,8 +212,8 @@ func profileEquippedLocked(pr *Profile, cat string) uint8 {
 	return 0
 }
 
-// profileSetEquippedLocked equips an item. Caller holds profilesMu.
-func profileSetEquippedLocked(pr *Profile, cat string, id uint8) {
+// SetEquippedLocked equips an item. Caller holds Mu.
+func SetEquippedLocked(pr *Profile, cat string, id uint8) {
 	if pr == nil {
 		return
 	}
@@ -256,9 +241,27 @@ func profileSetEquippedLocked(pr *Profile, cat string, id uint8) {
 
 const styleIncomePerMinute = 400
 
-// styleIncomeGrantLocked clamps how much Style a profile may earn per minute.
-// Returns the granted amount (0 means "drop it"). Caller holds profilesMu.
-func styleIncomeGrantLocked(pr *Profile, pid string, delta uint16) uint16 {
+// Потолки дневного дохода. Живут рядом с кодом, который их применяет: это
+// единственное место, где они что-то значат.
+//
+// E13: мягкий дневной потолок, всё сверх него оплачивается на 40%.
+// Поднят 600 -> 800 после того, как категории "terr" и "death" добавили 4750
+// Стиля к полной коллекции (14865 всего): на 600 среднему игроку требовалось
+// ~24 дня, чтобы закрыть магазин, вместо задуманных 2-3 недель. Реклейм доход
+// не разгоняет — он обходит награду за захват, а та и так ограничена.
+// G20/G23 подняли бюджет за захват 25 -> 70 и продлили выплату за место до 8-го
+// плюс 5 за выживание, это ещё ~40 Стиля за хороший матч. Потолок съедает
+// большую часть: измеренная средняя сессия по-прежнему даёт около 1000
+// Стиля в день, то есть ~15 дней на полную коллекцию.
+const (
+	StyleDaySoftCap   = 800
+	StyleOverCapNumer = 2
+	StyleOverCapDenom = 5
+)
+
+// StyleIncomeGrantLocked clamps how much Style a profile may earn per minute.
+// Returns the granted amount (0 means "drop it"). Caller holds Mu.
+func StyleIncomeGrantLocked(pr *Profile, pid string, delta uint16) uint16 {
 	if pr == nil || delta == 0 {
 		return delta
 	}
@@ -275,7 +278,7 @@ func styleIncomeGrantLocked(pr *Profile, pid string, delta uint16) uint16 {
 	if uint32(delta) > room {
 		if !pr.styleWindowLogged {
 			pr.styleWindowLogged = true
-			log.Printf("style_rate_anomaly pid=%q gained=%d", shortPID(pid), pr.styleWindowGained+uint32(delta))
+			log.Printf("style_rate_anomaly pid=%q gained=%d", ShortPID(pid), pr.styleWindowGained+uint32(delta))
 		}
 		delta = uint16(room)
 	}
@@ -283,14 +286,14 @@ func styleIncomeGrantLocked(pr *Profile, pid string, delta uint16) uint16 {
 	return delta
 }
 
-// styleDayIncomeGrantLocked applies the soft daily ceiling: the first
+// StyleDayIncomeGrantLocked applies the soft daily ceiling: the first
 // StyleDaySoftCap Style of a day pay in full, everything past it pays 40%.
-// Returns the granted amount. Caller holds profilesMu.
-func styleDayIncomeGrantLocked(pr *Profile, delta uint16) uint16 {
+// Returns the granted amount. Caller holds Mu.
+func StyleDayIncomeGrantLocked(pr *Profile, delta uint16) uint16 {
 	if pr == nil || delta == 0 {
 		return delta
 	}
-	today := dayStampNow()
+	today := DayStampNow()
 	if pr.DayIncomeDay != today {
 		pr.DayIncomeDay = today
 		pr.DayIncome = 0
@@ -338,15 +341,15 @@ const (
 	DefaultProfileEmptyTTLHours = 6
 
 	// DefaultMaxProfiles bounds the store. saveProfiles copies and marshals the
-	// whole map under profilesMu, and profilesMu is taken from under rm.mu on
+	// whole map under Mu, and Mu is taken from under rm.mu on
 	// the hot paths, so an unbounded store stalls every room at once. Override
 	// with MAX_PROFILES.
 	DefaultMaxProfiles = 50000
 )
 
 var (
-	profileEmptyTTL = loadProfileEmptyTTL()
-	maxProfiles     = loadMaxProfiles()
+	EmptyTTL    = loadProfileEmptyTTL()
+	MaxProfiles = loadMaxProfiles()
 )
 
 func loadProfileEmptyTTL() time.Duration {
@@ -370,7 +373,7 @@ func loadMaxProfiles() int {
 // profileHasProgressLocked reports whether a profile holds anything worth
 // keeping for 90 days: currency earned or held, a cosmetic bought past the free
 // default (bit 0), an achievement, a title or a real login streak.
-// Caller holds profilesMu.
+// Caller holds Mu.
 func profileHasProgressLocked(pr *Profile) bool {
 	if pr == nil {
 		return false
@@ -398,12 +401,12 @@ func profileHasProgressLocked(pr *Profile) bool {
 }
 
 // profileExpiredLocked applies the short TTL to empty profiles and the full one
-// to profiles with progress. Caller holds profilesMu.
+// to profiles with progress. Caller holds Mu.
 func profileExpiredLocked(pr *Profile, now time.Time) bool {
 	if pr == nil {
 		return true
 	}
-	ttl := profileEmptyTTL
+	ttl := EmptyTTL
 	if profileHasProgressLocked(pr) {
 		ttl = profileTTL
 	}
@@ -419,36 +422,36 @@ func profileExpiredLocked(pr *Profile, now time.Time) bool {
 // a Style grant and on a purchase, so an active player with an income at its
 // ceiling can go minutes without a touch and used to be evictable — measured,
 // an active profile with a balance of 500 was dropped and the next grant
-// created an empty one in its place. Guarded by profilesMu.
+// created an empty one in its place. Guarded by Mu.
 var liveProfilePIDs = make(map[string]int)
 
-// retainProfilePID marks a profile as held by a live connection.
-func retainProfilePID(pid string) {
+// RetainPID marks a profile as held by a live connection.
+func RetainPID(pid string) {
 	if pid == "" {
 		return
 	}
-	profilesMu.Lock()
+	Mu.Lock()
 	liveProfilePIDs[pid]++
-	profilesMu.Unlock()
+	Mu.Unlock()
 }
 
-// releaseProfilePID undoes retainProfilePID.
-func releaseProfilePID(pid string) {
+// ReleasePID undoes RetainPID.
+func ReleasePID(pid string) {
 	if pid == "" {
 		return
 	}
-	profilesMu.Lock()
+	Mu.Lock()
 	if n := liveProfilePIDs[pid]; n > 1 {
 		liveProfilePIDs[pid] = n - 1
 	} else {
 		delete(liveProfilePIDs, pid)
 	}
-	profilesMu.Unlock()
+	Mu.Unlock()
 }
 
 // evictSampleSize is how many entries one eviction pass looks at. A full sort
-// under profilesMu measured 0.60ms at 20k profiles (~1.5-2ms at 50k) and
-// profilesMu is taken from under rm.mu on hot paths, so every room in the
+// under Mu measured 0.60ms at 20k profiles (~1.5-2ms at 50k) and
+// Mu is taken from under rm.mu on hot paths, so every room in the
 // process stalls for that long. Sampling k entries and dropping the oldest of
 // them costs a fixed few microseconds and picks an almost-as-old victim.
 const evictSampleSize = 64
@@ -457,22 +460,22 @@ const evictSampleSize = 64
 // amortised over many admissions instead of running on every single one.
 const evictBatchSize = 16
 
-// evictProfilesLocked keeps the store under maxProfiles: expired entries go
+// evictProfilesLocked keeps the store under MaxProfiles: expired entries go
 // first, then the least recently seen of a bounded random sample. Profiles held
-// by a live connection are never candidates. Caller holds profilesMu.
+// by a live connection are never candidates. Caller holds Mu.
 func evictProfilesLocked(now time.Time) {
-	if len(profiles) < maxProfiles {
+	if len(store) < MaxProfiles {
 		return
 	}
-	for pid, pr := range profiles {
+	for pid, pr := range store {
 		if liveProfilePIDs[pid] > 0 {
 			continue
 		}
 		if profileExpiredLocked(pr, now) {
-			delete(profiles, pid)
+			delete(store, pid)
 		}
 	}
-	if len(profiles) < maxProfiles {
+	if len(store) < MaxProfiles {
 		return
 	}
 	type entry struct {
@@ -482,7 +485,7 @@ func evictProfilesLocked(now time.Time) {
 	// Go randomises map iteration order, so a truncated range is a random
 	// sample.
 	sample := make([]entry, 0, evictSampleSize)
-	for pid, pr := range profiles {
+	for pid, pr := range store {
 		if liveProfilePIDs[pid] > 0 {
 			continue
 		}
@@ -494,34 +497,34 @@ func evictProfilesLocked(now time.Time) {
 	if len(sample) == 0 {
 		// Everything left is live. Refusing to evict is the right call: the
 		// alternative is deleting the progress of someone who is playing.
-		log.Printf("profiles_evict_all_live count=%d", len(profiles))
+		log.Printf("profiles_evict_all_live count=%d", len(store))
 		return
 	}
 	sort.Slice(sample, func(i, j int) bool { return sample[i].seen < sample[j].seen })
 	// Retire a small batch so the sampling cost is amortised, but never more
 	// than the store can spare: a tiny store (tests, tiny MAX_PROFILES) drops
 	// exactly one entry.
-	batch := maxProfiles / 64
+	batch := MaxProfiles / 64
 	if batch < 1 {
 		batch = 1
 	}
 	if batch > evictBatchSize {
 		batch = evictBatchSize
 	}
-	drop := len(profiles) - maxProfiles + batch
+	drop := len(store) - MaxProfiles + batch
 	for i := 0; i < drop && i < len(sample); i++ {
-		if pr := profiles[sample[i].pid]; pr != nil && profileHasProgressLocked(pr) {
+		if pr := store[sample[i].pid]; pr != nil && profileHasProgressLocked(pr) {
 			// Losing currency must never be silent.
 			log.Printf("profiles_evict_with_progress pid=%q style=%d total=%d last_seen=%d",
-				shortPID(sample[i].pid), pr.StyleBalance, pr.TotalStyleGained, pr.LastSeen)
+				ShortPID(sample[i].pid), pr.StyleBalance, pr.TotalStyleGained, pr.LastSeen)
 		}
-		delete(profiles, sample[i].pid)
+		delete(store, sample[i].pid)
 	}
 }
 
 var profilesDirty atomic.Bool
 
-func markProfilesDirty() { profilesDirty.Store(true) }
+func MarkDirty() { profilesDirty.Store(true) }
 
 func profilesPath() string {
 	if p := strings.TrimSpace(os.Getenv("PROFILES_PATH")); p != "" {
@@ -536,20 +539,20 @@ type profilesFileFormat struct {
 	Profiles map[string]*Profile `json:"profiles"`
 }
 
-// touchProfileLastSeen bumps LastSeen for an existing profile only; it never
+// TouchLastSeen bumps LastSeen for an existing profile only; it never
 // creates one, so drive-by connections do not grow the store.
-func touchProfileLastSeen(pid string) {
+func TouchLastSeen(pid string) {
 	if pid == "" {
 		return
 	}
-	profilesMu.Lock()
-	pr := profiles[pid]
+	Mu.Lock()
+	pr := store[pid]
 	if pr != nil {
 		pr.LastSeen = time.Now().Unix()
 	}
-	profilesMu.Unlock()
+	Mu.Unlock()
 	if pr != nil {
-		markProfilesDirty()
+		MarkDirty()
 	}
 }
 
@@ -583,9 +586,15 @@ func enterProfilesReadOnly(path, reason string, err error) {
 // profilesSavingDisabled reports whether persistence is currently refused.
 func profilesSavingDisabled() bool { return profilesReadOnly.Load() }
 
-// loadProfiles reads the store from disk. A missing file is not an error;
+// Load reads the store from disk. A missing file is not an error;
 // anything else latches read-only mode (G6).
-func loadProfiles() {
+//
+// normalize приводит только что загруженную запись в порядок: выдаёт бесплатные
+// предметы, чинит экипировку, которой профиль не владеет, снимает титул за
+// отобранную ачивку. Это правила игры, а не хранения, поэтому они приходят
+// колбэком, а не живут здесь — иначе хранилище потянуло бы за собой каталог
+// косметики и таблицу достижений. nil означает «грузить как есть».
+func Load(normalize func(*Profile)) {
 	path := profilesPath()
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -613,7 +622,7 @@ func loadProfiles() {
 	}
 	now := time.Now()
 	loaded, evicted := 0, 0
-	profilesMu.Lock()
+	Mu.Lock()
 	for pid, pr := range f.Profiles {
 		if pr == nil || !validProfilePID(pid) {
 			continue
@@ -625,14 +634,16 @@ func loadProfiles() {
 			evicted++
 			continue
 		}
-		ensureProfileCosmeticsLocked(pr)
-		profiles[pid] = pr
+		if normalize != nil {
+			normalize(pr)
+		}
+		store[pid] = pr
 		loaded++
 	}
 	// A file written before the cap existed may be larger than it.
 	evictProfilesLocked(now)
-	loaded = len(profiles)
-	profilesMu.Unlock()
+	loaded = len(store)
+	Mu.Unlock()
 	log.Printf("profiles_loaded path=%q count=%d evicted=%d", path, loaded, evicted)
 }
 
@@ -652,19 +663,19 @@ func saveProfiles() error {
 	}
 
 	now := time.Now()
-	profilesMu.Lock()
-	for pid, pr := range profiles {
+	Mu.Lock()
+	for pid, pr := range store {
 		if pr == nil || profileExpiredLocked(pr, now) {
-			delete(profiles, pid)
+			delete(store, pid)
 		}
 	}
 	evictProfilesLocked(now)
-	snap := make(map[string]*Profile, len(profiles))
-	for pid, pr := range profiles {
+	snap := make(map[string]*Profile, len(store))
+	for pid, pr := range store {
 		cp := *pr
 		snap[pid] = &cp
 	}
-	profilesMu.Unlock()
+	Mu.Unlock()
 
 	b, err := json.Marshal(profilesFileFormat{
 		Version:  profilesFileVersion,
@@ -701,8 +712,8 @@ func saveProfiles() error {
 	return nil
 }
 
-// flushProfiles persists only when something changed since the last write.
-func flushProfiles(force bool) {
+// Flush persists only when something changed since the last write.
+func Flush(force bool) {
 	if profilesSavingDisabled() {
 		// Never overwrite a file we failed to read (G6).
 		return
@@ -717,8 +728,8 @@ func flushProfiles(force bool) {
 	}
 }
 
-// startProfilesAutosave persists dirty state on a fixed interval.
-func startProfilesAutosave(stop <-chan struct{}) {
+// StartAutosave persists dirty state on a fixed interval.
+func StartAutosave(stop <-chan struct{}) {
 	go func() {
 		t := time.NewTicker(profilesSaveEvery)
 		defer t.Stop()
@@ -727,54 +738,90 @@ func startProfilesAutosave(stop <-chan struct{}) {
 			case <-stop:
 				return
 			case <-t.C:
-				flushProfiles(false)
+				Flush(false)
 			}
 		}
 	}()
 }
 
-var profilesMu sync.Mutex
-var profiles = make(map[string]*Profile)
+var Mu sync.Mutex
+var store = make(map[string]*Profile)
 
-func dayStampNow() int64 {
+// Len — сколько записей лежит в хранилище.
+func Len() int {
+	Mu.Lock()
+	n := len(store)
+	Mu.Unlock()
+	return n
+}
+
+// SwapStore подменяет карту профилей пустой и возвращает функцию
+// восстановления.
+//
+// Карта одна на процесс, поэтому тест, который проверяет заведение или
+// вытеснение записей, обязан начинать с чистого листа и не оставлять следов
+// соседям. Рабочему коду подменять хранилище незачем.
+func SwapStore() (restore func()) {
+	Mu.Lock()
+	prev := store
+	store = make(map[string]*Profile)
+	Mu.Unlock()
+	return func() {
+		Mu.Lock()
+		store = prev
+		Mu.Unlock()
+	}
+}
+
+// StoredLocked отдаёт запись, которая действительно лежит в карте, или nil.
+//
+// Отличается от ForKey тем, что ничего не создаёт и не подменяет: путь чтения
+// возвращает временный объект для игрока, у которого записи ещё нет, и будить
+// ради изменений в таком объекте автосейв бессмысленно — сохранять нечего.
+// Вызывать под Mu.
+func StoredLocked(key string) *Profile {
+	return store[key]
+}
+
+func DayStampNow() int64 {
 	return time.Now().Unix() / 86400
 }
 
-// profileForKey is the READ path. It returns the stored profile when there is
+// ForKey is the READ path. It returns the stored profile when there is
 // one, otherwise a transient zero-value profile that is deliberately NOT put in
 // the map: a connect/join/disconnect loop must not be able to grow the store.
 // Writes through a transient profile are dropped, which is exactly right for a
 // player who has not earned anything yet.
-func profileForKey(key string) *Profile {
+func ForKey(key string) *Profile {
 	if key == "" {
 		return nil
 	}
-	profilesMu.Lock()
-	p := profiles[key]
-	profilesMu.Unlock()
+	Mu.Lock()
+	p := store[key]
+	Mu.Unlock()
 	if p == nil {
 		p = &Profile{LastSeen: time.Now().Unix()}
 	}
 	return p
 }
 
-// profileForKeyCreate is the WRITE path: it materialises the profile in the
+// ForKeyCreate is the WRITE path: it materialises the profile in the
 // store. Only call it where there is real progress to persist (a Style grant, a
 // quest step, a purchase) — never from a path a client can drive without
 // actually playing.
-func profileForKeyCreate(key string) *Profile {
+func ForKeyCreate(key string) *Profile {
 	if key == "" {
 		return nil
 	}
-	profilesMu.Lock()
-	defer profilesMu.Unlock()
-	return profileForKeyCreateLocked(key)
+	Mu.Lock()
+	defer Mu.Unlock()
+	return ForKeyCreateLocked(key)
 }
 
-// profileForKeyEquipLocked is the lookup used by the EQUIP paths
+// ForKeyEquipLocked is the lookup used by the EQUIP paths
 // (cosmeticsEquip, titleEquip). Equipping is not progress: nothing can be
 // equipped that was not first bought or unlocked, and both of those already
-// materialise the profile. Routing equip through profileForKeyCreateLocked
+// materialise the profile. Routing equip through ForKeyCreateLocked
 // (G8) meant every visitor who merely opened the wardrobe minted a store entry
 // — a free write amplifier against MAX_PROFILES that needed nothing but a
 // websocket and a rate-limit-respecting loop. S5: hand back the stored profile
@@ -782,31 +829,31 @@ func profileForKeyCreate(key string) *Profile {
 // profile the only owned item in every category is bit 0, which is already the
 // equipped default, so every equip it can legally perform is a no-op and there
 // is nothing to persist. The second return says whether the profile is stored,
-// so callers know not to wake the autosave. Caller holds profilesMu.
-func profileForKeyEquipLocked(key string) (*Profile, bool) {
+// so callers know not to wake the autosave. Caller holds Mu.
+func ForKeyEquipLocked(key string) (*Profile, bool) {
 	if key == "" {
 		return nil, false
 	}
-	if p := profiles[key]; p != nil {
+	if p := store[key]; p != nil {
 		return p, true
 	}
 	return &Profile{LastSeen: time.Now().Unix()}, false
 }
 
-// profileForKeyCreateLocked is profileForKeyCreate for callers that already
-// hold profilesMu, which is the only way to take the pointer and write through
+// ForKeyCreateLocked is ForKeyCreate for callers that already
+// hold Mu, which is the only way to take the pointer and write through
 // it in one critical section (G8).
-func profileForKeyCreateLocked(key string) *Profile {
+func ForKeyCreateLocked(key string) *Profile {
 	if key == "" {
 		return nil
 	}
 	now := time.Now()
-	p := profiles[key]
+	p := store[key]
 	if p == nil {
 		evictProfilesLocked(now)
 		p = &Profile{LastSeen: now.Unix()}
-		profiles[key] = p
-		markProfilesDirty()
+		store[key] = p
+		MarkDirty()
 	}
 	return p
 }

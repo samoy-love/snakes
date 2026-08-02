@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"snakes/internal/profiles"
 )
 
 // F4: a match runs through three phases derived from r.tick-r.matchStartTick.
@@ -1398,17 +1400,17 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 		if k != nil {
 			r.ensureContract(k)
 			if !k.bot {
-				pr := profileForKeyCreate(k.profileKey)
+				pr := profiles.ForKeyCreate(k.profileKey)
 				if pr != nil {
-					profilesMu.Lock()
+					profiles.Mu.Lock()
 					ensureProfileDailyLocked(pr, k.profileKey)
 					if pr.TotalKills < ^uint32(0) {
 						pr.TotalKills++
 					}
 					rewardCount := r.addDailyProgressLocked(k, pr, DailyKills, 1)
 					achvCount := r.checkAchievementsLocked(k, pr)
-					profilesMu.Unlock()
-					markProfilesDirty()
+					profiles.Mu.Unlock()
+					profiles.MarkDirty()
 					r.grantDailyRewards(k, rewardCount)
 					r.grantAchievementRewards(k, achvCount)
 				}
@@ -1451,16 +1453,16 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 				}
 				r.awardPoints(k.num, 10, PointsRevenge)
 				if !k.bot {
-					pr := profileForKeyCreate(k.profileKey)
+					pr := profiles.ForKeyCreate(k.profileKey)
 					if pr != nil {
-						profilesMu.Lock()
+						profiles.Mu.Lock()
 						ensureProfileDailyLocked(pr, k.profileKey)
 						if pr.TotalRevenge < ^uint32(0) {
 							pr.TotalRevenge++
 						}
 						achvCount := r.checkAchievementsLocked(k, pr)
-						profilesMu.Unlock()
-						markProfilesDirty()
+						profiles.Mu.Unlock()
+						profiles.MarkDirty()
 						r.grantAchievementRewards(k, achvCount)
 					}
 				}
@@ -1495,16 +1497,16 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 			r.addStyleCapped(k, StyleBountyKill, StyleBounty, &k.bountyStyleMatch, StyleBountyMatchCap)
 			r.awardPoints(k.num, 28, PointsBounty)
 			if !k.bot {
-				pr := profileForKeyCreate(k.profileKey)
+				pr := profiles.ForKeyCreate(k.profileKey)
 				if pr != nil {
-					profilesMu.Lock()
+					profiles.Mu.Lock()
 					ensureProfileDailyLocked(pr, k.profileKey)
 					if pr.TotalBounty < ^uint32(0) {
 						pr.TotalBounty++
 					}
 					achvCount := r.checkAchievementsLocked(k, pr)
-					profilesMu.Unlock()
-					markProfilesDirty()
+					profiles.Mu.Unlock()
+					profiles.MarkDirty()
 					r.grantAchievementRewards(k, achvCount)
 				}
 			}
@@ -1977,17 +1979,17 @@ func (r *Room) applyMove(p *Player) {
 				r.addContractProgress(p, 1)
 			}
 			if !p.bot {
-				pr := profileForKeyCreate(p.profileKey)
+				pr := profiles.ForKeyCreate(p.profileKey)
 				if pr != nil {
-					profilesMu.Lock()
+					profiles.Mu.Lock()
 					ensureProfileDailyLocked(pr, p.profileKey)
 					if pr.TotalPickups < ^uint32(0) {
 						pr.TotalPickups++
 					}
 					rewardCount := r.addDailyProgressLocked(p, pr, DailyPickups, 1)
 					achvCount := r.checkAchievementsLocked(p, pr)
-					profilesMu.Unlock()
-					markProfilesDirty()
+					profiles.Mu.Unlock()
+					profiles.MarkDirty()
 					r.grantDailyRewards(p, rewardCount)
 					r.grantAchievementRewards(p, achvCount)
 				}
@@ -2253,7 +2255,7 @@ func (r *Room) step() {
 			if p == nil || p.bot || p.profileKey == "" {
 				continue
 			}
-			touchProfileLastSeen(p.profileKey)
+			profiles.TouchLastSeen(p.profileKey)
 		}
 	}
 
