@@ -45,7 +45,7 @@ CI. Последний прогон `-race` (Linux, `golang:1.25`) прошёл 
 `protocol_test.go`, клиентская — тестами в `tests/`:
 
 ```sh
-make test-client          # или: node --test tests/*.test.mjs (нужен Node 22+)
+make test-client          # или: node --test tests/*.test.mjs (нужен Node 24+)
 ```
 
 Зависимостей нет — только `node:test` и `node:assert`.
@@ -76,7 +76,7 @@ make test-client   # и синхронно править public/client.js, по
 | два `u16` заменены на один `u32` (сумма та же) | проверка `kind=14` — не сходится последовательность ширин |
 
 Синтаксис клиентских скриптов проверяется отдельно: `node --check public/client.js`
-и `node --check public/client_*.js` (`make node-check`, нужен Node 22+ — он сам
+и `node --check public/client_*.js` (`make node-check`, нужен Node 24+ — он сам
 определяет ES-модуль по синтаксису).
 
 CI: `.github/workflows/ci.yml` — два job'а: **go** (gofmt / vet / staticcheck /

@@ -22,13 +22,12 @@
 
 ### Бинарные сообщения
 
-Первый байт — тип (константы `MsgStateBinary`, `MsgROIBinary`,
-`MsgMinimapChunk`, `MsgEventsBinary` в `main.go`), дальше little-endian.
+Первый байт — тип (константы `MsgROIBinary`, `MsgMinimapChunk`,
+`MsgEventsBinary` в `protocol.go`), дальше little-endian.
 
-| Тип | Константа | Сериализатор (`main.go`) | Назначение |
+| Тип | Константа | Сериализатор (`protocol.go`) | Назначение |
 | --- | --- | --- | --- |
-| `1` | `MsgStateBinary` | `(*Room).buildStateBinary` | Полный стейт всего поля. **Legacy**: оставлен для совместимости, в основном потоке не используется |
-| `2` | `MsgROIBinary` | `(*Room).buildROIBinary`, быстрые пути `buildROIPooledFast` / `buildROIPooledScan` | Основной канал: снапшот области интереса вокруг игрока (окно 80×56, шаг 8, упреждение 12 клеток), полный или дельта относительно `sinceTick` |
+| `2` | `MsgROIBinary` | `buildROIPooledFast` / `buildROIPooledScan` | Основной канал: снапшот области интереса вокруг игрока. Окно по умолчанию 80×56, но клиент может запросить своё под вьюпорт (сообщение `viewport`, границы в `hello.roi`); начало окна снапится по 8 клеток. Полный или дельта относительно `sinceTick` |
 | `4` | `MsgMinimapChunk` | `(*Room).buildMinimapChunkBinary` | Чанки миникарты 10×10 клеток; полная карта раскатывается порциями, дальше идут только изменившиеся чанки |
 | `5` | `MsgEventsBinary` | `(*Room).buildEventsPooledLocked` | Пакет игровых событий + мета матча (фаза, счётчики, bounty, мутатор) |
 
