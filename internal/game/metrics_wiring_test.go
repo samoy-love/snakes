@@ -30,27 +30,40 @@ func TestDeathAndKillCountersAreWired(t *testing.T) {
 	r.players[1] = victim
 	r.players[2] = killer
 
-	beforeWall := metrics.DeathsTotal.Load("wall")
-	beforeCut := metrics.DeathsTotal.Load("trail_cut")
-	beforeKills := metrics.KillsTotal.Load()
+	// Жертва — человек, убийца — бот: разные стороны должны попасть в разные
+	// ряды, иначе метка бессмысленна.
+	killer.bot = true
+
+	beforeWall := metrics.DeathsTotal.Load("wall", "player")
+	beforeCut := metrics.DeathsTotal.Load("trail_cut", "player")
+	beforeKillsBot := metrics.KillsTotal.Load("bot")
+	beforeKillsPlayer := metrics.KillsTotal.Load("player")
+	beforeMatchup := metrics.KillMatchupsTotal.Load("bot", "player")
 
 	// Смерть без виновника: причина считается, убийство — нет.
 	r.killPlayerWithReason(1, 0, "wall", -1, 5, 5)
-	if got := metrics.DeathsTotal.Load("wall"); got != beforeWall+1 {
-		t.Errorf(`deaths{reason="wall"} = %d, ожидалось %d`, got, beforeWall+1)
+	if got := metrics.DeathsTotal.Load("wall", "player"); got != beforeWall+1 {
+		t.Errorf(`deaths{reason="wall",actor="player"} = %d, ожидалось %d`, got, beforeWall+1)
 	}
-	if got := metrics.KillsTotal.Load(); got != beforeKills {
-		t.Errorf("kills = %d, ожидалось %d — стена не должна считаться убийством", got, beforeKills)
+	if got := metrics.KillsTotal.Load("bot"); got != beforeKillsBot {
+		t.Errorf("kills{actor=bot} = %d, ожидалось %d — стена не должна считаться убийством", got, beforeKillsBot)
 	}
 
-	// Смерть от чужого следа: считается и причина, и убийство.
+	// Смерть от чужого следа: считается причина, убийство и пара «кто кого».
 	victim.alive = true
 	r.killPlayerWithReason(1, 2, "trail_cut", -1, 5, 5)
-	if got := metrics.DeathsTotal.Load("trail_cut"); got != beforeCut+1 {
-		t.Errorf(`deaths{reason="trail_cut"} = %d, ожидалось %d`, got, beforeCut+1)
+	if got := metrics.DeathsTotal.Load("trail_cut", "player"); got != beforeCut+1 {
+		t.Errorf(`deaths{reason="trail_cut",actor="player"} = %d, ожидалось %d`, got, beforeCut+1)
 	}
-	if got := metrics.KillsTotal.Load(); got != beforeKills+1 {
-		t.Errorf("kills = %d, ожидалось %d", got, beforeKills+1)
+	if got := metrics.KillsTotal.Load("bot"); got != beforeKillsBot+1 {
+		t.Errorf("kills{actor=bot} = %d, ожидалось %d", got, beforeKillsBot+1)
+	}
+	// Ключевая проверка разделения: убийство бота не должно оседать на людях.
+	if got := metrics.KillsTotal.Load("player"); got != beforeKillsPlayer {
+		t.Errorf("kills{actor=player} = %d, ожидалось %d — убил бот, а не человек", got, beforeKillsPlayer)
+	}
+	if got := metrics.KillMatchupsTotal.Load("bot", "player"); got != beforeMatchup+1 {
+		t.Errorf(`kill_matchups{killer="bot",victim="player"} = %d, ожидалось %d`, got, beforeMatchup+1)
 	}
 }
 
