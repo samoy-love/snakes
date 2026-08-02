@@ -759,36 +759,6 @@ html, body {
    -webkit-overflow-scrolling: touch;
  }
 
- /* H9: скелетон-строка размером с .roomRow — client.js рисует её на время загрузки */
- .roomsSkeleton {
-   display: grid;
-   gap: 6px;
- }
-
- .roomsSkeletonRow {
-   display: grid;
-   gap: 8px;
-   padding: 10px;
-   min-height: var(--control-h);
-   border-radius: var(--r-md);
-   border: 1px solid rgba(255, 255, 255, 0.08);
-   background: rgba(0, 0, 0, 0.14);
- }
-
- .roomsSkeletonRow .skeletonLine {
-   height: 13px;
- }
-
- .roomsSkeletonRow .skeletonLine.isTitle {
-   width: 56%;
- }
-
- .roomsSkeletonRow .skeletonLine.isSub {
-   height: 11px;
-   width: 82%;
-   opacity: 0.7;
- }
-
  .menuPanelTitle {
    font-weight: 800;
    font-size: var(--fs-14);
@@ -1101,52 +1071,6 @@ html, body {
    color: var(--tier-color, var(--tier-base));
    border: 1px solid color-mix(in srgb, var(--tier-color, var(--tier-base)) 55%, transparent);
    background: color-mix(in srgb, var(--tier-color, var(--tier-base)) 16%, rgba(0, 0, 0, 0.35));
- }
-
- /* Разделители групп тиров в списке (текст вставляет client.js) */
- .tierDivider {
-   display: flex;
-   align-items: center;
-   gap: 10px;
-   margin: 8px 2px 0;
-   font-size: var(--fs-11);
-   font-weight: 800;
-   letter-spacing: 0.4px;
-   text-transform: uppercase;
-   color: var(--tier-color, var(--muted2));
- }
-
- .tierDivider::after {
-   content: '';
-   flex: 1;
-   height: 1px;
-   background: linear-gradient(90deg, color-mix(in srgb, var(--tier-color, var(--border)) 50%, transparent), transparent);
- }
-
- .tierDivider:first-child {
-   margin-top: 0;
- }
-
- /* Шапка категории: «Куплено 3 / 8 · до конца ветки 1355 ✨» */
- .cosmeticsCatSummary {
-   display: flex;
-   align-items: center;
-   flex-wrap: wrap;
-   gap: 6px 10px;
-   padding: 7px 10px;
-   border-radius: var(--r-md);
-   border: 1px solid var(--border2);
-   background: rgba(0, 0, 0, 0.20);
-   font-size: var(--fs-12);
-   font-weight: 700;
-   color: var(--muted);
-   font-variant-numeric: tabular-nums;
- }
-
- .cosmeticsCatSummary b,
- .cosmeticsCatSummary .num {
-   color: rgba(255, 255, 255, 0.92);
-   font-weight: 800;
  }
 
  /* --- Полоса тира и цвет цены ---------------------------------------------- */
@@ -1872,11 +1796,6 @@ html, body {
    color: var(--muted);
  }
 
- .overlayRow {
-   display: flex;
-   gap: 10px;
- }
-
  .fieldInline {
    display: flex;
    align-items: center;
@@ -1978,45 +1897,6 @@ html, body {
    line-height: 1;
    color: var(--muted);
    flex: 0 0 auto;
- }
-
- .overlayRow input {
-   flex: 1;
-   padding: var(--pad-md) var(--pad-lg);
-   border-radius: var(--r-md);
-   border: 1px solid var(--border);
-   background: var(--panel2);
-   color: var(--text);
-   outline: none;
- }
-
- .overlayRow input:focus-visible {
-   border-color: var(--focus);
-   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
- }
-
- .overlayRow button {
-   padding: var(--pad-md) 14px;
-   border-radius: var(--r-md);
-   border: 1px solid var(--border);
-   background: var(--btn);
-   color: var(--text);
-   cursor: pointer;
-   transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
- }
-
- .overlayRow button:hover {
-   background: var(--btn2);
- }
-
- .overlayRow button:active {
-   transform: translateY(1px);
- }
-
- .overlayRow button:focus-visible {
-   outline: none;
-   border-color: var(--focus);
-   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
  }
 
  .toast {
@@ -2601,23 +2481,10 @@ html, body {
   }
  }
 
- .hudComboIcon {
-  font-size: var(--fs-14);
-  line-height: 1;
- }
-
  .hudComboValue {
   font-size: var(--fs-16);
   font-variant-numeric: tabular-nums;
   color: rgba(255, 255, 255, 0.98);
- }
-
- .hudComboLabel {
-  font-size: var(--fs-11);
-  font-weight: 800;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  color: var(--muted2);
  }
 
  /* Пока чип виден, очередь тостов уезжает выше, чтобы не накладываться */
@@ -2969,20 +2836,6 @@ html, body {
   font-size: var(--fs-meta);
   font-weight: 800;
   color: var(--muted2);
- }
-
- .topHudValue {
-  font-size: var(--fs-title);
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  line-height: var(--lh-tight);
- }
-
- .topHudSub {
-  font-size: var(--fs-meta);
-  font-weight: 800;
-  color: var(--muted2);
-  font-variant-numeric: tabular-nums;
  }
 
  .topHudRight {
@@ -3600,14 +3453,6 @@ html, body {
   width: 100%;
 }
 
-.minimapExpandBtn {
-  position: absolute;
-  right: 10px;
-  top: 10px;
-  border-radius: var(--r-sm);
-  pointer-events: auto;
-}
-
 .minimapLegend {
   position: absolute;
   left: 10px;
@@ -3627,39 +3472,6 @@ html, body {
 
 .minimapLegend[aria-hidden="true"] {
   display: none;
-}
-
-.minimapLegendItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.minimapLegendSwatch {
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.10);
-}
-
-.minimapLegendSwatch.isYou {
-  background: rgba(255, 255, 255, 0.92);
-  border-color: rgba(0, 0, 0, 0.35);
-}
-
-.minimapLegendSwatch.isView {
-  background: rgba(96, 165, 250, 0.70);
-  border-color: rgba(0, 0, 0, 0.35);
-}
-
-.minimapLegendSwatch.isZone {
-  background: rgba(255, 45, 85, 0.62);
-  border-color: rgba(0, 0, 0, 0.35);
-}
-
-.minimapLegendText {
-  font-weight: 800;
 }
 
 #minimapOverlay {
@@ -4068,10 +3880,6 @@ img.emoji {
      align-items: center;
      column-gap: 10px;
      row-gap: 0;
-   }
-
-   .topHudValue {
-     font-size: var(--fs-16);
    }
 
    .topHudRight {
@@ -4614,8 +4422,7 @@ img.emoji {
   /* Рамки профиля 5–7: сияние, бегущий блик и вращение оттенка призмы */
   .frame5,
   .frame6 td:nth-child(2)::after,
-  .frame7 td:nth-child(2),
-  .roomsSkeletonRow .skeletonLine {
+  .frame7 td:nth-child(2) {
     animation: none;
   }
 
@@ -4656,426 +4463,7 @@ img.emoji {
 
 /* ==========================================================================
    ВОЛНА ОНБОРДИНГА. Разметку создаёт client.js, здесь только оформление.
-   Общий принцип всей секции: камера центрирует игрока, поэтому вертикальная
-   полоса 28%–72% высоты экрана — заповедник змейки. Ни один элемент ниже
-   не имеет права туда заходить, отсюда явные top/bottom вместо центрирования.
    ========================================================================== */
-
-:root {
-  /* Верхняя и нижняя границы «мёртвой зоны» вокруг головы змейки.
-     Нижняя больше верхней: низ экрана уже занят стеком тостов и чатом,
-     подсказка обязана встать НАД ними, а не поверх. */
-  --onboard-top: calc(var(--sa-top) + 96px);
-  --onboard-bottom: calc(var(--sa-bottom) + 188px);
-}
-
-/* --- Подсказка-объяснение механики поверх поля -----------------------------
-   Живёт над полем, но вне центра. .isTop/.isBottom выбирает client.js в
-   зависимости от того, где сейчас голова игрока. */
-.onboardHint {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: var(--z-toasts);
-  /* width: max-content обязателен. У fixed-элемента с одним только left:50%
-     доступная ширина считается от left до правого края экрана, то есть ровно
-     половина вьюпорта: на 375px подсказка ужималась до 188px и рвала строку
-     пополам. max-width ниже возвращает потолок. */
-  width: max-content;
-  max-width: min(420px, calc(100vw - 32px - var(--sa-left) - var(--sa-right)));
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent2) 34%, var(--border2));
-  /* Намеренно полупрозрачно: сквозь подсказку должно быть видно поле. */
-  background: color-mix(in srgb, var(--panel) 74%, transparent);
-  backdrop-filter: blur(10px);
-  box-shadow: var(--shadow-float);
-  color: var(--text);
-  font-size: var(--fs-13);
-  font-weight: 800;
-  line-height: var(--lh-tight);
-  text-align: center;
-  text-wrap: balance;
-  pointer-events: none;
-  animation: onboardHintIn 260ms cubic-bezier(0.2, 1.3, 0.4, 1) both,
-    onboardHintPulse 2.6s ease-in-out 260ms infinite;
-}
-
-.onboardHint.isTop {
-  top: var(--onboard-top);
-  bottom: auto;
-}
-
-.onboardHint.isBottom {
-  top: auto;
-  bottom: var(--onboard-bottom);
-}
-
-/* Без модификатора элемент всё равно обязан оказаться вне центра. */
-.onboardHint:not(.isTop):not(.isBottom) {
-  top: var(--onboard-top);
-}
-
-/* Иконку client.js кладёт отдельным span'ом; если её нет — ничего не ломается. */
-.onboardHintIcon {
-  flex: 0 0 auto;
-  font-size: var(--fs-16);
-  line-height: 1;
-}
-
-.onboardHintIcon img.emoji {
-  width: 18px;
-  height: 18px;
-  vertical-align: -3px;
-}
-
-.onboardHintText {
-  min-width: 0;
-}
-
-@keyframes onboardHintIn {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
-}
-
-/* Пульсация лёгкая и по прозрачности/тени, а не по transform: сдвиг рядом с
-   игровым полем читается как движение объекта в мире. */
-@keyframes onboardHintPulse {
-  0%,
-  100% {
-    opacity: 0.86;
-    box-shadow: var(--shadow-float);
-  }
-  50% {
-    opacity: 1;
-    box-shadow: var(--shadow-float), 0 0 0 4px color-mix(in srgb, var(--accent2) 12%, transparent);
-  }
-}
-
-/* --- Подсказка про Реклейм -------------------------------------------------
-   Отдельный смысл: не «сделай», а «у тебя есть окно времени». Поэтому янтарь
-   вместо синего и место под таймер. Работает и как .onboardHint.reclaimHint,
-   и самостоятельным элементом. */
-.reclaimHint {
-  border-color: color-mix(in srgb, var(--tier-legendary) 42%, var(--border2));
-  background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--tier-legendary) 14%, transparent),
-      transparent
-    ),
-    color-mix(in srgb, var(--panel) 78%, transparent);
-  color: color-mix(in srgb, var(--tier-legendary) 26%, var(--text));
-}
-
-.reclaimHint:not(.onboardHint) {
-  position: fixed;
-  left: 50%;
-  top: var(--onboard-top);
-  transform: translateX(-50%);
-  z-index: var(--z-toasts);
-  width: max-content;
-  max-width: min(420px, calc(100vw - 32px - var(--sa-left) - var(--sa-right)));
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  backdrop-filter: blur(10px);
-  box-shadow: var(--shadow-float);
-  font-size: var(--fs-13);
-  font-weight: 800;
-  line-height: var(--lh-tight);
-  text-align: center;
-  pointer-events: none;
-}
-
-/* Обратный отсчёт «остывания» земли — моноширинные цифры, чтобы не дёргался. */
-.reclaimHintTimer {
-  flex: 0 0 auto;
-  font-variant-numeric: tabular-nums;
-  font-weight: 800;
-  color: var(--tier-legendary);
-}
-
-/* Полоска остывания: ширину задаёт client.js инлайном на .reclaimHintFill */
-.reclaimHintBar {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 3px;
-  height: 2px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.35);
-  overflow: hidden;
-}
-
-.reclaimHintFill {
-  display: block;
-  height: 100%;
-  width: 100%;
-  border-radius: 999px;
-  background: var(--tier-legendary);
-  transition: width 200ms linear;
-}
-
-/* Оверлеи модальны — подсказки поля под ними не должны просвечивать. */
-body.overlayActive .onboardHint,
-body.overlayActive .reclaimHint {
-  display: none !important;
-}
-
-/* --- Одноразовый тост-объяснение системы -----------------------------------
-   Отличается от .eventToast намеренно: событие — это «что произошло», а это —
-   «как устроена игра». Спокойный синий вместо алого, лампочка вместо иконки
-   события, без «влёта» с подскоком. Длительность жизни задаёт client.js. */
-.onboardStepToast {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: var(--pad-md) var(--pad-lg);
-  border-radius: var(--r-lg);
-  border: 1px solid color-mix(in srgb, var(--accent2) 40%, var(--border2));
-  border-left: 3px solid color-mix(in srgb, var(--accent2) 70%, transparent);
-  background: linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--accent2) 13%, transparent),
-      transparent 62%
-    ),
-    color-mix(in srgb, var(--panel) 88%, transparent);
-  box-shadow: var(--shadow-float);
-  backdrop-filter: blur(12px);
-  color: var(--text);
-  max-width: 100%;
-  word-break: break-word;
-  pointer-events: auto;
-  /* Мягче и дольше, чем toastIn у обычного тоста: это не тревога. */
-  animation: onboardStepIn 380ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
-}
-
-/* Лампочка. ::before, чтобы client.js не был обязан класть иконку в разметку;
-   если он всё же кладёт .onboardStepToastIcon — псевдоэлемент отключается. */
-.onboardStepToast::before {
-  content: '💡';
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  font-size: var(--fs-16);
-  line-height: 1;
-  border: 1px solid color-mix(in srgb, var(--accent2) 34%, transparent);
-  background: color-mix(in srgb, var(--accent2) 12%, rgba(0, 0, 0, 0.28));
-}
-
-.onboardStepToast:has(.onboardStepToastIcon)::before {
-  content: none;
-}
-
-.onboardStepToastIcon {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  font-size: var(--fs-16);
-  line-height: 1;
-  border: 1px solid color-mix(in srgb, var(--accent2) 34%, transparent);
-  background: color-mix(in srgb, var(--accent2) 12%, rgba(0, 0, 0, 0.28));
-}
-
-.onboardStepToastBody {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.onboardStepToastTitle {
-  font-size: var(--fs-13);
-  font-weight: 800;
-  letter-spacing: 0.2px;
-}
-
-/* Объяснение — это текст, который читают; ему нужен нормальный интерлиньяж. */
-.onboardStepToastText {
-  font-size: var(--fs-12);
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--muted);
-}
-
-@keyframes onboardStepIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* --- Баннер первого захвата ------------------------------------------------
-   Модификатор существующего #bigBanner: первый успешный захват — единственный
-   момент, когда игрок понимает игру. Разрешено быть громким. */
-#bigBanner.firstCaptureBanner {
-  color: #fffbe8;
-  text-shadow: 0 0 28px color-mix(in srgb, var(--gold) 75%, transparent),
-    0 0 8px color-mix(in srgb, var(--gold) 60%, transparent),
-    0 6px 30px rgba(0, 0, 0, 0.75);
-}
-
-#bigBanner.firstCaptureBanner .bigBannerTitle {
-  background: linear-gradient(180deg, #fff6d0 0%, var(--gold) 52%, #b8860b 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  /* text-shadow не рисуется под прозрачной заливкой — свечение даёт drop-shadow */
-  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--gold) 70%, transparent))
-    drop-shadow(0 6px 22px rgba(0, 0, 0, 0.7));
-}
-
-#bigBanner.firstCaptureBanner .bigBannerIcon {
-  filter: drop-shadow(0 0 16px color-mix(in srgb, var(--gold) 70%, transparent));
-}
-
-#bigBanner.firstCaptureBanner .bigBannerSub {
-  color: color-mix(in srgb, var(--gold) 55%, #fff);
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.75);
-}
-
-/* Золотое гало за баннером — рисуем псевдоэлементом, чтобы не трогать разметку */
-#bigBanner.firstCaptureBanner::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 150%;
-  height: 220%;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: -1;
-  background: radial-gradient(
-    closest-side,
-    color-mix(in srgb, var(--gold) 26%, transparent),
-    transparent 72%
-  );
-}
-
-/* Масштабирование: сильнее и с «отдачей», чем базовый bannerIn.
-   Специфичность (0,2,0) перебивает `#bigBanner.isOn` (0,1,1)? Нет —
-   (1,1,0) против (1,1,0) при равенстве побеждает более поздний, а этот блок
-   идёт в самом низу файла, поэтому анимация тут выигрывает. */
-#bigBanner.isOn.firstCaptureBanner {
-  animation: firstCaptureIn 900ms cubic-bezier(0.16, 1.5, 0.3, 1) both;
-}
-
-@keyframes firstCaptureIn {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.4) rotate(-4deg);
-  }
-  45% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1.18) rotate(1.5deg);
-  }
-  70% {
-    transform: translate(-50%, -50%) scale(0.97) rotate(-0.6deg);
-  }
-  100% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1) rotate(0deg);
-  }
-}
-
-/* --- Человеческое объяснение в оверлее смерти ------------------------------
-   Соседние .deathStat — сухие числа. Этот блок — единственное место, где игроку
-   объясняют, что он сделал не так, поэтому он крупнее всего остального. */
-.deathExplain {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin: 10px 0;
-  padding: var(--pad-lg);
-  border-radius: var(--r-lg);
-  border: 1px solid color-mix(in srgb, var(--accent2) 30%, var(--border2));
-  background: linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--accent2) 12%, transparent),
-      transparent 60%
-    ),
-    rgba(0, 0, 0, 0.20);
-  /* Крупнее .deathReason (12px) и .toastSub (12px) — это главный текст карточки */
-  font-size: var(--fs-14);
-  font-weight: 700;
-  line-height: 1.45;
-  color: rgba(255, 255, 255, 0.94);
-}
-
-.deathExplain::before {
-  content: '💡';
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-md);
-  font-size: var(--fs-16);
-  line-height: 1;
-  border: 1px solid color-mix(in srgb, var(--accent2) 30%, transparent);
-  background: color-mix(in srgb, var(--accent2) 12%, rgba(0, 0, 0, 0.26));
-}
-
-.deathExplain:has(.deathExplainIcon)::before {
-  content: none;
-}
-
-.deathExplainIcon {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-md);
-  font-size: var(--fs-16);
-  line-height: 1;
-  border: 1px solid color-mix(in srgb, var(--accent2) 30%, transparent);
-  background: color-mix(in srgb, var(--accent2) 12%, rgba(0, 0, 0, 0.26));
-}
-
-.deathExplainBody {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.deathExplainTitle {
-  font-size: var(--fs-14);
-  font-weight: 800;
-  letter-spacing: 0.2px;
-}
-
-/* Вторая строка — «как не повторить». Тише заголовка, но всё ещё читаемая. */
-.deathExplainTip {
-  font-size: var(--fs-13);
-  font-weight: 600;
-  color: var(--muted);
-}
 
 /* client.js уже собирает две строки причины смерти — правил для них не было */
 .deathReasonMain {
@@ -5195,11 +4583,8 @@ body.overlayActive .reclaimHint {
   white-space: nowrap;
 }
 
-/* --- «До первого скина N ✨» -----------------------------------------------
-   .matchFirstSkin — то, что реально рендерит client.js. .firstSkinProgress —
-   имя из контракта онбординга. Оформление общее, чтобы не разъехалось. */
-.matchFirstSkin,
-.firstSkinProgress {
+/* --- «До первого скина N ✨» ----------------------------------------------- */
+.matchFirstSkin {
   margin-top: 10px;
   padding: var(--pad-md) var(--pad-lg);
   border-radius: var(--r-md);
@@ -5212,8 +4597,7 @@ body.overlayActive .reclaimHint {
     rgba(0, 0, 0, 0.18);
 }
 
-.matchFirstSkinTop,
-.firstSkinProgressTop {
+.matchFirstSkinTop {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -5221,8 +4605,7 @@ body.overlayActive .reclaimHint {
   margin-bottom: 6px;
 }
 
-.matchFirstSkinLabel,
-.firstSkinProgressLabel {
+.matchFirstSkinLabel {
   font-size: var(--fs-11);
   font-weight: 800;
   letter-spacing: 0.3px;
@@ -5231,8 +4614,7 @@ body.overlayActive .reclaimHint {
   min-width: 0;
 }
 
-.matchFirstSkinValue,
-.firstSkinProgressValue {
+.matchFirstSkinValue {
   flex: 0 0 auto;
   font-size: var(--fs-14);
   font-weight: 800;
@@ -5241,8 +4623,7 @@ body.overlayActive .reclaimHint {
   color: var(--gold);
 }
 
-.matchFirstSkinBar,
-.firstSkinProgressBar {
+.matchFirstSkinBar {
   position: relative;
   height: 8px;
   border-radius: 999px;
@@ -5252,8 +4633,7 @@ body.overlayActive .reclaimHint {
 }
 
 /* Ширину client.js задаёт инлайновым style="width:…%" */
-.matchFirstSkinFill,
-.firstSkinProgressFill {
+.matchFirstSkinFill {
   display: block;
   height: 100%;
   width: 0%;
@@ -5264,8 +4644,7 @@ body.overlayActive .reclaimHint {
   transition: width 420ms cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
-.matchFirstSkinSub,
-.firstSkinProgressSub {
+.matchFirstSkinSub {
   margin-top: 6px;
   font-size: var(--fs-12);
   font-weight: 600;
@@ -5501,38 +4880,10 @@ body.overlayActive .reclaimHint {
    ========================================================================== */
 
 @media (max-width: 720px) {
-  /* Мёртвая зона змейки на мобильном шире: HUD-строк две, а не одна. */
   :root {
-    --onboard-top: calc(var(--sa-top) + 122px);
-    /* 8 (отступ) + 52 (свёрнутый чат) + 128 (стек из двух тостов) + 8 (зазор) */
-    --onboard-bottom: calc(var(--sa-bottom) + 196px);
     /* Единственный источник правды для высоты развёрнутого чата: её читают
        и сам #chat, и смещение стека тостов над ним. */
     --chat-max-mobile: min(30dvh, 220px);
-  }
-
-  .onboardHint {
-    font-size: var(--fs-12);
-    padding: 7px 12px;
-    max-width: calc(100vw - 24px - var(--sa-left) - var(--sa-right));
-  }
-
-  /* Развёрнутый чат съедает низ — подсказку уводим наверх принудительно */
-  body:has(#chat:not(.collapsed)) .onboardHint.isBottom {
-    top: var(--onboard-top);
-    bottom: auto;
-  }
-
-  .onboardStepToast {
-    padding: var(--pad-sm) var(--pad-md);
-    gap: 8px;
-  }
-
-  .onboardStepToast::before,
-  .onboardStepToastIcon {
-    width: 26px;
-    height: 26px;
-    font-size: var(--fs-14);
   }
 
   /* Чат по умолчанию свёрнут в кнопку; развёрнутый не должен занимать пол-экрана.
@@ -5607,23 +4958,12 @@ body.overlayActive .reclaimHint {
 }
 
 @media (max-width: 520px) {
-  /* Правая панель здесь уже display:none — топ-HUD забирает всю ширину, а
-     подсказка поднимается под один ряд иконок. */
-  :root {
-    --onboard-top: calc(var(--sa-top) + 118px);
-  }
-
   /* Шесть колонок в 375px помещаются только «в упор»: числа и так табличные,
      поэтому режем горизонтальные отступы, а не колонки — прятать смерти/киллы
      нельзя, они и есть новые данные, ради которых экран переделан. */
   .matchTable td,
   .matchTable th {
     padding: 6px 4px;
-  }
-
-  .deathExplain {
-    font-size: var(--fs-13);
-    padding: var(--pad-md);
   }
 }
 
@@ -5665,10 +5005,6 @@ body.overlayActive .reclaimHint {
    элементы оставались в конечном, читаемом состоянии.
    ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
-  .onboardHint,
-  .onboardStepToast,
-  .reclaimHint,
-  #bigBanner.isOn.firstCaptureBanner,
   .topHudBounty.isMe,
   .topHudTime.isUrgent,
   .lb-leave,
@@ -5676,24 +5012,11 @@ body.overlayActive .reclaimHint {
     animation: none;
   }
 
-  /* Без «влёта» подсказка обязана быть видимой и на месте */
-  .onboardHint {
-    opacity: 1;
-    transform: translateX(-50%);
-  }
-
-  #bigBanner.isOn.firstCaptureBanner {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
-
   .lb-leave {
     opacity: 0;
   }
 
-  .matchFirstSkinFill,
-  .firstSkinProgressFill,
-  .reclaimHintFill {
+  .matchFirstSkinFill {
     transition: none;
   }
 }
@@ -5926,8 +5249,7 @@ body.overlayActive .reclaimHint {
 
 /* Вес 800–900 на 11–13px по тёмному фону читается как замыленное пятно:
    акцент оставляем только капителям-разделителям. */
-.overlay .card .settingsGroupTitle,
-.overlay .card .tierDivider {
+.overlay .card .settingsGroupTitle {
   font-size: var(--fs-meta);
   font-weight: 700;
 }
@@ -6067,8 +5389,6 @@ body.overlayActive .reclaimHint {
     max-height: min(56dvh, 520px);
   }
 
-  .cosmeticsItems > .tierDivider,
-  .cosmeticsItems > .cosmeticsCatSummary,
   .cosmeticsItems > .roomsEmpty {
     grid-column: 1 / -1;
   }
@@ -6147,7 +5467,6 @@ html[data-theme="light"] {
 .deathOverlay .toastTitle,
 .overlay .card .btnPlay,
 .matchKpiValue,
-.topHudValue,
 #title {
   font-weight: 900;
 }
@@ -6630,8 +5949,7 @@ body.inGame #hud:not(.lbPinned) #help {
   opacity: 0.9;
 }
 
-/* В плашке над головой ник и так мелкий — бейдж ужимаем ещё сильнее */
-.nameTag .botArch,
+/* Только-глиф вариант бейджа: ужимаем ещё сильнее */
 .botArch.isGlyphOnly {
   max-width: none;
   padding: 0 3px;

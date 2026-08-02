@@ -162,7 +162,6 @@ func buildGolden(t *testing.T) goldenDoc {
 			"roiTrailerLen":          2 + 2 + 2 + 2 + 4 + 4,
 		},
 		MsgTypes: map[string]int{
-			"state":        MsgStateBinary,
 			"roi":          MsgROIBinary,
 			"minimapChunk": MsgMinimapChunk,
 			"events":       MsgEventsBinary,
