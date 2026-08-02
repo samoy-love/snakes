@@ -71,7 +71,6 @@ func TestEnvVarsAreDocumented(t *testing.T) {
 	}{
 		{".env.example", "добавьте запись с дефолтом и комментарием, зачем она"},
 		{"README.md", "опишите переменную в таблице конфигурации"},
-		{"docker-compose.yml", "пробросьте её в environment: сервиса game"},
 	}
 
 	for _, d := range docs {
@@ -91,7 +90,7 @@ func TestEnvVarsAreDocumented(t *testing.T) {
 
 // В обратную сторону: в .env.example не должно остаться переменных, которые
 // код уже не читает, — оператор выставит их и будет думать, что они работают.
-// HTTP_PORT — исключение, её читает docker-compose.yml, а не сервер.
+// Исключение — переменные, которые потребляет сборка, а не сам сервер.
 func TestEnvExampleHasNoStaleVars(t *testing.T) {
 	b, err := os.ReadFile(".env.example")
 	if err != nil {
@@ -103,9 +102,8 @@ func TestEnvExampleHasNoStaleVars(t *testing.T) {
 	}
 	// Переменные, которые потребляет инфраструктура, а не сам сервер.
 	infra := map[string]string{
-		"HTTP_PORT": "порт публикации nginx в docker-compose.yml",
-		"VERSION":   "build arg докерфайла",
-		"COMMIT":    "build arg докерфайла",
+		"VERSION": "вшивается в бинарь через -ldflags при сборке",
+		"COMMIT":  "вшивается в бинарь через -ldflags при сборке",
 	}
 
 	assign := regexp.MustCompile(`(?m)^\s*#?\s*([A-Z][A-Z0-9_]*)=`)

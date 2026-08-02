@@ -44,7 +44,7 @@ CLIENT_JS  := public/client.js public/client_audio.js public/client_errors.js \
 CLIENT_TESTS := tests/protocol_golden.test.mjs tests/client_contract.test.mjs
 
 .PHONY: help run build test test-race test-race-docker test-client test-all vet fmt fmt-check \
-        golden node-check docker-build docker-up docker-down docker-logs clean
+        golden node-check clean
 
 help:
 	@echo "Доступные цели:"
@@ -60,10 +60,6 @@ help:
 	@echo "  vet          — go vet ./..."
 	@echo "  fmt          — gofmt -w ."
 	@echo "  fmt-check    — падает, если есть неотформатированные файлы"
-	@echo "  docker-build — docker build -t $(IMAGE):$(TAG) ."
-	@echo "  docker-up    — docker compose up -d --build"
-	@echo "  docker-down  — docker compose down"
-	@echo "  docker-logs  — docker compose logs -f"
 	@echo "  clean        — удалить бинарь и dist/"
 
 run:
@@ -131,21 +127,6 @@ fmt-check:
 		exit 1; \
 	fi
 
-docker-build:
-	docker build \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg COMMIT=$(COMMIT) \
-		--build-arg BUILD_TIME=$(BUILD_TIME) \
-		-t $(IMAGE):$(TAG) .
-
-docker-up:
-	docker compose up -d --build
-
-docker-down:
-	docker compose down
-
-docker-logs:
-	docker compose logs -f --tail=100
 
 clean:
 	go clean
