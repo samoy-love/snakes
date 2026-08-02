@@ -1,193 +1,27 @@
+// ws.go — сессия игрока поверх WebSocket: рукопожатие, лимиты на входящие
+// команды и их разбор. Всё, что относится к транспорту и не знает про игру
+// (адрес за прокси, ведро rate-limit, allowlist Origin'ов), живёт в httpx.
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"log"
-	"math"
-	"net"
 	"net/http"
-	"net/url"
-	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"nhooyr.io/websocket"
+
+	"snakes/internal/httpx"
 )
 
-// requestClientIP resolves the peer address used for rate limiting and logs
-// only. X-Forwarded-For is honoured only when the immediate peer is a trusted
-// proxy, and then the rightmost untrusted hop wins: everything to its left is
-// attacker controlled and must not be believed.
-func requestClientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = strings.TrimSpace(r.RemoteAddr)
-	}
-	host = strings.TrimSpace(host)
-	if !isTrustedProxy(host) {
-		return host
-	}
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff == "" {
-		return host
-	}
-	parts := strings.Split(xff, ",")
-	for i := len(parts) - 1; i >= 0; i-- {
-		ip := strings.TrimSpace(parts[i])
-		if ip == "" {
-			continue
-		}
-		if net.ParseIP(ip) == nil {
-			// Malformed chain: stop trusting it entirely.
-			return host
-		}
-		if isTrustedProxy(ip) {
-			continue
-		}
-		return ip
-	}
-	return host
-}
-
-type tokenBucket struct {
-	tokens   float64
-	last     time.Time
-	rate     float64
-	burst    float64
-	lastSeen time.Time
-}
-
-type ipRateLimiter struct {
-	mu        sync.Mutex
-	buckets   map[string]*tokenBucket
-	lastSweep time.Time
-}
-
-const (
-	// rateLimiterSweepAt is the bucket count above which idle entries are
-	// dropped. One bucket exists per (IP, message type) pair.
-	rateLimiterSweepAt = 5000
-	// rateLimiterSweepEvery bounds how often the O(n) sweep runs.
-	rateLimiterSweepEvery = 30 * time.Second
-	// rateLimiterBucketTTL is how long an untouched bucket is kept.
-	rateLimiterBucketTTL = 10 * time.Minute
-	// rateLimiterBucketTTLTight is the fallback cutoff used when a normal
-	// sweep did not bring the map back under the threshold.
-	rateLimiterBucketTTLTight = time.Minute
-)
-
-// sweepLocked drops idle buckets. It must run on the accepted path too: the
-// original code swept only after a rejection, so a server where nobody is
-// being limited grew the map without bound. Caller holds l.mu.
-func (l *ipRateLimiter) sweepLocked(now time.Time) {
-	if len(l.buckets) <= rateLimiterSweepAt {
-		return
-	}
-	if !l.lastSweep.IsZero() && now.Sub(l.lastSweep) < rateLimiterSweepEvery {
-		return
-	}
-	l.lastSweep = now
-	l.dropIdleLocked(now.Add(-rateLimiterBucketTTL))
-	if len(l.buckets) > rateLimiterSweepAt {
-		l.dropIdleLocked(now.Add(-rateLimiterBucketTTLTight))
-	}
-}
-
-func (l *ipRateLimiter) dropIdleLocked(cut time.Time) {
-	for k, v := range l.buckets {
-		if v.lastSeen.Before(cut) {
-			delete(l.buckets, k)
-		}
-	}
-}
-
-func (l *ipRateLimiter) allow(key string, rate float64, burst float64) bool {
-	if l == nil {
-		return true
-	}
-	now := time.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.buckets == nil {
-		l.buckets = make(map[string]*tokenBucket)
-	}
-	b := l.buckets[key]
-	if b == nil {
-		b = &tokenBucket{tokens: burst, last: now, rate: rate, burst: burst, lastSeen: now}
-		l.buckets[key] = b
-	}
-	b.lastSeen = now
-	b.rate = rate
-	b.burst = burst
-	dt := now.Sub(b.last).Seconds()
-	if dt > 0 {
-		b.tokens = math.Min(b.burst, b.tokens+dt*b.rate)
-		b.last = now
-	}
-	l.sweepLocked(now)
-	if b.tokens >= 1 {
-		b.tokens -= 1
-		return true
-	}
-	return false
-}
-
-var wsIPLimiter = &ipRateLimiter{buckets: make(map[string]*tokenBucket)}
-
-// normalizeWSOrigin makes both sides of the allowlist comparison canonical:
-// scheme and host are case-insensitive, a trailing slash is not significant.
-func normalizeWSOrigin(s string) string {
-	s = strings.TrimRight(strings.TrimSpace(s), "/")
-	u, err := url.Parse(s)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return strings.ToLower(s)
-	}
-	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
-}
-
-// wsAllowLocalhost keeps the "any loopback Origin is fine" shortcut. It is
-// convenient in development and a hole in production, where it hands a page
-// served by malware on the player's own machine a valid Origin: production was
-// measured answering 101 to `Origin: http://localhost`.
-//
-// G9: OFF by default. Development turns it on explicitly with
-// WS_ALLOW_LOCALHOST=1 (also true/yes/on).
-var wsAllowLocalhost = loadWSAllowLocalhost()
-
-func loadWSAllowLocalhost() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("WS_ALLOW_LOCALHOST"))) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
-}
-
-func isLoopbackOriginHost(h string) bool {
-	h = strings.ToLower(strings.TrimSpace(h))
-	return h == "localhost" || h == "127.0.0.1" || h == "::1"
-}
-
-// wsOriginAllowed is the single arbiter of the WebSocket Origin check;
-// websocket.Accept runs with InsecureSkipVerify so nothing rejects earlier.
-func wsOriginAllowed(r *http.Request) bool {
-	origin := strings.TrimSpace(r.Header.Get("Origin"))
-	if origin == "" {
-		// Non-browser client: no Origin to judge.
-		return true
-	}
-	if wsAllowLocalhost {
-		if u, err := url.Parse(origin); err == nil && isLoopbackOriginHost(u.Hostname()) {
-			return true
-		}
-	}
-	_, ok := allowedWSOrigins[normalizeWSOrigin(origin)]
-	return ok
-}
+// wsIPLimiter — общий на процесс лимитер входящих команд: одно ведро на пару
+// (IP, тип сообщения).
+var wsIPLimiter = httpx.NewIPRateLimiter()
 
 func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
-	if !wsOriginAllowed(r) {
+	if !httpx.WSOriginAllowed(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -207,7 +41,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	c.SetReadLimit(MaxClientWSMsgBytes)
 	// Signed identity: the legacy ?pid= parameter is never trusted, only ?t=.
 	pid, token := resolveProfileToken(r.URL.Query().Get("t"))
-	client := &Client{conn: c, sendCh: make(chan outbound, 256), ip: requestClientIP(r), pid: pid}
+	client := &Client{conn: c, sendCh: make(chan outbound, 256), ip: httpx.ClientIP(r), pid: pid}
 	// G7: a profile held by a live connection is never an eviction candidate.
 	retainProfilePID(pid)
 	defer releaseProfilePID(pid)
@@ -306,7 +140,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				key = client.ip + "|<unknown>"
 				rate, burst = 5, 10
 			}
-			if rate > 0 && !wsIPLimiter.allow(key, rate, burst) {
+			if rate > 0 && !wsIPLimiter.Allow(key, rate, burst) {
 				client.closeWith(websocket.StatusPolicyViolation, "rate_limited")
 				return
 			}

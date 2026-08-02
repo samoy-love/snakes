@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"snakes/internal/envcfg"
 )
 
 var debugBotDeathSnap = os.Getenv("BOT_DEATH_SNAP") == "1"
@@ -24,12 +26,12 @@ var (
 
 func init() {
 	if v := os.Getenv("MATCH_DURATION_TICKS"); v != "" {
-		if n, err := parseInt(v); err == nil && n > 0 {
+		if n, err := envcfg.ParseInt(v); err == nil && n > 0 {
 			MatchDurationTicks = uint32(n)
 		}
 	}
 	if v := os.Getenv("MATCH_INTERMISSION_TICKS"); v != "" {
-		if n, err := parseInt(v); err == nil && n > 0 {
+		if n, err := envcfg.ParseInt(v); err == nil && n > 0 {
 			MatchIntermissionTicks = uint32(n)
 		}
 	}
@@ -50,28 +52,6 @@ const (
 	// is dropped. Keep small: broadcasts run on the room tick goroutine.
 	SendBackpressureTimeout = 100 * time.Millisecond
 )
-
-// allowedWSOrigins is the WebSocket origin allowlist. It is seeded from the
-// WS_ORIGINS env var (comma-separated), falling back to the production host.
-// Without this, any deployment on a different domain — including Docker — is
-// rejected at the handshake.
-var allowedWSOrigins = loadAllowedWSOrigins()
-
-func loadAllowedWSOrigins() map[string]struct{} {
-	out := make(map[string]struct{})
-	raw := strings.TrimSpace(os.Getenv("WS_ORIGINS"))
-	if raw == "" {
-		out["https://snakes.samoy.love"] = struct{}{}
-		out["http://snakes.samoy.love"] = struct{}{}
-		return out
-	}
-	for _, part := range strings.Split(raw, ",") {
-		if o := normalizeWSOrigin(part); o != "" {
-			out[o] = struct{}{}
-		}
-	}
-	return out
-}
 
 // Build metadata, injected by the linker:
 //

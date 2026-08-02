@@ -1,7 +1,6 @@
-package main
+package httpx
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,7 +14,7 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	h := securityHeadersMiddleware(next)
+	h := SecurityHeadersMiddleware(next)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -65,7 +64,7 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	}
 
 	// Заголовки ставятся до вызова next, то есть и на ответах с ошибкой.
-	boom := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	boom := SecurityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nope", http.StatusInternalServerError)
 	}))
 	rec = httptest.NewRecorder()
@@ -87,7 +86,7 @@ func TestIsVersionedAsset(t *testing.T) {
 	}{
 		{"/client.js", false},
 		{"/client.js?v=", false},
-		{"/client.js?v=" + buildPlaceholder, false},
+		{"/client.js?v=" + BuildPlaceholder, false},
 		{"/client.js?v=20260802-abc1234", true},
 		{"/client.js?x=1&v=rel", true},
 		{"/client.js?v=0", true},
@@ -96,31 +95,6 @@ func TestIsVersionedAsset(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, c.url, nil)
 		if got := isVersionedAsset(req); got != c.want {
 			t.Fatalf("isVersionedAsset(%q) = %v, ожидалось %v", c.url, got, c.want)
-		}
-	}
-}
-
-// Ловит: молчаливое принятие мусора в числовых переменных окружения
-// (PORT/ROOM_LIMIT читаются через parseInt).
-func TestParseInt(t *testing.T) {
-	cases := []struct {
-		in   string
-		want int
-		ok   bool
-	}{
-		{"0", 0, true},
-		{"42", 42, true},
-		{"-7", -7, true},
-		{"", 0, false},
-		{"abc", 0, false},
-	}
-	for _, c := range cases {
-		got, err := parseInt(c.in)
-		if (err == nil) != c.ok {
-			t.Fatalf("parseInt(%q): err=%v, ожидалось ok=%v", c.in, err, c.ok)
-		}
-		if c.ok && got != c.want {
-			t.Fatalf("parseInt(%q) = %d, ожидалось %d", c.in, got, c.want)
 		}
 	}
 }
@@ -134,8 +108,8 @@ func TestProbeHandlers(t *testing.T) {
 		h    http.HandlerFunc
 		body string
 	}{
-		{"/healthz", healthzHandler, "ok\n"},
-		{"/readyz", readyzHandler, "ready\n"},
+		{"/healthz", HealthzHandler, "ok\n"},
+		{"/readyz", ReadyzHandler, "ready\n"},
 	}
 	for _, c := range cases {
 		rec := httptest.NewRecorder()
@@ -152,62 +126,5 @@ func TestProbeHandlers(t *testing.T) {
 		if got := rec.Body.String(); got != c.body {
 			t.Fatalf("%s: тело %q, ожидалось %q", c.name, got, c.body)
 		}
-	}
-}
-
-// Ловит: поломку формата /metrics и потерю связи счётчиков с metrics.*.
-// Ответ парсится внешним сбором, поэтому это обязан быть валидный JSON с
-// ровно этими четырьмя ключами.
-func TestMetricsHandler(t *testing.T) {
-	read := func() map[string]int64 {
-		rec := httptest.NewRecorder()
-		metricsHandler(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("код %d, ожидалось 200", rec.Code)
-		}
-		if got := rec.Header().Get("Content-Type"); got != "application/json" {
-			t.Fatalf("Content-Type = %q, ожидалось application/json", got)
-		}
-		var m map[string]int64
-		if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
-			t.Fatalf("тело /metrics не JSON (%v): %s", err, rec.Body.String())
-		}
-		if len(m) != 4 {
-			t.Fatalf("в ответе %d счётчиков, ожидалось 4: %s", len(m), rec.Body.String())
-		}
-		for _, k := range []string{"wsConnections", "wsActive", "wsWriteErrors", "wsDropped"} {
-			if _, ok := m[k]; !ok {
-				t.Fatalf("нет счётчика %q: %s", k, rec.Body.String())
-			}
-		}
-		return m
-	}
-
-	before := read()
-	metrics.wsConnections.Add(1)
-	metrics.wsActive.Add(1)
-	metrics.wsWriteErrors.Add(1)
-	metrics.wsDropped.Add(1)
-	// Счётчики глобальные — возвращаем их на место, чтобы соседние тесты
-	// видели то же, что и до нас.
-	defer func() {
-		metrics.wsConnections.Add(^uint64(0))
-		metrics.wsActive.Add(-1)
-		metrics.wsWriteErrors.Add(^uint64(0))
-		metrics.wsDropped.Add(^uint64(0))
-	}()
-	after := read()
-	for k, v := range before {
-		if after[k] != v+1 {
-			t.Fatalf("%s = %d, ожидалось %d — счётчик отвязан от metrics.*", k, after[k], v+1)
-		}
-	}
-}
-
-// mustCwd обязан возвращать что-то пригодное для filepath.Join, а не пустую
-// строку: на ней http.Dir("") отдаёт корень файловой системы.
-func TestMustCwdIsNeverEmpty(t *testing.T) {
-	if got := mustCwd(); got == "" {
-		t.Fatal("mustCwd вернул пустую строку — раздача статики уехала бы в корень ФС")
 	}
 }
