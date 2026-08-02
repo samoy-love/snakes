@@ -89,6 +89,7 @@ go run .
 | `MAX_PROFILES` | `50000` | Потолок числа профилей: сохранение маршалит весь набор целиком |
 | `PROFILE_EMPTY_TTL_HOURS` | `6` | Через сколько часов вычищается профиль без прогресса (с прогрессом — 90 дней) |
 | `BOT_DEATH_SNAP` | *(пусто)* | Отладочный «снап» бота при смерти. В проде не нужен |
+| `METRICS_ADDR` | *(пусто)* | Адрес отдельного слушателя метрик (`host:port`). Пусто — отдельного слушателя нет, см. [Метрики](#метрики) |
 
 Фактические лимиты сервер печатает в лог при старте — там же версия сборки:
 
@@ -103,6 +104,36 @@ limits roomLimit=16 maxRooms=64 maxProfiles=50000 wsAllowLocalhost=false
 
 Шаблон конфигурации — `.env.example`. Тест `env_docs_test.go` следит, чтобы каждая
 `os.Getenv` в коде была описана и здесь, и в шаблоне.
+
+## Метрики
+
+`/metrics` отдаёт text exposition format Prometheus. Реализация своя
+(`internal/metrics`), без `prometheus/client_golang`: формат — имя, метки,
+число, перевод строки, а библиотека тянет за собой protobuf и expfmt ради трёх
+десятков счётчиков.
+
+Считается не только транспорт, но и то, как в игру играют:
+
+| Метрика | О чём |
+| --- | --- |
+| `snakes_rooms`, `snakes_players`, `snakes_bots`, `snakes_matches_running` | Что происходит прямо сейчас |
+| `snakes_matches_total`, `snakes_match_duration_seconds`, `snakes_match_survivors` | Матчи: сколько, как долго, сколько игроков доживает до конца |
+| `snakes_tick_duration_seconds` | Время обсчёта тика при бюджете 100 мс |
+| `snakes_cells_captured_total`, `snakes_loops_closed_total` | Территория и замкнутые петли |
+| `snakes_kills_total`, `snakes_deaths_total{reason}` | Смерти по причинам: `self_trail`, `trail_cut`, `head_on`, `wall` |
+| `snakes_powerup_pickups_total{type}`, `snakes_mutators_activated_total{mutator}` | Бонусы по типам и сработавшие мутаторы |
+| `snakes_contracts_completed_total{type}`, `snakes_dailies_completed_total{type}` | Выполненные контракты и ежедневки |
+| `snakes_style_awarded_total{reason}`, `snakes_cosmetics_purchased_total{category}` | Начисленный «Стиль» по поводам и покупки косметики |
+| `snakes_ws_closed_total{reason}`, `snakes_ws_handshake_rejected_total{reason}`, `snakes_ratelimit_triggered_total{kind}` | Разрывы, отказы по Origin, срабатывания rate-limit |
+| `snakes_ws_connections_total`, `snakes_ws_active`, `snakes_ws_write_errors_total`, `snakes_ws_dropped_messages_total` | Транспорт |
+| `snakes_build_info{version,commit}` | Какая версия сейчас крутится |
+
+Сбор идёт из Prometheus в `samoy-monitoring`, а тот живёт в Docker и приходит с
+адреса моста. Игровой порт закрыт на loopback намеренно, поэтому для сбора
+поднимается отдельный слушатель на `METRICS_ADDR` — он отдаёт ровно `/metrics`,
+и открытие адреса моста не открывает заодно `/ws` и статику мимо nginx.
+Дополнительно юнит режет сеть на уровне ядра, см.
+`deploy/systemd/snakes.service.d/10-metrics-scrape.conf`.
 
 ## Тесты
 

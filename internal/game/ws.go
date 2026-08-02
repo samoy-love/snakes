@@ -27,6 +27,7 @@ var wsIPLimiter = httpx.NewIPRateLimiter()
 
 func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	if !httpx.WSOriginAllowed(r) {
+		metrics.WSHandshakeRejectedTotal.Inc("origin")
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -146,6 +147,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				rate, burst = 5, 10
 			}
 			if rate > 0 && !wsIPLimiter.Allow(key, rate, burst) {
+				metrics.RateLimitedTotal.Inc("ws_command")
 				client.closeWith(websocket.StatusPolicyViolation, "rate_limited")
 				return
 			}
@@ -367,6 +369,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if bought {
+				metrics.CosmeticsPurchasedTotal.Inc(cat)
 				profiles.MarkDirty()
 				log.Printf("cosmetics_txn pid=%q cat=%q id=%d price=%d balance_before=%d balance_after=%d",
 					profiles.ShortPID(pid), cat, id, price, balBefore, balAfter)

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -34,6 +35,7 @@ var (
 func main() {
 	log.Printf("snakes build version=%s commit=%s buildTime=%s", Version, Commit, BuildTime)
 	game.SetBuildVersion(Version)
+	metrics.SetBuildInfo(Version, Commit)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -64,6 +66,7 @@ func main() {
 	profiles.StartAutosave(autosaveStop)
 
 	hub := game.NewHub(roomLimit)
+	metrics.SetGameSnapshot(hub.Snapshot)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", hub.HandleWS)
@@ -85,6 +88,31 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 
+	// Отдельный слушатель для метрик. Игра остаётся на loopback, а забирать
+	// метрики приходит Prometheus из docker-контейнера, то есть с адреса
+	// моста. Пустить его на игровой порт означало бы открыть туда же /ws и
+	// статику мимо nginx со всеми его лимитами и заголовками, поэтому наружу
+	// выставляется ровно один путь и ничего больше. Пусто — слушателя нет.
+	var metricsSrv *http.Server
+	if addr := strings.TrimSpace(os.Getenv("METRICS_ADDR")); addr != "" {
+		mmux := http.NewServeMux()
+		mmux.HandleFunc("/metrics", metrics.Handler)
+		metricsSrv = &http.Server{
+			Addr:              addr,
+			Handler:           mmux,
+			ReadHeaderTimeout: 5 * time.Second,
+			WriteTimeout:      15 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
+		go func() {
+			log.Printf("metrics listening on http://%s/metrics", addr)
+			if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				// Не Fatal: без метрик игра играется, без игры метрики не нужны.
+				log.Printf("metrics server error: %v", err)
+			}
+		}()
+	}
+
 	go func() {
 		log.Printf("listening on http://%s\n", listenAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -99,6 +127,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+	if metricsSrv != nil {
+		_ = metricsSrv.Shutdown(ctx)
+	}
 
 	hub.Close()
 

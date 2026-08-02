@@ -18,6 +18,8 @@ import (
 	"snakes/internal/profiles"
 
 	"snakes/internal/sanitize"
+
+	"snakes/internal/metrics"
 )
 
 // F4: a match runs through three phases derived from r.tick-r.matchStartTick.
@@ -648,6 +650,7 @@ func (r *Room) maybeUpdateMutator() {
 		if el == 600 || el == 1500 || el == 2400 {
 			pick := uint8(1 + r.rng.Intn(2))
 			r.mutatorType = pick
+			metrics.MutatorsActivatedTotal.Inc(mutatorLabel(pick))
 			r.mutatorUntil = r.tick + 240
 			r.pushEvent(Event{Kind: EventMutatorStart, D: r.mutatorType, C: r.mutatorUntil})
 			r.metaDirty = true
@@ -1262,7 +1265,9 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 	if r.matchDeaths != nil {
 		r.matchDeaths[num] = r.matchDeaths[num] + 1
 	}
+	metrics.DeathsTotal.Inc(reason)
 	if killer != 0 && killer != num {
+		metrics.KillsTotal.Inc()
 		if r.matchKills != nil {
 			r.matchKills[killer] = r.matchKills[killer] + 1
 		}
@@ -1976,6 +1981,7 @@ func (r *Room) applyMove(p *Player) {
 			r.removePowerUpAtIndex(idx)
 			r.metaDirty = true
 			r.pushEvent(Event{Kind: EventPowerupPickup, A: p.num, B: pu.ID, D: pu.Type, X: uint16(p.x), Y: uint16(p.y)})
+			metrics.PowerupPickupsTotal.Inc(powerupLabel(pu.Type))
 			r.ensureContract(p)
 			if p.contractType == ContractPickups {
 				r.addContractProgress(p, 1)
@@ -2082,6 +2088,9 @@ func (r *Room) step() {
 
 	r.tick++
 	tickNow := r.tick
+	// Время тика снимается через defer: у step несколько ранних выходов, и
+	// замер в конце тела считал бы только самые тяжёлые тики.
+	defer func() { metrics.TickDurationSeconds.ObserveDuration(time.Since(stepStartedAt)) }()
 
 	var matchEndPayload any
 	var matchStartPayload any
@@ -2102,6 +2111,15 @@ func (r *Room) step() {
 				}
 			}
 			log.Printf("match_end room=%d seq=%d reclaims=%d", r.id, r.matchSeq, reclaims)
+			survivors := 0
+			for _, p := range r.players {
+				if p != nil && p.alive {
+					survivors++
+				}
+			}
+			metrics.MatchesTotal.Inc()
+			metrics.MatchDurationSeconds.Observe(float64(r.matchElapsed()) * TickMS / 1000)
+			metrics.MatchSurvivors.Observe(float64(survivors))
 			// E3: rewards follow the ABSOLUTE place among every participant,
 			// bots included. Ranking humans only made the single human in a
 			// room a guaranteed "winner" no matter how badly they played.
