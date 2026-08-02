@@ -518,7 +518,16 @@ const (
 	// pay. A 12-cell loop is still a real detour outside your land.
 	CaptureMinCells = 12
 
-	StyleCaptureCellsPer = 25  // trail cells drawn outside per 1 Style
+	// Enclosed cells per 1 Style. This used to read 25 and was calibrated
+	// against the TRAIL length, because capture() accidentally fed it the
+	// perimeter instead of the area (the ownedBefore snapshot was taken after
+	// the interior had already been filled). Fixing that made the same loop
+	// report ~3.4x more cells, which would have inflated the currency and let a
+	// player hit StyleCaptureMatchCap in a fraction of the intended time — the
+	// very problem G1 was written to stop. Rescaled by that ratio so the Style
+	// income per match stays where it was tuned; the fix shows up in match
+	// POINTS (big loops finally out-earn nibbles), not in currency.
+	StyleCaptureCellsPer = 85
 	StyleCaptureMatchCap = 70  // E2: max Style from captures per match
 	StyleKillMatchCap    = 100 // E4: max Style from kills (incl. streaks) per match
 
