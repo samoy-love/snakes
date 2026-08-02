@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -786,4 +787,82 @@ func startProfilesAutosave(stop <-chan struct{}) {
 			}
 		}
 	}()
+}
+
+var profilesMu sync.Mutex
+var profiles = make(map[string]*Profile)
+
+func dayStampNow() int64 {
+	return time.Now().Unix() / 86400
+}
+
+// profileForKey is the READ path. It returns the stored profile when there is
+// one, otherwise a transient zero-value profile that is deliberately NOT put in
+// the map: a connect/join/disconnect loop must not be able to grow the store.
+// Writes through a transient profile are dropped, which is exactly right for a
+// player who has not earned anything yet.
+func profileForKey(key string) *Profile {
+	if key == "" {
+		return nil
+	}
+	profilesMu.Lock()
+	p := profiles[key]
+	profilesMu.Unlock()
+	if p == nil {
+		p = &Profile{LastSeen: time.Now().Unix()}
+	}
+	return p
+}
+
+// profileForKeyCreate is the WRITE path: it materialises the profile in the
+// store. Only call it where there is real progress to persist (a Style grant, a
+// quest step, a purchase) — never from a path a client can drive without
+// actually playing.
+func profileForKeyCreate(key string) *Profile {
+	if key == "" {
+		return nil
+	}
+	profilesMu.Lock()
+	defer profilesMu.Unlock()
+	return profileForKeyCreateLocked(key)
+}
+
+// profileForKeyEquipLocked is the lookup used by the EQUIP paths
+// (cosmeticsEquip, titleEquip). Equipping is not progress: nothing can be
+// equipped that was not first bought or unlocked, and both of those already
+// materialise the profile. Routing equip through profileForKeyCreateLocked
+// (G8) meant every visitor who merely opened the wardrobe minted a store entry
+// — a free write amplifier against MAX_PROFILES that needed nothing but a
+// websocket and a rate-limit-respecting loop. S5: hand back the stored profile
+// when there is one, otherwise a transient with the free defaults. For such a
+// profile the only owned item in every category is bit 0, which is already the
+// equipped default, so every equip it can legally perform is a no-op and there
+// is nothing to persist. The second return says whether the profile is stored,
+// so callers know not to wake the autosave. Caller holds profilesMu.
+func profileForKeyEquipLocked(key string) (*Profile, bool) {
+	if key == "" {
+		return nil, false
+	}
+	if p := profiles[key]; p != nil {
+		return p, true
+	}
+	return &Profile{LastSeen: time.Now().Unix()}, false
+}
+
+// profileForKeyCreateLocked is profileForKeyCreate for callers that already
+// hold profilesMu, which is the only way to take the pointer and write through
+// it in one critical section (G8).
+func profileForKeyCreateLocked(key string) *Profile {
+	if key == "" {
+		return nil
+	}
+	now := time.Now()
+	p := profiles[key]
+	if p == nil {
+		evictProfilesLocked(now)
+		p = &Profile{LastSeen: now.Unix()}
+		profiles[key] = p
+		markProfilesDirty()
+	}
+	return p
 }

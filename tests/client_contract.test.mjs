@@ -13,6 +13,10 @@
  * Во всех трёх случаях парсер «съезжал» и молча терял киллфид, тосты,
  * обновления заданий и баланс валюты.
  *
+ * Клиент разбит на модули (public/client*.js), поэтому тест склеивает их все
+ * и ищет разбор в общем тексте: так проверка переживает переезд парсера в
+ * другой файл и не превращается в молча зелёный тест.
+ *
  * Тест разбирает исходник клиента как текст и проверяет три вещи на каждый
  * тип события:
  *   1) обработчик существует;
@@ -23,17 +27,33 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const golden = JSON.parse(readFileSync(join(HERE, 'golden', 'protocol_golden.json'), 'utf8'));
+
+// Все модули клиента, склеенные в один текст. Парсер протокола сейчас лежит в
+// client.js, но искать его по всему клиенту дешевле, чем однажды не заметить
+// переезд: тест тогда просто не нашёл бы разбор и упал, а не позеленел молча.
 // SNAKES_CLIENT_JS — только для самопроверки самого теста (прогон по нарочно
 // испорченной копии клиента). В CI переменная не задаётся.
-const clientPath = process.env.SNAKES_CLIENT_JS || join(ROOT, 'public', 'client.js');
-const src = readFileSync(clientPath, 'utf8');
+function readClientSources() {
+  const override = process.env.SNAKES_CLIENT_JS;
+  if (override) return readFileSync(override, 'utf8');
+  const dir = join(ROOT, 'public');
+  const files = readdirSync(dir)
+    .filter((f) => /^client.*\.js$/.test(f))
+    .sort();
+  // client.js первым: разбор пакетов и msgType-ветки исторически там, а порядок
+  // важен только для читаемости диагностики.
+  files.sort((a, b) => (a === 'client.js' ? -1 : b === 'client.js' ? 1 : 0));
+  return files.map((f) => readFileSync(join(dir, f), 'utf8')).join('\n');
+}
+
+const src = readClientSources();
 
 // --- вспомогательные разборщики --------------------------------------------
 

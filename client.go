@@ -1,0 +1,438 @@
+// client.go holds the per-connection client: its send queue and write loop,
+// room join/leave and the chat handler.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"time"
+
+	"nhooyr.io/websocket"
+)
+
+func (c *Client) profileKey() string {
+	if c == nil {
+		return ""
+	}
+	if c.pid != "" {
+		return c.pid
+	}
+	return c.ip
+}
+
+func (c *Client) close() {
+	c.closeWith(websocket.StatusNormalClosure, "")
+}
+
+func (c *Client) closeWith(code websocket.StatusCode, reason string) {
+	if c.closed.Swap(true) {
+		return
+	}
+	log.Printf("ws_close ip=%q pid=%q code=%d reason=%q", c.ip, shortPID(c.pid), code, reason)
+	metrics.wsActive.Add(-1)
+	c.leaveRoom(context.Background())
+	close(c.sendCh)
+	_ = c.conn.Close(code, reason)
+}
+
+func (c *Client) writeLoop() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("ws_writeLoop_panic ip=%q err=%v", c.ip, r)
+			c.closeWith(websocket.StatusInternalError, "panic")
+		}
+	}()
+
+	writeFailed := false
+	for m := range c.sendCh {
+		if !writeFailed {
+			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+			err := c.conn.Write(ctx, m.msgType, m.data)
+			cancel()
+			if err != nil {
+				metrics.wsWriteErrors.Add(1)
+				log.Printf("ws_write_error ip=%q err=%v", c.ip, err)
+				writeFailed = true
+				c.closeWith(websocket.StatusGoingAway, "write_error")
+			}
+		}
+		if m.pd != nil {
+			decPooledRef(m.pd)
+		}
+		if c.closed.Load() && writeFailed {
+			// drain queued messages to release pooled refs
+			continue
+		}
+		if c.closed.Load() {
+			return
+		}
+	}
+}
+
+func (c *Client) enqueue(msgType websocket.MessageType, b []byte, pd *pooledData, drop bool) bool {
+	if c.closed.Load() {
+		decPooledRef(pd)
+		return false
+	}
+	m := outbound{msgType: msgType, data: b, drop: drop, pd: pd}
+	defer func() {
+		if recover() != nil {
+			decPooledRef(pd)
+		}
+	}()
+	if drop {
+		select {
+		case c.sendCh <- m:
+			return true
+		default:
+		}
+		metrics.wsDropped.Add(1)
+		decPooledRef(pd)
+		return false
+	}
+	select {
+	case c.sendCh <- m:
+		return true
+	default:
+	}
+	// Bounded wait: a single slow client must never stall a room tick.
+	t := time.NewTimer(SendBackpressureTimeout)
+	defer func() {
+		if !t.Stop() {
+			select {
+			case <-t.C:
+			default:
+			}
+		}
+	}()
+	select {
+	case c.sendCh <- m:
+		return true
+	case <-t.C:
+	}
+	metrics.wsDropped.Add(1)
+	decPooledRef(pd)
+	// Drop the laggard instead of blocking everyone else. Async because the
+	// caller may hold room locks that close() needs.
+	go c.closeWith(websocket.StatusPolicyViolation, "send_backpressure")
+	return false
+}
+
+func (c *Client) sendJSON(ctx context.Context, typ string, data any) {
+	b, err := json.Marshal(ServerMsg{Type: typ, Data: data})
+	if err != nil {
+		return
+	}
+	_ = c.enqueue(websocket.MessageText, b, nil, false)
+}
+
+func (c *Client) sendBinaryPooled(pd *pooledData, drop bool) bool {
+	if pd == nil {
+		return false
+	}
+	if len(pd.b) == 0 {
+		decPooledRef(pd)
+		return false
+	}
+	return c.enqueue(websocket.MessageBinary, pd.b, pd, drop)
+}
+
+func (c *Client) sendRooms(ctx context.Context, hub *Hub) {
+	rooms := hub.listRoomsSnapshot()
+	c.sendJSON(ctx, "rooms", rooms)
+}
+
+func (c *Client) broadcastNameUpdate(ctx context.Context) {
+	c.mu.Lock()
+	rm := c.room
+	pl := c.player
+	name := c.name.Load().(string)
+	c.mu.Unlock()
+	if rm == nil || pl == nil {
+		return
+	}
+
+	rm.mu.Lock()
+	pl.name = name
+	rm.setKnownNameLocked(pl.num, name, true)
+	display := rm.displayNameLocked(pl.num)
+	rm.mu.Unlock()
+
+	rm.broadcastJSON(ctx, "nameUpdate", map[string]any{"n": pl.num, "nm": display})
+}
+
+func (c *Client) leaveRoom(ctx context.Context) {
+	c.leaveRoomInternal(ctx, true)
+}
+
+func (c *Client) leaveRoomInternal(ctx context.Context, notify bool) {
+	c.mu.Lock()
+	rm := c.room
+	pl := c.player
+	c.room = nil
+	c.player = nil
+	c.mu.Unlock()
+
+	if rm == nil {
+		return
+	}
+
+	rm.mu.Lock()
+	delete(rm.clients, c)
+	if pl == nil {
+		rm.mu.Unlock()
+		return
+	}
+
+	offlineUpdate := ""
+	num := pl.num
+	rm.setKnownNameLocked(num, pl.name, false)
+	offlineUpdate = rm.displayNameLocked(num)
+	rm.removePlayer(num)
+	// G5: removePlayer drops the player's territory and trail outright (a
+	// leaver leaves nothing to reclaim), so there is nothing on the map left to
+	// label and the entry must not survive the session. Keeping it was an
+	// unbounded leak: 200 join/leave cycles measured 214 entries, and every one
+	// of them cost each new client one nameUpdate message.
+	if !rm.hasCoolingCellsLocked(num) {
+		rm.dropKnownNameLocked(num)
+	}
+	rm.humanCount = maxInt(0, rm.humanCount-1)
+	rm.forceFullSnapshot = true
+	shouldCleanup := rm.humanCount == 0
+	if !shouldCleanup {
+		// G7: refill the bot field as the room empties out.
+		rm.syncBotPopulationLocked()
+	}
+	rm.mu.Unlock()
+
+	if offlineUpdate != "" {
+		rm.broadcastJSON(ctx, "nameUpdate", map[string]any{"n": num, "nm": offlineUpdate})
+	}
+	if !shouldCleanup {
+		// The refill above may have added bots; cosExtra is what carries their
+		// archetype and tier, so the remaining clients need a fresh copy.
+		rm.broadcastCosExtra(ctx)
+	}
+
+	if notify {
+		c.sendJSON(ctx, "left", map[string]any{"room": rm.id})
+	}
+
+	if shouldCleanup {
+		rm.scheduleCleanup()
+	}
+}
+
+func (c *Client) joinAuto(ctx context.Context, hub *Hub) {
+	rm := hub.pickRoomForJoin()
+	c.joinRoom(ctx, hub, rm)
+}
+
+func (c *Client) joinRoomByID(ctx context.Context, hub *Hub, id int) {
+	rm := hub.getRoom(id)
+	if rm == nil {
+		c.sendJSON(ctx, "error", map[string]any{"message": "room_not_found"})
+		return
+	}
+	c.joinRoom(ctx, hub, rm)
+}
+
+func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
+	if rm == nil {
+		c.sendJSON(ctx, "error", map[string]any{"message": "rooms_limit_reached"})
+		return
+	}
+	c.leaveRoomInternal(ctx, false)
+
+	name := c.name.Load().(string)
+
+	rm.mu.Lock()
+	if rm.humanCount >= rm.limit {
+		rm.mu.Unlock()
+		c.sendJSON(ctx, "error", map[string]any{"message": "room_full"})
+		return
+	}
+
+	pnum := rm.allocPlayerNumLocked()
+	if pnum == 0 {
+		rm.mu.Unlock()
+		c.sendJSON(ctx, "error", map[string]any{"message": "room_full"})
+		return
+	}
+
+	hue := rm.allocUniqueHue()
+
+	pl := &Player{
+		num:             pnum,
+		name:            name,
+		x:               -1,
+		y:               -1,
+		homeX:           -1,
+		homeY:           -1,
+		dir:             DirRight,
+		pendingDir:      DirRight,
+		nextX:           -1,
+		nextY:           -1,
+		nextI:           -1,
+		alive:           false,
+		trail:           nil,
+		owned:           nil,
+		bot:             false,
+		hue:             hue,
+		cosInvCaptureFx: 1,
+		cosInvHead:      1,
+		cosInvSeg:       1,
+		cosInvNameplate: 1,
+		cosInvFrame:     1,
+		cosInvTerr:      1,
+		cosInvDeath:     1,
+		cosCaptureFx:    0,
+		cosHead:         0,
+		cosSeg:          0,
+		cosNameplate:    0,
+		cosFrame:        0,
+		profileKey:      c.profileKey(),
+	}
+	if pr := profileForKey(pl.profileKey); pr != nil {
+		profilesMu.Lock()
+		ensureProfileCosmeticsLocked(pr)
+		pr.LastSeen = time.Now().Unix()
+		applyProfileCosmeticsToPlayerLocked(pl, pr)
+		// Only a stored profile has something to persist; a transient one is
+		// discarded with this call.
+		stored := profiles[pl.profileKey] != nil
+		profilesMu.Unlock()
+		if stored {
+			markProfilesDirty()
+		}
+	}
+
+	rm.players[pnum] = pl
+	rm.scores[pnum] = 0
+	rm.points[pnum] = 0
+	rm.clients[c] = struct{}{}
+	rm.humanCount++
+	rm.forceFullSnapshot = true
+	rm.cancelCleanupLocked()
+	// G7: thin the bot field out so a busy room is not a mob.
+	rm.syncBotPopulationLocked()
+
+	rm.setKnownNameLocked(pnum, name, true)
+	rm.sendDailyStateToPlayer(pl)
+
+	known := rm.collectKnownNamesLocked()
+	rm.mu.Unlock()
+
+	c.mu.Lock()
+	c.room = rm
+	c.player = pl
+	c.mu.Unlock()
+
+	rm.mu.Lock()
+	matchSeq := rm.matchSeq
+	tickNow := rm.tick
+	matchEndTick := rm.matchEndTick
+	matchEnded := rm.matchEnded
+	matchResetAt := rm.matchResetAt
+	// G24: the match arc was invisible to the player even though the server
+	// has always changed the rules by phase.
+	matchPhaseNow := rm.matchPhase()
+	matchPhaseUntil := rm.phaseUntilTick()
+	var matchResults []matchResult
+	if matchEnded {
+		matchResults = rm.buildMatchResultsLocked()
+	}
+	rm.mu.Unlock()
+
+	initPayload := map[string]any{
+		"w":          W,
+		"h":          H,
+		"tickMs":     TickMS,
+		"tick":       tickNow,
+		"you":        pnum,
+		"mapCells":   N,
+		"room":       rm.id,
+		"roomLimit":  rm.limit,
+		"matchSeq":   matchSeq,
+		"matchEnd":   matchEndTick,
+		"matchEnded": matchEnded,
+		"matchReset": matchResetAt,
+		"phase":      matchPhaseNow,
+		"phaseUntil": matchPhaseUntil,
+	}
+	initPayload["cosmetics"] = cosmeticsStatePayload(pl)
+	if matchEnded {
+		initPayload["matchResults"] = matchResults
+	}
+	c.sendJSON(ctx, "init", initPayload)
+
+	rm.mu.Lock()
+	chatHistory := make([]ChatMessage, len(rm.chat))
+	copy(chatHistory, rm.chat)
+	rm.minimapDirty = true
+	rm.minimapFullActive = true
+	rm.minimapFullCursor = 0
+	rm.mu.Unlock()
+
+	c.sendKnownNames(ctx, known)
+	if len(chatHistory) > 0 {
+		c.sendJSON(ctx, "chatInit", chatHistory)
+	}
+
+	rm.broadcastJSON(ctx, "nameUpdate", map[string]any{"n": pnum, "nm": rmDisplayName(rm, pnum)})
+	// The newcomer needs the whole room, everyone else needs the newcomer:
+	// one full broadcast covers both.
+	rm.broadcastCosExtra(ctx)
+}
+
+func (c *Client) handleChat(ctx context.Context, text string) {
+	c.mu.Lock()
+	rm := c.room
+	pl := c.player
+	c.mu.Unlock()
+	if rm == nil || pl == nil {
+		return
+	}
+
+	msgText := sanitizeChat(text)
+	if msgText == "" {
+		return
+	}
+
+	rm.mu.Lock()
+	if !pl.lastChatAt.IsZero() && time.Since(pl.lastChatAt) < ChatMinInterval {
+		rm.mu.Unlock()
+		return
+	}
+	pl.lastChatAt = time.Now()
+	out := ChatMessage{T: time.Now().UnixMilli(), N: pl.num, Text: msgText}
+	rm.chat = append(rm.chat, out)
+	if len(rm.chat) > ChatHistoryMax {
+		rm.chat = rm.chat[len(rm.chat)-ChatHistoryMax:]
+	}
+	rm.mu.Unlock()
+
+	rm.broadcastJSON(ctx, "chat", out)
+}
+
+// sendKnownNames delivers the name table as one nameUpdateBatch message, plus
+// the legacy per-entry messages while the table is short enough for that to be
+// free (G5). Must be called without r.mu held.
+func (c *Client) sendKnownNames(ctx context.Context, items []knownNameItem) {
+	if len(items) == 0 {
+		return
+	}
+	c.sendJSON(ctx, "nameUpdateBatch", map[string]any{"names": items})
+	if len(items) > KnownNamesLegacyMax {
+		return
+	}
+	for _, it := range items {
+		payload := map[string]any{"n": it.N, "nm": it.Nm}
+		if it.NmEn != "" {
+			payload["nmEn"] = it.NmEn
+		}
+		c.sendJSON(ctx, "nameUpdate", payload)
+	}
+}
