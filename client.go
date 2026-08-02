@@ -131,11 +131,11 @@ func (c *Client) sendBinaryPooled(pd *pooledData, drop bool) bool {
 	if pd == nil {
 		return false
 	}
-	if len(pd.b) == 0 {
+	if len(pd.B) == 0 {
 		decPooledRef(pd)
 		return false
 	}
-	return c.enqueue(websocket.MessageBinary, pd.b, pd, drop)
+	return c.enqueue(websocket.MessageBinary, pd.B, pd, drop)
 }
 
 func (c *Client) sendRooms(ctx context.Context, hub *Hub) {
@@ -383,8 +383,8 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	chatHistory := make([]ChatMessage, len(rm.chat))
 	copy(chatHistory, rm.chat)
 	rm.minimapDirty = true
-	rm.minimapFullActive = true
-	rm.minimapFullCursor = 0
+	rm.minimapCur.FullActive = true
+	rm.minimapCur.FullCursor = 0
 	rm.mu.Unlock()
 
 	c.sendKnownNames(ctx, known)

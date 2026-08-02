@@ -13,12 +13,9 @@ import (
 
 var debugBotDeathSnap = os.Getenv("BOT_DEATH_SNAP") == "1"
 
-const (
-	W      = 200
-	H      = 140
-	N      = W * H
-	TickMS = 100
-)
+// TickMS — шаг игрового времени. Размеры поля (W/H/N) живут в пакете
+// protocol: индекс клетки уезжает на провод, см. wire.go.
+const TickMS = 100
 
 var (
 	MatchDurationTicks     uint32 = 3000
