@@ -186,10 +186,12 @@ limits roomLimit=16 maxRooms=64 maxProfiles=50000 wsAllowLocalhost=false
 | `snakes_ws_connections_total`, `snakes_ws_active`, `snakes_ws_write_errors_total`, `snakes_ws_dropped_messages_total` | Транспорт |
 | `snakes_build_info{version,commit}` | Какая версия сейчас крутится |
 
-Сбор идёт из Prometheus в `samoy-monitoring`, а тот живёт в Docker и приходит с
-адреса моста. Игровой порт закрыт на loopback намеренно, поэтому для сбора
-поднимается отдельный слушатель на `METRICS_ADDR` — он отдаёт ровно `/metrics`,
-и открытие адреса моста не открывает заодно `/ws` и статику мимо nginx.
+Сбор идёт из Prometheus в
+[metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love), а тот живёт
+в Docker и приходит с адреса моста. Игровой порт закрыт на loopback намеренно,
+поэтому для сбора поднимается отдельный слушатель на `METRICS_ADDR` — он отдаёт
+ровно `/metrics`, и открытие адреса моста не открывает заодно `/ws` и статику
+мимо nginx.
 Дополнительно юнит режет сеть на уровне ядра, см.
 `deploy/systemd/snakes.service.d/10-metrics-scrape.conf`.
 
