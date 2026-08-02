@@ -21,132 +21,40 @@
 
 ---
 
-## Архитектура деплоя
+## Выкатка
 
-```
-/opt/snakes/
-├── current   -> releases/<timestamp>-<sha>   симлинк на активный релиз
-├── previous  -> releases/<timestamp>-<sha>   симлинк на предыдущий (для отката)
-└── releases/
-    ├── 20260801-172220-ebdfcc3/{snakes, public/}
-    └── ...                                    хранятся последние KEEP_RELEASES (5)
-
-/etc/systemd/system/snakes.service   юнит (User=www-data, WorkingDirectory=/opt/snakes/current)
-/etc/snakes/snakes.env               переменные окружения (root:root 0600) — СЕКРЕТЫ ЗДЕСЬ
-/var/lib/snakes/profiles.json        профили игроков (ПЕРЕЖИВАЕТ деплой)
-/etc/nginx/sites-available/snakes.conf   TLS-терминация и проксирование на 127.0.0.1:8090
-```
-
-Ключевые факты о проде:
-
-* Хост Oracle Ampere → **aarch64**. Собирать надо `GOARCH=arm64` (это дефолт в скриптах;
-  для x86-сервера задайте `DEPLOY_GOARCH=amd64`).
-* Приложение слушает **:8090** (порт 3000 занят docker-proxy другого проекта).
-  Снаружи 8090 закрыт, доступ только через nginx.
-* systemd-юнит ограничен `IPAddressAllow=localhost` + `ProtectSystem=strict`,
-  запись разрешена только в `/var/lib/snakes`.
-* Логи — в journald, отдельного файла лога нет, logrotate не нужен.
-
-Деплой выполняется атомарно: новый релиз распаковывается рядом, затем симлинк `current`
-переключается через `ln -sfn` + `mv -Tf` (atomic rename), сервис рестартует, и только
-после успешного healthcheck релиз считается принятым. Если healthcheck не прошёл —
-симлинк автоматически возвращается на прошлый релиз, сервис перезапускается,
-скрипт завершается ненулевым кодом.
-
-Четыре свойства, на которые стоит обратить внимание:
-
-* **Обрыв ssh не срывает авто-откат.** Активация запускается не как обычная
-  foreground-команда по ssh, а как transient systemd-юнит
-  (`systemd-run --unit=snakes-deploy-<релиз> --wait --pipe`). Юнит — потомок PID 1,
-  поэтому SIGHUP от умершего ssh до него не доходит и healthcheck с авто-откатом
-  досчитывается до конца. `deploy.sh`, потеряв соединение, переподключается и
-  забирает результат командой `remote_ctl.sh await <релиз>`.
-* **Два деплоя одновременно невозможны.** `remote_ctl.sh` берёт `flock` на
-  `/opt/snakes/.deploy.lock` до любых действий с симлинками, поэтому ручной запуск
-  во время CI-деплоя просто встаёт в очередь (до `LOCK_WAIT` секунд).
-* **Healthcheck ходит и через nginx.** Локальная проверка `127.0.0.1:8090`
-  ничего не говорит про nginx/TLS/DNS: при сломанном vhost деплой рапортовал
-  «OK» на лежащем сайте. Теперь после локальной проверки идёт публичная по
-  `PUBLIC_HEALTH_URL`. Её провал — ошибка деплоя, но **без отката**: релиз тут ни
-  при чём, чинить надо nginx.
-* **`PROFILE_SECRET` проверяется ДО переключения симлинка.** Если `/etc/snakes/snakes.env`
-  пропал или переменная пуста, сервер стартанул бы с эфемерным ключом и разом
-  обесценил все токены игроков — это не лечится откатом. Проверяется только факт
-  наличия непустого значения, само значение нигде не печатается.
-
-Повторный `rollback.sh` **шагает вниз по списку релизов**, а не прыгает между
-двумя последними: каждый отвергнутый релиз записывается в `/opt/snakes/rejected`
-и больше никогда не становится целью отката.
-
----
-
-## Как задеплоить вручную
-
-Из Git Bash на Windows (транспорт plink/pscp определяется автоматически по `.ppk`):
+Механика — в общем пайплайне [deploy-kit](https://github.com/tr0llex/deploy-kit).
+Что именно катится, описано в [`.deploy-kit/prod.env`](../.deploy-kit/prod.env).
 
 ```bash
-export DEPLOY_KEY="/c/Users/<вы>/Desktop/server access/oracle 2025-09-21.ppk"
-export DEPLOY_REF=HEAD          # собрать чистый экспорт HEAD, а не рабочую копию
-./scripts/deploy.sh
+# из GitHub Actions: тег v* либо Actions -> Deploy -> Run workflow
+# локально тем же контрактом:
+deploy-kit/bin/deploy --config .deploy-kit/prod.env
+deploy-kit/bin/deploy --config .deploy-kit/prod.env --dry-run
 ```
 
-Из Linux/CI (транспорт ssh/scp):
+Клиент и сервер едут **одним артефактом**: у них общий бинарный протокол, и
+разъехавшиеся версии ломают разбор пакетов молча — страница откроется, а игра
+развалится.
 
-```bash
-export DEPLOY_HOST=207.127.93.34 DEPLOY_USER=ubuntu DEPLOY_KEY=~/.ssh/deploy_key
-./scripts/deploy.sh
-```
+Перед выкаткой обязателен полный регресс с `-race`: комнаты, профили, лимитеры,
+ИИ ботов и экономика работают в разных горутинах, и гонка там не роняет процесс
+громко, а тихо портит балансы игроков.
 
-Скрипт сам: прогоняет `go build ./...` и `go test ./...` (пропустить — `SKIP_TESTS=1`),
-кросс-собирает статический бинарь, упаковывает его с `public/`, заливает, активирует
-и проверяет `/healthz`.
-
-### Переменные окружения
-
-| Переменная | Дефолт | Назначение |
-|---|---|---|
-| `DEPLOY_HOST` | `207.127.93.34` | хост |
-| `DEPLOY_USER` | `ubuntu` | пользователь SSH (нужен passwordless sudo) |
-| `DEPLOY_KEY` | пусто | путь к приватному ключу (`.ppk` → plink, иначе ssh) |
-| `DEPLOY_PORT` | `22` | порт SSH |
-| `DEPLOY_PATH` | `/opt/snakes` | корень релизов |
-| `DEPLOY_SERVICE` | `snakes` | имя systemd-юнита |
-| `DEPLOY_RUN_USER` | `www-data` | от кого работает сервис |
-| `HEALTH_PORT` / `HEALTH_PATH` | `8090` / `/healthz` | локальный healthcheck |
-| `HEALTH_RETRIES` / `HEALTH_DELAY` | `30` / `2` | до 60 секунд ожидания |
-| `PUBLIC_HEALTH_URL` | `https://snakes.samoy.love/healthz` | публичный healthcheck ЧЕРЕЗ nginx; пустая строка — пропустить |
-| `PUBLIC_HEALTH_RETRIES` | `10` | попыток публичного healthcheck (пауза 3 с) |
-| `DEPLOY_ENV_FILE` | `/etc/snakes/snakes.env` | env-файл юнита; проверяется на непустой `PROFILE_SECRET` до переключения симлинка |
-| `LOCK_WAIT` | `600` | сколько секунд ждать чужой деплой на блокировке |
-| `KEEP_RELEASES` | `5` | сколько релизов хранить |
-| `DEPLOY_GOOS` / `DEPLOY_GOARCH` | `linux` / `arm64` | цель кросс-сборки |
-| `DEPLOY_TRANSPORT` | `auto` | `auto` \| `ssh` \| `putty` |
-| `DEPLOY_REF` | пусто | git-ref для чистой сборки вместо рабочей копии |
-| `SKIP_TESTS` | `0` | `1` — не запускать `go test` |
-
-Секретов в репозитории нет: ключ передаётся путём, а `PROFILE_SECRET` живёт
-только в `/etc/snakes/snakes.env` на сервере.
-
----
+Автодеплой по мержу сознательно не заведён: перезапуск прерывает идущие матчи,
+состояние комнат живёт в памяти.
 
 ## Как откатиться
 
-```bash
-./scripts/rollback.sh            # current <-> previous, рестарт, healthcheck
-./scripts/rollback.sh --status   # что задеплоено сейчас, какие релизы есть
-```
-
-Откат делает то же самое атомарное переключение симлинка и падает с ненулевым кодом,
-если целевой релиз не поднялся. Откатиться можно и вручную:
+Релизы лежат на сервере, пересборка не нужна:
 
 ```bash
-sudo ln -sfn /opt/snakes/releases/<нужный> /opt/snakes/current.tmp
-sudo mv -Tf /opt/snakes/current.tmp /opt/snakes/current
-sudo systemctl restart snakes
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8090/healthz
+ssh ubuntu@<host> 'sudo /opt/deploy-kit/rollback.sh --app snakes --root /opt/snakes --list'
+ssh ubuntu@<host> 'sudo /opt/deploy-kit/rollback.sh --app snakes --root /opt/snakes     --unit snakes.service --health https://snakes.samoy.love/healthz'
 ```
 
----
+При провале healthcheck выкатка откатывается сама — это проверено на живом
+сервере: релиз без бита запуска не поднялся, и прод вернулся на предыдущий.
 
 ## Логи и диагностика
 
@@ -205,7 +113,7 @@ curl -s -i --http1.1 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
 ## Что делать при инциденте
 
 1. **Сайт лёг сразу после деплоя.** Скрипт откатывается сам. Если нет —
-   `./scripts/rollback.sh`, затем `journalctl -u snakes -n 100`.
+   `/opt/deploy-kit/rollback.sh` (см. раздел «Как откатиться»), затем `journalctl -u snakes -n 100`.
 2. **Сервис не стартует.** `systemctl status snakes` + `journalctl -u snakes -n 100`.
    Частые причины: битый `snakes.env`, занятый порт 8090, бинарь не той архитектуры
    (`file /opt/snakes/current/snakes` должен показывать `ARM aarch64`).
@@ -220,21 +128,6 @@ curl -s -i --http1.1 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
    проектов) и `du -sh /opt/snakes/releases/*`. Старые релизы чистит сам деплой
    (`KEEP_RELEASES`), вручную — `sudo journalctl --vacuum-time=14d`
    (осторожно: затрагивает логи чужих сервисов тоже).
-
----
-
-## Файлы деплоя в репозитории
-
-| Файл | Назначение |
-|---|---|
-| `scripts/deploy.sh` | сборка + доставка + активация + healthcheck + авто-откат |
-| `scripts/rollback.sh` | откат на предыдущий релиз одной командой |
-| `scripts/lib_deploy.sh` | конфигурация и выбор транспорта (ssh/scp либо plink/pscp) |
-| `scripts/remote_ctl.sh` | серверная часть: блокировка, распаковка, симлинк, рестарт, healthcheck (локальный + публичный), авто-откат, чистка |
-| `scripts/backup_profiles.sh` | бэкап `profiles.json` (ставится на сервер как `/usr/local/bin/snakes-backup-profiles.sh`) |
-| `deploy/systemd/snakes-backup-profiles.{service,timer}` | часовой таймер этого бэкапа |
-| `.github/workflows/deploy.yml` | деплой по тегу `v*` и по кнопке |
-
 
 ---
 

@@ -231,7 +231,7 @@ buildTime=...`) и уходят клиенту в поле `version` пакет�
 
 * `Dockerfile` — через build-args `VERSION`, `COMMIT`, `BUILD_TIME`
   (пробрасываются из `docker-compose.yml`);
-* `scripts/deploy.sh` — сам: `Version` = имя релиза (`<UTC-таймштамп>-<short sha>`),
+* выкатка (`.deploy-kit/prod.env`) — сама: `Version` = имя релиза (`<UTC-таймштамп>-<short sha>`),
   `Commit` = полный git sha (с суффиксом `-dirty`, если деплоят грязное дерево),
   `BuildTime` = момент сборки в ISO-8601 UTC.
 
@@ -411,7 +411,7 @@ CI: `.github/workflows/ci.yml` — три job'а: **go** (gofmt / vet / build /
 
 1. `public/index.html` ссылается на собственную статику как
    `/client.js?v=__BUILD__` — литеральный плейсхолдер.
-2. `scripts/deploy.sh` подменяет `__BUILD__` на идентификатор релиза
+2. Выкатка подменяет `__BUILD__` на идентификатор релиза
    (`20260802-010203-abc1234`) **в копии, которая уезжает на сервер**. В
    репозитории литерал остаётся как есть.
 3. Ответ получает `Cache-Control: public, max-age=31536000, immutable`, только
