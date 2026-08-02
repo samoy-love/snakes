@@ -53,8 +53,17 @@ jobs:
       - name: go build
         run: go build ./...
 
+      # -short убирает из прогона под детектором только бюджетные тесты
+      # производительности: замерять время под -race бессмысленно, он
+      # замедляет код в 5–20 раз. Вся остальная логика проверяется здесь.
       - name: go test -race
-        run: go test ./... -race -coverprofile=coverage.out -covermode=atomic
+        run: go test ./... -race -short -coverprofile=coverage.out -covermode=atomic
+
+      # Бюджеты меряются отдельно и без детектора — иначе тик комнаты «не
+      # укладывается» в 10 мс просто из-за инструментации, а не из-за кода.
+      # Прогон занимает пару секунд.
+      - name: Бюджеты производительности (без -race)
+        run: go test ./internal/game/ -run TestRoomFleetStepBudget -count=1
 
       # Покрытие уезжает в Codecov: цифра в README должна обновляться сама,
       # иначе она превращается в украшение и врёт при первом же изменении.
