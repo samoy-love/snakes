@@ -64,7 +64,7 @@ make test-client          # или: node --test tests/*.test.mjs (нужен Nod
 протокола:
 
 ```sh
-make golden        # UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport .
+make golden        # UPDATE_GOLDEN=1 go test -run TestProtocolGoldenExport ./internal/game
 make test-client   # и синхронно править public/client.js, пока не позеленеет
 ```
 
