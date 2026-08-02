@@ -540,20 +540,92 @@ func TestBotScenarioHunterCapNeverExceeded(t *testing.T) {
 	}
 }
 
+// forceHuntDeath сводит двух ботов в охоту и убивает охотника тем же тиком.
+//
+// Смерть охотника — главный путь возврата слота, и ждать её от симуляции
+// нельзя: порядок обхода r.players в Go случаен, поэтому при одном и том же
+// сиде матч идёт по-разному, и бывают прогоны, где за все отведённые тики не
+// гибнет никто (наблюдалось 02.08.2026: push прошёл, pull_request на том же
+// коммите упал). Поэтому смерть организуется тестом: пара берётся по
+// возрастанию номера, а не по состоянию ИИ.
+//
+// Возвращает жертву, чтобы вызывающий мог убить и её тоже.
+func forceHuntDeath(t *testing.T, r *Room, seed int64) *Player {
+	t.Helper()
+	alive := make([]uint16, 0, len(r.players))
+	for _, num := range sortedNums(r) {
+		if p := r.players[num]; p != nil && p.bot && p.alive {
+			alive = append(alive, num)
+		}
+	}
+	if len(alive) < 2 {
+		t.Fatalf("сид %d тик %d: живых ботов %d — некого свести в охоту",
+			seed, r.tick, len(alive))
+	}
+	h := r.players[alive[0]]
+	v := r.players[alive[1]]
+
+	r.enterHunt(h, v.num, v.x, v.y, 0, 60)
+	booked := r.huntersOn[v.num]
+	if booked < 1 {
+		t.Fatalf("сид %d тик %d: enterHunt не забронировал слот на игрока %d",
+			seed, r.tick, v.num)
+	}
+	// Причина «wall» с killer=0: только она проходит сквозь послереспавновый
+	// иммунитет, а бот мог родиться минуту назад.
+	r.killPlayerWithReason(h.num, 0, "wall", -1, h.x, h.y)
+	if h.alive {
+		t.Fatalf("сид %d тик %d: бот %d пережил принудительную смерть", seed, r.tick, h.num)
+	}
+	if h.aiHuntWho != 0 {
+		t.Fatalf("сид %d тик %d: мёртвый охотник %d всё ещё числится за жертвой %d",
+			seed, r.tick, h.num, h.aiHuntWho)
+	}
+	if got := r.huntersOn[v.num]; got != booked-1 {
+		t.Fatalf("сид %d тик %d: после смерти охотника на игрока %d забронировано %d, ожидалось %d",
+			seed, r.tick, v.num, got, booked-1)
+	}
+	return v
+}
+
 // Ловит: расхождение забронированного счётчика huntersOn с фактическим
 // состоянием ботов. Именно этот счётчик решает, пустят ли следующего бота в
 // атаку; если он «залипнет» на потолке (охотник умер, жертва умерла, бот снят
 // с поля — а слот не вернулся), агрессия ботов молча выключится до конца
 // матча, и заметить это без сверки нельзя. Эталон считается здесь же, а не
 // вызовом recomputeHuntersLocked: тест не должен верить проверяемому коду.
-// Сверка на каждом тике длинного прогона, в котором гарантированно есть
-// смерти и респавны.
+//
+// Сверка идёт на каждом тике длинного прогона, а смерть охотника и смерть
+// жертвы — те два перехода, ради которых тест и написан, — устраиваются
+// принудительно на фиксированных тиках. Полагаться на то, что симуляция сама
+// кого-нибудь убьёт, нельзя: см. forceHuntDeath.
 func TestBotScenarioHunterCensusMatchesState(t *testing.T) {
 	skipLongScenario(t)
 	for _, seed := range scenarioSeeds {
 		r := newBotScenarioRoom(t, seed)
 
 		const ticks = 500
+		// Тики принудительных смертей: начало, середина и конец прогона, чтобы
+		// проверка попадала и на разогретую комнату с уже занятыми слотами.
+		probes := map[int]bool{100: true, 250: true, 400: true}
+
+		checkCensus := func(stage string) {
+			t.Helper()
+			want := huntCensus(r)
+			for victim, n := range r.huntersOn {
+				if n != want[victim] {
+					t.Fatalf("сид %d тик %d (%s): huntersOn[%d]=%d, фактически охотятся %d",
+						seed, r.tick, stage, victim, n, want[victim])
+				}
+			}
+			for victim, n := range want {
+				if r.huntersOn[victim] != n {
+					t.Fatalf("сид %d тик %d (%s): на игрока %d охотятся %d ботов, но забронировано %d",
+						seed, r.tick, stage, victim, n, r.huntersOn[victim])
+				}
+			}
+		}
+
 		deaths := 0
 		alivePrev := make(map[uint16]bool, len(r.players))
 		for _, num := range sortedNums(r) {
@@ -568,24 +640,21 @@ func TestBotScenarioHunterCensusMatchesState(t *testing.T) {
 				}
 				alivePrev[num] = p.alive
 			}
-			want := huntCensus(r)
-			for victim, n := range r.huntersOn {
-				if n != want[victim] {
-					t.Fatalf("сид %d тик %d: huntersOn[%d]=%d, фактически охотятся %d",
-						seed, r.tick, victim, n, want[victim])
-				}
+			checkCensus("шаг")
+			if !probes[tk] {
+				continue
 			}
-			for victim, n := range want {
-				if r.huntersOn[victim] != n {
-					t.Fatalf("сид %d тик %d: на игрока %d охотятся %d ботов, но забронировано %d",
-						seed, r.tick, victim, n, r.huntersOn[victim])
-				}
-			}
+			// Смерть охотника: слот обязан вернуться сразу.
+			victim := forceHuntDeath(t, r, seed)
+			checkCensus("смерть охотника")
+			// Смерть жертвы: слоты её охотников снимаются не мгновенно, но учёт
+			// обязан сходиться и здесь.
+			r.killPlayerWithReason(victim.num, 0, "wall", -1, victim.x, victim.y)
+			checkCensus("смерть жертвы")
+			alivePrev[victim.num] = false
 		}
-		if deaths == 0 {
-			t.Fatalf("сид %d: за %d тиков не умер ни один бот — сценарий не проверяет освобождение слотов",
-				seed, ticks)
-		}
+		t.Logf("сид %d: смертей замечено %d, принудительных пар %d",
+			seed, deaths, len(probes))
 	}
 }
 
