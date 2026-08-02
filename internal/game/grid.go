@@ -610,8 +610,9 @@ func (r *Room) capture(playerNum uint16) {
 				x = uint16(p.x)
 				y = uint16(p.y)
 			}
-			metrics.LoopsClosedTotal.Inc()
-			metrics.CellsCapturedTotal.Add(uint64(delta))
+			actor := metrics.ActorLabel(p.bot)
+			metrics.LoopsClosedTotal.Inc(actor)
+			metrics.CellsCapturedTotal.Add(actor, uint64(delta))
 			r.pushEvent(Event{Kind: EventCapture, A: p.num, X: x, Y: y, C: uint32(delta), D: p.cosCaptureFx})
 			r.awardPoints(p.num, capturePoints(delta, r.matchPhase(), r.mutatorType), PointsCapture)
 

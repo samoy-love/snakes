@@ -288,3 +288,97 @@ func escapeLabel(s string) string {
 func formatFloat(v float64) string {
 	return strconv.FormatFloat(v, 'g', -1, 64)
 }
+
+// CounterVec2 — счётчик с двумя метками.
+//
+// Понадобился ради разделения «игрок против бота». Ботов в комнате втрое
+// больше живых людей, и без этой метки все игровые счётчики показывают
+// в основном работу ИИ: по ним нельзя понять ни сколько играют люди, ни
+// насколько бот похож на человека по поведению.
+type CounterVec2 struct {
+	meta
+	labelA, labelB string
+	mu             sync.RWMutex
+	vals           map[[2]string]*atomic.Uint64
+}
+
+func (cv *CounterVec2) metricType() string { return "counter" }
+
+// Inc увеличивает счётчик для пары меток на единицу.
+func (cv *CounterVec2) Inc(a, b string) { cv.Add(a, b, 1) }
+
+// Add увеличивает счётчик для пары меток на n.
+func (cv *CounterVec2) Add(a, b string, n uint64) {
+	key := [2]string{a, b}
+	cv.mu.RLock()
+	c, ok := cv.vals[key]
+	cv.mu.RUnlock()
+	if !ok {
+		cv.mu.Lock()
+		if c, ok = cv.vals[key]; !ok {
+			c = new(atomic.Uint64)
+			cv.vals[key] = c
+		}
+		cv.mu.Unlock()
+	}
+	c.Add(n)
+}
+
+// Load возвращает значение для пары меток (0, если такой ещё не было).
+func (cv *CounterVec2) Load(a, b string) uint64 {
+	cv.mu.RLock()
+	defer cv.mu.RUnlock()
+	if c, ok := cv.vals[[2]string{a, b}]; ok {
+		return c.Load()
+	}
+	return 0
+}
+
+func (cv *CounterVec2) writeSamples(w *bufio.Writer) {
+	cv.mu.RLock()
+	keys := make([][2]string, 0, len(cv.vals))
+	for k := range cv.vals {
+		keys = append(keys, k)
+	}
+	cv.mu.RUnlock()
+	// Тот же порядок, что и у одномерного счётчика: вывод обязан быть
+	// воспроизводимым, иначе его не продиффать и не проверить тестом.
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i][0] != keys[j][0] {
+			return keys[i][0] < keys[j][0]
+		}
+		return keys[i][1] < keys[j][1]
+	})
+	for _, k := range keys {
+		w.WriteString(cv.name)
+		w.WriteString(`{`)
+		w.WriteString(cv.labelA)
+		w.WriteString(`="`)
+		w.WriteString(escapeLabel(k[0]))
+		w.WriteString(`",`)
+		w.WriteString(cv.labelB)
+		w.WriteString(`="`)
+		w.WriteString(escapeLabel(k[1]))
+		w.WriteString(`"} `)
+		w.WriteString(strconv.FormatUint(cv.Load(k[0], k[1]), 10))
+		w.WriteByte('\n')
+	}
+}
+
+// newCounterVec2 заводит счётчик с двумя метками. Пары из knownA × knownB
+// присутствуют в выводе с нуля — по той же причине, что и у одномерного:
+// метрика, возникающая только после первого события, ломает rate().
+func newCounterVec2(name, help, labelA, labelB string, knownA, knownB []string) *CounterVec2 {
+	cv := register(&CounterVec2{
+		meta:   meta{name: name, help: help},
+		labelA: labelA,
+		labelB: labelB,
+		vals:   make(map[[2]string]*atomic.Uint64, len(knownA)*len(knownB)),
+	})
+	for _, a := range knownA {
+		for _, b := range knownB {
+			cv.vals[[2]string{a, b}] = new(atomic.Uint64)
+		}
+	}
+	return cv
+}
