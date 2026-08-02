@@ -22,3 +22,6 @@ data/
 snakes
 snakes.exe
 dist/
+
+# Каталог сборки для выкатки (deploy-kit)
+stage/
