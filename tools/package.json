@@ -1,0 +1,19 @@
+{
+  "name": "snakes-tools",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Offline visual harness for the Snakes client. Dev-only: nothing here is served to the browser, public/ stays dependency-free.",
+  "scripts": {
+    "shots:desktop": "node shoot.mjs --w 1366 --h 768 --tag desktop --seconds 40",
+    "shots:phone": "node shoot.mjs --w 390 --h 844 --tag phone --seconds 40",
+    "hud": "node hud.mjs --seconds 45",
+    "orient": "node orient.mjs",
+    "probe": "node probe.mjs --seconds 20"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.3",
+    "jsdom": "^30.0.1",
+    "ws": "^8.21.1"
+  }
+}
