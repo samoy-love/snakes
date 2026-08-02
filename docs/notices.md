@@ -1,6 +1,6 @@
 # Third-party notices
 
-Snakes is MIT-licensed (see [LICENSE](LICENSE)). It bundles the following
+Snakes is MIT-licensed (see [LICENSE](../LICENSE)). It bundles the following
 third-party assets, which keep their own terms.
 
 ## Twemoji

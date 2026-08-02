@@ -56,8 +56,8 @@ dk rollback <цель> # откатить
 ## Структура
 
 ```
-README.md          единственный markdown в корне; допустима
-                   локализованная копия вида README.en.md
+README.md          английский, единственный markdown в корне вместе с
+README.ru.md       русской версией
 docs/              всё остальное, если нужно
 .deploy-kit/       описания целей выкатки
 .github/workflows/ вызовы переиспользуемых workflow из deploy-kit
