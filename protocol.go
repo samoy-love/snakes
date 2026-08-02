@@ -16,7 +16,6 @@ const (
 )
 
 const (
-	MsgStateBinary  = 1
 	MsgROIBinary    = 2
 	MsgEventsBinary = 5
 	MsgMinimapChunk = 4

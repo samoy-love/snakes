@@ -19,8 +19,7 @@
   "msgTypes": {
     "events": 5,
     "minimapChunk": 4,
-    "roi": 2,
-    "state": 1
+    "roi": 2
   },
   "events": [
     {

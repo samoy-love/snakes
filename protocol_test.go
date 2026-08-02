@@ -1003,7 +1003,6 @@ func TestMsgTypeConstants(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"MsgStateBinary", MsgStateBinary, 1},
 		{"MsgROIBinary", MsgROIBinary, 2},
 		{"MsgMinimapChunk", MsgMinimapChunk, 4},
 		{"MsgEventsBinary", MsgEventsBinary, 5},

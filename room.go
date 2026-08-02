@@ -564,21 +564,6 @@ func (r *Room) playerShieldBits(p *Player) uint8 {
 	return v
 }
 
-func (r *Room) powerupTypeName(t uint8) string {
-	switch t {
-	case PowerupShield:
-		return "shield"
-	case PowerupDash:
-		return "dash"
-	case PowerupNova:
-		return "nova"
-	case PowerupMegaDash:
-		return "megadash"
-	default:
-		return ""
-	}
-}
-
 func (r *Room) removePowerUpAtIndex(idx int) {
 	if idx < 0 || idx >= len(r.powerUps) {
 		return
@@ -1479,10 +1464,6 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 	p.dir = DirRight
 	p.pendingDir = DirRight
 	p.nextI = -1
-}
-
-func (r *Room) killPlayer(num uint16) {
-	r.killPlayerWithReason(num, 0, "unknown", -2, 0, 0)
 }
 
 func (r *Room) respawnPlayer(p *Player) {

@@ -959,19 +959,6 @@ func (r *Room) payHoldPoints() {
 	}
 }
 
-func (r *Room) contractName(t uint8) string {
-	switch t {
-	case ContractKills:
-		return "kills"
-	case ContractPickups:
-		return "pickups"
-	case ContractCapture:
-		return "capture"
-	default:
-		return ""
-	}
-}
-
 // Contract goals ramp with the number of contracts already completed in the
 // match, so the 4th one is not as trivial as the 1st (E5).
 var (

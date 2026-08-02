@@ -215,10 +215,6 @@ function getLangDefault() {
 
 let lang = getLangDefault();
 
-// Legacy local-only id. It is NOT sent to the server anymore (A1: signed tokens).
-const PROFILE_ID_KEY = 'snakes_profile_id_v1';
-let profileId = '';
-
 const PROFILE_TOKEN_KEY = 'snakes_profile_token_v1';
 let profileToken = '';
 
@@ -240,35 +236,6 @@ function setProfileToken(tok) {
   try {
     localStorage.setItem(PROFILE_TOKEN_KEY, s);
   } catch {}
-}
-
-function ensureProfileId() {
-  if (profileId) return profileId;
-  try {
-    const cached = localStorage.getItem(PROFILE_ID_KEY);
-    if (cached && typeof cached === 'string' && cached.length >= 16 && cached.length <= 64) {
-      profileId = cached;
-      return profileId;
-    }
-  } catch {}
-
-  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let out = '';
-  try {
-    const buf = new Uint8Array(32);
-    crypto.getRandomValues(buf);
-    for (let i = 0; i < buf.length; i++) out += alphabet[buf[i] % alphabet.length];
-  } catch {
-    out = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
-  }
-  if (out.length < 16) out = out.padEnd(16, '0');
-  if (out.length > 64) out = out.slice(0, 64);
-
-  profileId = out;
-  try {
-    localStorage.setItem(PROFILE_ID_KEY, profileId);
-  } catch {}
-  return profileId;
 }
 
 function t(key) {
@@ -298,27 +265,6 @@ function formatNumber(value, options) {
   } catch {
     return String(n);
   }
-}
-
-function pluralRu(n, one, few, many) {
-  const x = Math.abs(Number(n) || 0);
-  const mod10 = x % 10;
-  const mod100 = x % 100;
-  if (mod10 === 1 && mod100 !== 11) return one;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
-  return many;
-}
-
-function pluralEn(n, one, many) {
-  const x = Math.abs(Number(n) || 0);
-  return x === 1 ? one : many;
-}
-
-function plural(n, forms) {
-  const x = Math.abs(Number(n) || 0);
-  if (!forms || typeof forms !== 'object') return '';
-  if (lang === 'en') return pluralEn(x, forms.one || '', forms.many || forms.other || forms.one || '');
-  return pluralRu(x, forms.one || '', forms.few || forms.many || '', forms.many || forms.few || '');
 }
 
 function applyTranslations(root) {
@@ -882,10 +828,6 @@ const rightSidebarEl = document.getElementById('rightSidebar');
 const rightInfoEl = document.getElementById('rightInfo');
 const rightMatchDetailsEl = document.getElementById('rightMatchDetails');
 const rightTeamDetailsEl = document.getElementById('rightTeamDetails');
-const rightTabButtons = Array.from(document.querySelectorAll('#rightTabs .rightTabBtn'));
-const rightTabMatchEl = document.getElementById('rightTabMatch');
-const rightTabTeamEl = document.getElementById('rightTabTeam');
-const rightTabChatEl = document.getElementById('rightTabChat');
 
 overlayManager.register('menu', {
   root: () => menuOverlay,
@@ -964,17 +906,6 @@ try {
     chatBtn.appendChild(s);
   }
 } catch {}
-
-const rightTabMatchBtn = rightTabButtons.find((b) => String(b?.dataset?.tab || '') === 'match') || null;
-let matchTabBadgeCount = 0;
-const matchTabBadgeEl = (() => {
-  if (!rightTabMatchBtn) return null;
-  const el = document.createElement('span');
-  el.className = 'tabBadge hidden';
-  el.setAttribute('aria-hidden', 'true');
-  rightTabMatchBtn.appendChild(el);
-  return el;
-})();
 
 let W = 0;
 let H = 0;
@@ -1478,7 +1409,6 @@ function addShakeVel(dx, dy) {
  * J22 — пресеты эффектов
  * ======================================================================== */
 
-const FX_PRESET_KEY = 'fxPreset';
 const FX_PRESETS = {
   calm: { shake: 0, flash: 0, particles: 0.35, hitstop: 0, countUp: false, volume: 0.6, banner: true },
   normal: { shake: 1, flash: 1, particles: 1, hitstop: 1, countUp: true, volume: 1, banner: true },
@@ -2368,7 +2298,6 @@ function updateChatLayout() {
 }
 
 const colors = new Map();
-const hslPartsCache = new Map();
 
 const minimapOwnerRgbCache = new Map();
 
@@ -3067,13 +2996,6 @@ function setRightTab(tab, fromUser) {
   }
 }
 
-function updateMatchTabBadge() {
-  if (!matchTabBadgeEl) return;
-  const n = Math.max(0, Number(matchTabBadgeCount) || 0);
-  matchTabBadgeEl.textContent = n > 99 ? '99+' : String(n);
-  matchTabBadgeEl.classList.toggle('hidden', n <= 0);
-}
-
 function bumpMatchTabBadge() {
   if (!rightInfoEl) return;
   rightInfoEl.classList.add('rightInfoPulse');
@@ -3105,14 +3027,6 @@ function getRightTabDefault() {
     // ignore
   }
   return 'match';
-}
-
-for (const b of rightTabButtons) {
-  b.addEventListener('click', (e) => {
-    const t = String(b?.dataset?.tab || 'match');
-    setRightTab(t, true);
-    e?.preventDefault?.();
-  });
 }
 
 setRightTab(getRightTabDefault(), false);
@@ -3617,15 +3531,6 @@ function syncMatchOverlayActions() {
   matchContinueBtn.disabled = waiting;
   matchContinueBtn.setAttribute('aria-disabled', waiting ? 'true' : 'false');
   matchContinueBtn.textContent = waiting ? t('match.starting') : t('match.play_on');
-}
-
-function focusMatchOverlayDefault() {
-  try {
-    const target = !matchContinueBtn?.disabled ? matchContinueBtn : matchMenuBtn;
-    requestAnimationFrame(() => target?.focus());
-  } catch {
-    // ignore
-  }
 }
 
 function showMatchOverlay() {
@@ -4170,8 +4075,6 @@ function resetClientForNewMatch() {
   lastEventsAt = 0;
   bigToastCooldownUntil = 0;
 
-  matchTabBadgeCount = 0;
-  updateMatchTabBadge();
   try {
     for (const it of toastByKey.values()) {
       if (it?.timer) clearTimeout(it.timer);
@@ -8669,124 +8572,6 @@ function handleStateBinary(buf) {
     const msgType = dv.getUint8(o);
     o += 1;
 
-  // legacy full state (1) is no longer used for minimap; server primarily sends ROI (2) + minimap chunks (4)
-  if (msgType === 1) {
-    if (o + 1 + 4 + 2 > bl) return;
-    const full = dv.getUint8(o) === 1;
-    o += 1;
-    const tick = dv.getUint32(o, true);
-    o += 4;
-    const pc = dv.getUint16(o, true);
-    o += 2;
-
-    const perPlayerV4 = 21;
-    const perPlayerV3 = 20;
-    const perPlayerV2 = 15;
-    const perPlayerV1 = 14;
-    let perPlayer = perPlayerV4;
-    if (o + pc * perPlayerV4 + 4 + 4 > bl) {
-      perPlayer = perPlayerV3;
-    }
-    if (o + pc * perPlayer + 4 + 4 > bl) {
-      perPlayer = perPlayerV2;
-      if (o + pc * perPlayerV2 + 4 + 4 > bl) {
-        perPlayer = perPlayerV1;
-        if (o + pc * perPlayerV1 + 4 + 4 > bl) return;
-      }
-    }
-
-    const players = [];
-    for (let k = 0; k < pc; k++) {
-      const n = dv.getUint16(o, true);
-      o += 2;
-      const x = dv.getUint16(o, true);
-      o += 2;
-      const y = dv.getUint16(o, true);
-      o += 2;
-      const d = dv.getUint8(o);
-      o += 1;
-      const a = dv.getUint8(o) === 1;
-      o += 1;
-      const s = dv.getUint16(o, true);
-      o += 2;
-      const p = dv.getUint16(o, true);
-      o += 2;
-      const hue = dv.getUint16(o, true);
-      o += 2;
-      let sh = 0;
-      let bot = 0;
-      let cosCaptureFx = 0;
-      let cosHead = 0;
-      let cosSeg = 0;
-      let cosNameplate = 0;
-      let cosFrame = 0;
-      if (perPlayer === perPlayerV2 || perPlayer === perPlayerV3) {
-        sh = dv.getUint8(o);
-        o += 1;
-      }
-      if (perPlayer === perPlayerV4) {
-        sh = dv.getUint8(o);
-        o += 1;
-      }
-      if (perPlayer === perPlayerV4) {
-        bot = dv.getUint8(o);
-        o += 1;
-      }
-      if (perPlayer === perPlayerV3 || perPlayer === perPlayerV4) {
-        cosCaptureFx = dv.getUint8(o);
-        o += 1;
-        cosHead = dv.getUint8(o);
-        o += 1;
-        cosSeg = dv.getUint8(o);
-        o += 1;
-        cosNameplate = dv.getUint8(o);
-        o += 1;
-        cosFrame = dv.getUint8(o);
-        o += 1;
-      }
-      const c = hueToHsl(hue);
-      if (bot) botIds.add(n);
-      players.push({
-        n,
-        x,
-        y,
-        d: DIR_NAMES[d] || 'right',
-        a,
-        c,
-        s,
-        p,
-        sh,
-        cosCaptureFx,
-        cosHead,
-        cosSeg,
-        cosNameplate,
-        cosFrame,
-        nm: displayNameOf(n, bot ? botDisplayName(n) : `${t('leaderboard.player')} ${n}`),
-        b: 0
-      });
-    }
-
-    const len1 = dv.getUint32(o, true);
-    o += 4;
-    const len2 = dv.getUint32(o, true);
-    o += 4;
-    if (o + len1 + len2 > bl) return;
-    if (full) {
-      const grid = buf.slice(o, o + len1);
-      o += len1;
-      const trail = buf.slice(o, o + len2);
-      minimapGridOwner = new Uint16Array(grid);
-      minimapDirty = true;
-      onState({ full: true, tick, t: Date.now(), players, grid, trail });
-      return;
-    }
-    const dg = buf.slice(o, o + len1);
-    o += len1;
-    const dt = buf.slice(o, o + len2);
-    onState({ full: false, tick, t: Date.now(), players, dg, dt });
-    return;
-  }
-
   // ROI update: type(1)=2, tick(4), players, rx/ry/rw/rh, dg, dt
   if (msgType === 2) {
     if (o + 4 + 2 > bl) return;
@@ -9954,18 +9739,6 @@ setInterval(() => {
 
 showMenuOverlay();
 connectWs();
-
-function colorWithAlpha(hsl, a) {
-  const key = String(hsl);
-  let parts = hslPartsCache.get(key);
-  if (!parts) {
-    const m = key.match(/^hsl\((\d+)\s+(\d+)%\s+(\d+)%\)$/);
-    if (!m) return `rgba(255,255,255,${a})`;
-    parts = { h: Number(m[1]), s: Number(m[2]), l: Number(m[3]) };
-    hslPartsCache.set(key, parts);
-  }
-  return `hsla(${parts.h} ${parts.s}% ${parts.l}% / ${a})`;
-}
 
 function quantizeAlpha(a) {
   const v = Math.max(0, Math.min(1, a));

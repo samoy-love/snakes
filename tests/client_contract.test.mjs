@@ -261,14 +261,27 @@ test('client.js: разбор чанков миникарты', () => {
 
 test('client.js: номера типов сообщений совпадают с сервером', () => {
   for (const [name, want] of Object.entries(golden.msgTypes)) {
-    if (name === 'state') continue; // legacy-путь, отдельная ветка msgType === 1
     assert.match(
       src,
       new RegExp(`if \\(msgType === ${want}\\) \\{`),
       `в client.js нет ветки разбора для msgType=${want} (${name})`
     );
   }
-  assert.match(src, /if \(msgType === 1\) \{/, 'нет ветки legacy full state (msgType=1)');
+});
+
+// Обратная сторона: ветка разбора, которой на сервере нет, — мёртвый путь.
+// Легаси-тип 1 (полный снапшот) удалён вместе с серверным сериализатором;
+// эта проверка не даёт ему (или любому другому призраку) вернуться.
+test('client.js: нет веток разбора для типов сообщений, которых сервер не шлёт', () => {
+  const known = new Set(Object.values(golden.msgTypes).map(Number));
+  const found = [...src.matchAll(/if \(msgType === (\d+)\) \{/g)].map((m) => Number(m[1]));
+  assert.ok(found.length > 0, 'в client.js не найдено ни одной ветки msgType');
+  const orphan = [...new Set(found)].filter((v) => !known.has(v)).sort((a, b) => a - b);
+  assert.deepEqual(
+    orphan,
+    [],
+    'ветка разбора есть, а сообщения такого типа сервер не отправляет — мёртвый код протокола'
+  );
 });
 
 // ---------------------------------------------------------------------------

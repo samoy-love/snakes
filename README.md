@@ -1,5 +1,9 @@
 # Snakes — многопользовательский захват территории
 
+[![CI](https://github.com/tr0llex/Snakes/actions/workflows/ci.yml/badge.svg)](https://github.com/tr0llex/Snakes/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/tr0llex/Snakes/branch/main/graph/badge.svg)](https://codecov.io/gh/tr0llex/Snakes)
+
+
 Браузерная многопользовательская игра в жанре splix.io: змейка ползает по общему
 полю 200×140 клеток и закрашивает его своим цветом. Пока змейка находится внутри
 собственной территории, она в безопасности. Стоит выйти за её пределы — за головой
