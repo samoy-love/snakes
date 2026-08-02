@@ -44,29 +44,9 @@ func main() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	// Liveness/readiness for container orchestration and HEALTHCHECK.
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok\n"))
-	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ready\n"))
-	})
-	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(fmt.Sprintf(
-			"{\"wsConnections\":%d,\"wsActive\":%d,\"wsWriteErrors\":%d,\"wsDropped\":%d}\n",
-			metrics.wsConnections.Load(),
-			metrics.wsActive.Load(),
-			metrics.wsWriteErrors.Load(),
-			metrics.wsDropped.Load(),
-		)))
-	})
+	mux.HandleFunc("/healthz", healthzHandler)
+	mux.HandleFunc("/readyz", readyzHandler)
+	mux.HandleFunc("/metrics", metricsHandler)
 
 	publicDir := filepath.Join(mustCwd(), "public")
 	fs := http.FileServer(http.Dir(publicDir))
@@ -103,6 +83,36 @@ func main() {
 
 	close(autosaveStop)
 	flushProfiles(true)
+}
+
+// The three probe handlers are named functions rather than literals inside
+// main() so tests can drive them through httptest: as closures they were
+// unreachable from anywhere but a live listener.
+
+func healthzHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok\n"))
+}
+
+func readyzHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ready\n"))
+}
+
+func metricsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(fmt.Sprintf(
+		"{\"wsConnections\":%d,\"wsActive\":%d,\"wsWriteErrors\":%d,\"wsDropped\":%d}\n",
+		metrics.wsConnections.Load(),
+		metrics.wsActive.Load(),
+		metrics.wsWriteErrors.Load(),
+		metrics.wsDropped.Load(),
+	)))
 }
 
 func mustCwd() string {

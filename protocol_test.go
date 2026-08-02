@@ -2868,6 +2868,78 @@ func TestKnownNamesBatchPayload(t *testing.T) {
 	}
 }
 
+// Ловит: возврат русских серверных литералов («Игрок N», «(отключен)») без
+// английского двойника — в английской локали они попадали прямо в таблицу
+// лидеров.
+func TestServerWrittenNamesHaveEnglishTwin(t *testing.T) {
+	r := newTestRoom()
+
+	// Безымянный игрок: сервер сам придумал подпись, значит обязан дать и
+	// английский вариант.
+	r.setKnownNameLocked(2, "", true)
+	if got := r.displayNameLocked(2); got != "Игрок 2" {
+		t.Fatalf("подпись безымянного = %q", got)
+	}
+	if got := r.displayNameEnLocked(2); got != "Player 2" {
+		t.Fatalf("английский двойник безымянного = %q, ожидалось \"Player 2\"", got)
+	}
+	// Неизвестный номер идёт по тому же пути.
+	if got := r.displayNameEnLocked(99); got != "Player 99" {
+		t.Fatalf("английский двойник неизвестного номера = %q", got)
+	}
+
+	// Своё имя не переводится: двойника нет, клиент берёт nm.
+	r.setKnownNameLocked(3, "Вася", true)
+	if got := r.displayNameEnLocked(3); got != "" {
+		t.Fatalf("у выбранного игроком имени появился двойник %q", got)
+	}
+
+	// Суффикс отключения — тоже серверный текст.
+	r.setKnownNameLocked(3, "Вася", false)
+	if got := r.displayNameLocked(3); got != "Вася (отключен)" {
+		t.Fatalf("офлайн-подпись = %q", got)
+	}
+	if got := r.displayNameEnLocked(3); got != "Вася (offline)" {
+		t.Fatalf("английская офлайн-подпись = %q", got)
+	}
+	r.setKnownNameLocked(4, "", false)
+	if got := r.displayNameEnLocked(4); got != "Player 4 (offline)" {
+		t.Fatalf("офлайн + безымянный = %q", got)
+	}
+
+	// У ботов приём прежний и не сломан.
+	r.setKnownNameLocalizedLocked(5, "Бот", "Bot", true)
+	if got := r.displayNameEnLocked(5); got != "Bot" {
+		t.Fatalf("двойник бота = %q", got)
+	}
+
+	// Двойники доезжают до батча имён.
+	for _, it := range r.collectKnownNamesLocked() {
+		if it.N == 2 && it.NmEn != "Player 2" {
+			t.Fatalf("в батче у безымянного nmEn=%q", it.NmEn)
+		}
+		if it.N == 3 && it.NmEn != "Вася (offline)" {
+			t.Fatalf("в батче у отключённого nmEn=%q", it.NmEn)
+		}
+	}
+
+	// И до итогов матча: живой человек без имени.
+	r.players[2] = &Player{num: 2, alive: true}
+	found := false
+	for _, mr := range r.buildMatchResultsLocked() {
+		if mr.N != 2 {
+			continue
+		}
+		found = true
+		if mr.Nm != "Игрок 2" || mr.NmEn != "Player 2" {
+			t.Fatalf("в matchResult nm=%q nmEn=%q", mr.Nm, mr.NmEn)
+		}
+	}
+	if !found {
+		t.Fatal("игрок 2 не попал в итоги матча")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // G10: коды причин Стиля, которые сервер обещает клиенту
 // ---------------------------------------------------------------------------
@@ -3021,15 +3093,28 @@ func TestAchvProgressPayload(t *testing.T) {
 		t.Fatalf("AchvKills10: cur=%d max=%d, ожидалось 10/10", e.Cur, e.Max)
 	}
 
-	// Закрытые ачивки из списка исчезают.
+	// Открытые ачивки из списка НЕ исчезают: клиент рисует полосу и по ним,
+	// иначе у открытого титула она осталась бы пустой. У выданной ачивки
+	// полоса полная — cur == max.
 	pr.AchvMask |= 1 << uint32(AchvKills10)
 	profilesMu.Lock()
 	got = achvProgressLocked(pr)
 	profilesMu.Unlock()
+	if len(got) != len(achvRules) {
+		t.Fatalf("после выдачи ачивки строк %d, ожидалось %d", len(got), len(achvRules))
+	}
+	found := false
 	for _, e := range got {
-		if e.ID == AchvKills10 {
-			t.Fatalf("закрытая ачивка осталась в прогрессе: %+v", e)
+		if e.ID != AchvKills10 {
+			continue
 		}
+		found = true
+		if e.Cur != e.Max || e.Max != 10 {
+			t.Fatalf("выданная ачивка: cur=%d max=%d, ожидалось 10/10", e.Cur, e.Max)
+		}
+	}
+	if !found {
+		t.Fatal("выданная ачивка пропала из прогресса — клиент нарисует пустую полосу")
 	}
 
 	// И то же самое в самом payload сообщения cosmetics.

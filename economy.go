@@ -71,11 +71,15 @@ func (r *Room) awardPoints(num uint16, base uint16, reason uint8) {
 	if reason > PointsHold {
 		reason = PointsOther
 	}
-	// The leader is the best score in the room, dead or alive: using only living
-	// players made every multiplier jump around while the leader lay dead.
+	// The mark to beat is the best score among the OTHER players, dead or alive:
+	// counting only the living made every multiplier jump around while the
+	// leader lay dead, and counting the receiver himself made the gap
+	// non-negative by construction — the leader penalty promised below could
+	// never fire. With nobody else in the room best stays 0 and the band is off,
+	// so a lone player never penalises himself.
 	best := uint16(0)
 	for _, o := range r.players {
-		if o == nil {
+		if o == nil || o.num == num {
 			continue
 		}
 		if v := r.points[o.num]; v > best {
@@ -333,30 +337,28 @@ func (r *Room) checkAchievementsLocked(p *Player, pr *Profile) int {
 }
 
 // achvProgressEntry is one row of the "achvProgress" array carried by the
-// "cosmetics" payload: the running counter and the threshold of an achievement
-// that is NOT yet unlocked. Unlocked ones are omitted — the client already has
-// them in achvMask/titleMask.
+// "cosmetics" payload: the running counter and the threshold of one
+// achievement.
 type achvProgressEntry struct {
 	ID  uint8  `json:"id"`
 	Cur uint32 `json:"cur"`
 	Max uint32 `json:"max"`
 }
 
-// achvProgressLocked snapshots the progress of every locked achievement, in
-// achvRules order. Caller holds profilesMu.
+// achvProgressLocked snapshots the progress of every achievement, unlocked
+// ones included: the client draws a bar per title and had no numbers at all for
+// the rows it could not fill from achvMask. Caller holds profilesMu.
 func achvProgressLocked(pr *Profile) []achvProgressEntry {
 	out := make([]achvProgressEntry, 0, len(achvRules))
 	if pr == nil {
 		return out
 	}
 	for _, ru := range achvRules {
-		if pr.AchvMask&(uint32(1)<<uint32(ru.code)) != 0 {
-			continue
-		}
 		cur := ru.get(pr)
 		if cur > ru.need {
-			// Counter is past the threshold but the unlock has not been
-			// evaluated yet; never report more than the goal.
+			// Counters keep growing after the unlock (and may pass the goal
+			// before it is evaluated); never report more than the goal, the
+			// client derives the bar fraction straight from cur/max.
 			cur = ru.need
 		}
 		out = append(out, achvProgressEntry{ID: ru.code, Cur: cur, Max: ru.need})
