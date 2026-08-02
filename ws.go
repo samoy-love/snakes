@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // requestClientIP resolves the peer address used for rate limiting and logs

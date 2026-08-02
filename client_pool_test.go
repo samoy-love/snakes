@@ -4,7 +4,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 func refsOf(pd *pooledData) int32 { return atomic.LoadInt32(&pd.refs) }
