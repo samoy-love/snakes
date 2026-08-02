@@ -79,14 +79,11 @@ make test-client   # и синхронно править public/client.js, по
 и `node --check public/client_*.js` (`make node-check`, нужен Node 22+ — он сам
 определяет ES-модуль по синтаксису).
 
-CI: `.github/workflows/ci.yml` — три job'а: **go** (gofmt / vet / build /
-`test -race`), **js** (`node --check` по `public/client*.js` + клиентские тесты
-протокола `node --test`) и **docker** (сборка образа, `docker run`, проверка
-`/healthz`, `/readyz`, `/`, `/client.js`, `/style.css`, `/metrics`, заголовки
-кэширования статики, рукопожатие `/ws` и отказ чужому origin'у, ожидание статуса
-`healthy` у HEALTHCHECK и проба записи в каталог профилей от непривилегированного
-пользователя).
-`.github/workflows/docker.yml` — сборка и публикация образа в GHCR по push в
-`master`/`main` и по тегам `v*`.
+CI: `.github/workflows/ci.yml` — два job'а: **go** (gofmt / vet / staticcheck /
+build / `test -race` + отправка покрытия в Codecov) и **js** (`node --check` по
+`public/client*.js` + клиентские тесты протокола `node --test`).
+
+Выкатка — отдельный workflow `.github/workflows/deploy.yml`, он вызывает общий
+пайплайн deploy-kit.
 
 ---
