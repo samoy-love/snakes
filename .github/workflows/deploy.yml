@@ -1,107 +1,29 @@
-name: deploy
+name: Deploy
 
-# Production deploy of the Snakes server.
-#   * automatically on a v* tag (v1.2.3)
-#   * manually via "Run workflow" (workflow_dispatch)
+# Механика выкатки — в deploy-kit. Здесь только что катим и какой регресс
+# обязан пройти.
 #
-# Requires these repository secrets (Settings -> Secrets and variables -> Actions):
-#   SSH_HOST      production host, e.g. 207.127.93.34
-#   SSH_USER      deploy user, e.g. ubuntu
-#   SSH_KEY       full OpenSSH PRIVATE key of that user (BEGIN/END lines included)
-#   SSH_PORT      (optional) ssh port, default 22
-#   DEPLOY_PATH   (optional) release root, default /opt/snakes
-#   HEALTH_URL    (optional) public healthcheck URL, default https://snakes.samoy.love/healthz
-# Optional repository variables (vars.*):
-#   DEPLOY_GOARCH default arm64 (the production host is Oracle Ampere / aarch64)
-#   DEPLOY_SERVICE default snakes
+# Перезапуск сервиса прерывает идущие матчи: состояние комнат живёт в памяти.
+# Поэтому автодеплой по каждому мержу не заведён — выкатка по тегу или руками.
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
-      ref:
-        description: 'Git ref to deploy (default: the checked out ref)'
-        required: false
-        default: ''
-
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
-
-permissions:
-  contents: read
+      dry-run:
+        description: 'Показать план, ничего не менять'
+        type: boolean
+        default: false
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-    environment: production
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.ref || github.ref }}
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-          cache: true
-
-      - name: Vet
-        run: go vet ./...
-
-      # -race is not optional here. Rooms, the profile store, the rate limiters,
-      # the bot AI and the economy all run on separate goroutines and were all
-      # recently rewritten; a data race in any of them corrupts player balances
-      # rather than crashing loudly. The deploy step below sets SKIP_TESTS=1, so
-      # this is the ONLY place tests run on the way to production.
-      - name: Test (race detector)
-        run: go test -race -count=1 ./...
-
-      - name: Build (sanity, host arch)
-        run: go build ./...
-
-      - name: Install SSH key
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "${SSH_PORT:-22}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
-        env:
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-
-      - name: Deploy
-        env:
-          DEPLOY_HOST: ${{ secrets.SSH_HOST }}
-          DEPLOY_USER: ${{ secrets.SSH_USER }}
-          DEPLOY_PORT: ${{ secrets.SSH_PORT || '22' }}
-          DEPLOY_KEY: /home/runner/.ssh/deploy_key
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/snakes' }}
-          DEPLOY_SERVICE: ${{ vars.DEPLOY_SERVICE || 'snakes' }}
-          DEPLOY_GOARCH: ${{ vars.DEPLOY_GOARCH || 'arm64' }}
-          DEPLOY_TRANSPORT: ssh
-          # The server-side activation checks this through nginx before it calls
-          # the deploy a success, so a broken vhost can no longer be reported as
-          # "DEPLOY OK".
-          PUBLIC_HEALTH_URL: ${{ secrets.HEALTH_URL || 'https://snakes.samoy.love/healthz' }}
-          SKIP_TESTS: '1'   # already run above
-        run: |
-          chmod +x scripts/*.sh
-          ./scripts/deploy.sh
-
-      - name: Public healthcheck
-        env:
-          HEALTH_URL: ${{ secrets.HEALTH_URL || 'https://snakes.samoy.love/healthz' }}
-        run: |
-          for i in $(seq 1 10); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || true)
-            echo "attempt $i: HTTP $code"
-            [ "$code" = "200" ] && exit 0
-            sleep 3
-          done
-          echo "public healthcheck failed"; exit 1
-
-      - name: Cleanup key
-        if: always()
-        run: rm -f ~/.ssh/deploy_key
+    uses: tr0llex/deploy-kit/.github/workflows/go-service.yml@main
+    with:
+      config: .deploy-kit/prod.env
+      # -race обязателен: комнаты, профили, лимитеры, ИИ ботов и экономика
+      # работают в разных горутинах. Гонка здесь не роняет процесс громко,
+      # а тихо портит балансы игроков.
+      gates: go vet ./... && go test ./... -race -count=1
+      dry-run: ${{ inputs.dry-run == true }}
+    secrets: inherit
