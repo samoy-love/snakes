@@ -208,7 +208,7 @@ func buildGolden(t *testing.T) goldenDoc {
 		if pd == nil {
 			t.Fatalf("kind=%d: buildEventsPooledLocked вернул nil", kind)
 		}
-		b := append([]byte(nil), pd.b...)
+		b := append([]byte(nil), pd.B...)
 		releasePooledData(pd)
 		add("events_kind_"+goldenEventConstName[kind], "пакет событий с одним событием-образцом", b)
 	}
@@ -233,7 +233,7 @@ func buildGolden(t *testing.T) goldenDoc {
 		if pd == nil {
 			t.Fatal("events_header: nil")
 		}
-		b := append([]byte(nil), pd.b...)
+		b := append([]byte(nil), pd.B...)
 		releasePooledData(pd)
 		add("events_header_powerups", "заголовок + 5 powerup + 2 события", b)
 	}
@@ -249,7 +249,7 @@ func buildGolden(t *testing.T) goldenDoc {
 		if pd == nil {
 			t.Fatal("events_all_kinds: nil")
 		}
-		b := append([]byte(nil), pd.b...)
+		b := append([]byte(nil), pd.B...)
 		releasePooledData(pd)
 		add("events_all_kinds", "все 21 типов событий в одном пакете, по порядку", b)
 	}
@@ -264,7 +264,7 @@ func buildGolden(t *testing.T) goldenDoc {
 		if pd == nil {
 			t.Fatal("events_unknown_kind: nil")
 		}
-		b := append([]byte(nil), pd.b...)
+		b := append([]byte(nil), pd.B...)
 		releasePooledData(pd)
 		add("events_unknown_kind", "неизвестный kind=250 (1 байт-заглушка) + известное событие следом", b)
 	}
@@ -287,7 +287,7 @@ func buildGolden(t *testing.T) goldenDoc {
 		if pd == nil {
 			t.Fatal("roi_fast: nil")
 		}
-		b := append([]byte(nil), pd.b...)
+		b := append([]byte(nil), pd.B...)
 		releasePooledData(pd)
 		add("roi_fast_two_players", "ROI (тип 2), два игрока, пустые дельты", b)
 	}
@@ -309,7 +309,7 @@ func buildGolden(t *testing.T) goldenDoc {
 		if pd == nil {
 			t.Fatal("roi_scan_full: nil")
 		}
-		b := append([]byte(nil), pd.b...)
+		b := append([]byte(nil), pd.B...)
 		releasePooledData(pd)
 		add("roi_scan_full", "ROI (тип 2), полный скан региона 4x3", b)
 	}
@@ -412,7 +412,7 @@ func TestGoldenEventLayoutMatchesSerializer(t *testing.T) {
 
 			// payload начинается сразу после байта kind.
 			off := eventsHeaderBase + 2 + 1
-			rd := &reader{b: pd.b, o: off, t: t}
+			rd := &reader{b: pd.B, o: off, t: t}
 			for _, f := range goldenEventFields[kind] {
 				want := goldenSample[f.Name]
 				var got uint32

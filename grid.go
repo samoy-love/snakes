@@ -3,6 +3,14 @@
 // reclaim.
 package main
 
+import "sync"
+
+// Скратч заливки: две карты размером с поле, которые capture берёт и
+// возвращает на каждом захвате. Без пула каждый захват территории стоил бы
+// 28000 байт и 28000 int мусора.
+var floodBytesPool = sync.Pool{New: func() any { return make([]byte, N) }}
+var floodIntPool = sync.Pool{New: func() any { return make([]int, N) }}
+
 func (r *Room) bonusTerritory(num uint16, cx, cy int, rad int) {
 	if rad <= 0 {
 		return

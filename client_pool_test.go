@@ -1,13 +1,12 @@
 package main
 
 import (
-	"sync/atomic"
 	"testing"
 
 	"nhooyr.io/websocket"
 )
 
-func refsOf(pd *pooledData) int32 { return atomic.LoadInt32(&pd.refs) }
+func refsOf(pd *pooledData) int32 { return pd.Refs() }
 
 // newQueuedClient — клиент без сокета: enqueue трогает только closed и sendCh,
 // так что этого достаточно для проверки очереди и подсчёта ссылок.
@@ -29,11 +28,11 @@ func TestPooledRefCountLifecycle(t *testing.T) {
 	if got := refsOf(pd); got != 1 {
 		t.Fatalf("свежий буфер имеет %d ссылок, ожидалась 1", got)
 	}
-	if len(pd.b) != 0 {
-		t.Fatalf("свежий буфер не пуст: %d байт", len(pd.b))
+	if len(pd.B) != 0 {
+		t.Fatalf("свежий буфер не пуст: %d байт", len(pd.B))
 	}
-	if cap(pd.b) < 64 {
-		t.Fatalf("ёмкость буфера %d, запрашивалось 64", cap(pd.b))
+	if cap(pd.B) < 64 {
+		t.Fatalf("ёмкость буфера %d, запрашивалось 64", cap(pd.B))
 	}
 
 	incPooledRef(pd)
@@ -46,13 +45,13 @@ func TestPooledRefCountLifecycle(t *testing.T) {
 	if got := refsOf(pd); got != 1 {
 		t.Fatalf("после двух dec ссылок %d, ожидалась 1", got)
 	}
-	pd.b = append(pd.b, 1, 2, 3)
+	pd.B = append(pd.B, 1, 2, 3)
 	decPooledRef(pd)
 	if got := refsOf(pd); got != 0 {
 		t.Fatalf("последний dec оставил %d ссылок", got)
 	}
-	if len(pd.b) != 0 {
-		t.Fatalf("возвращённый в пул буфер сохранил %d байт", len(pd.b))
+	if len(pd.B) != 0 {
+		t.Fatalf("возвращённый в пул буфер сохранил %d байт", len(pd.B))
 	}
 
 	// nil-аргументы безопасны: они приходят с путей, где буфера просто нет.
@@ -62,8 +61,8 @@ func TestPooledRefCountLifecycle(t *testing.T) {
 
 	// Запрос большей ёмкости выделяет новый массив, а не отдаёт короткий.
 	big := acquirePooledData(200000)
-	if cap(big.b) < 200000 {
-		t.Fatalf("ёмкость %d, запрашивалось 200000", cap(big.b))
+	if cap(big.B) < 200000 {
+		t.Fatalf("ёмкость %d, запрашивалось 200000", cap(big.B))
 	}
 	decPooledRef(big)
 }
@@ -71,12 +70,12 @@ func TestPooledRefCountLifecycle(t *testing.T) {
 // Ловит: возврат в пул огромных буферов — это тихий рост RSS, потому что
 // sync.Pool держал бы мегабайтные массивы между тиками.
 func TestOversizedBuffersAreNotPooled(t *testing.T) {
-	pd := &pooledData{b: make([]byte, 8, 2*1024*1024)}
-	atomic.StoreInt32(&pd.refs, 1)
+	pd := acquirePooledData(2 * 1024 * 1024)
+	pd.B = append(pd.B, make([]byte, 8)...)
 	decPooledRef(pd)
 	// Буфер выброшен, а не очищен и положен обратно.
-	if len(pd.b) != 8 {
-		t.Fatalf("огромный буфер был подготовлен к переиспользованию: len=%d", len(pd.b))
+	if len(pd.B) != 8 {
+		t.Fatalf("огромный буфер был подготовлен к переиспользованию: len=%d", len(pd.B))
 	}
 
 	// Тот же порог у пула uint32.
@@ -102,9 +101,9 @@ func TestEnqueueOnClosedClientReleasesRef(t *testing.T) {
 	c := newQueuedClient(4)
 	c.closed.Store(true)
 	pd := acquirePooledData(16)
-	pd.b = append(pd.b, 1)
+	pd.B = append(pd.B, 1)
 
-	if c.enqueue(websocket.MessageBinary, pd.b, pd, false) {
+	if c.enqueue(websocket.MessageBinary, pd.B, pd, false) {
 		t.Fatal("закрытый клиент принял сообщение")
 	}
 	if got := refsOf(pd); got != 0 {
@@ -121,8 +120,8 @@ func TestEnqueueDropPathReleasesRefAndCounts(t *testing.T) {
 	c := newQueuedClient(1)
 	// Забиваем очередь.
 	first := acquirePooledData(16)
-	first.b = append(first.b, 1)
-	if !c.enqueue(websocket.MessageBinary, first.b, first, true) {
+	first.B = append(first.B, 1)
+	if !c.enqueue(websocket.MessageBinary, first.B, first, true) {
 		t.Fatal("первое сообщение не попало в пустую очередь")
 	}
 	if got := refsOf(first); got != 1 {
@@ -131,8 +130,8 @@ func TestEnqueueDropPathReleasesRefAndCounts(t *testing.T) {
 
 	dropped := metrics.wsDropped.Load()
 	second := acquirePooledData(16)
-	second.b = append(second.b, 2)
-	if c.enqueue(websocket.MessageBinary, second.b, second, true) {
+	second.B = append(second.B, 2)
+	if c.enqueue(websocket.MessageBinary, second.B, second, true) {
 		t.Fatal("сообщение попало в полную очередь")
 	}
 	if got := refsOf(second); got != 0 {
@@ -185,12 +184,12 @@ func TestSharedBufferFanoutEndsAtZeroRefs(t *testing.T) {
 	// свою ссылку сами.
 	cs[1].closed.Store(true)
 	filler := acquirePooledData(8)
-	filler.b = append(filler.b, 9)
-	cs[2].enqueue(websocket.MessageBinary, filler.b, filler, true)
-	cs[2].enqueue(websocket.MessageBinary, filler.b, nil, true)
+	filler.B = append(filler.B, 9)
+	cs[2].enqueue(websocket.MessageBinary, filler.B, filler, true)
+	cs[2].enqueue(websocket.MessageBinary, filler.B, nil, true)
 
 	pd := acquirePooledData(64)
-	pd.b = append(pd.b, 1, 2, 3, 4)
+	pd.B = append(pd.B, 1, 2, 3, 4)
 	for _, c := range cs {
 		incPooledRef(pd)
 		_ = c.sendBinaryPooled(pd, true)

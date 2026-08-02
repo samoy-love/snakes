@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"nhooyr.io/websocket"
+
+	"snakes/internal/protocol"
 )
 
 type Dir uint8
@@ -64,10 +66,11 @@ type Room struct {
 	changedGrid  []uint32
 	changedTrail []uint32
 
-	minimapGrid       []uint32
-	minimapDirty      bool
-	minimapFullActive bool
-	minimapFullCursor int
+	minimapGrid  []uint32
+	minimapDirty bool
+	// minimapCur — курсор постраничной выдачи полной миникарты, им управляет
+	// кодер протокола.
+	minimapCur protocol.MinimapCursor
 
 	events []Event
 
@@ -145,6 +148,9 @@ type Room struct {
 	tmpClients []*Client
 	tmpReqs    []roiReq
 	tmpAnchors map[uint16]playerAnchor
+	// tmpROIPlayers — скратч под записи игроков для ROI-пакета, см.
+	// roiPlayersLocked.
+	tmpROIPlayers []protocol.ROIPlayer
 }
 
 type matchResult struct {
@@ -424,25 +430,6 @@ type Profile struct {
 	styleWindowStart  int64
 	styleWindowGained uint32
 	styleWindowLogged bool
-}
-
-type PowerUp struct {
-	ID      uint16
-	Type    uint8
-	X       uint16
-	Y       uint16
-	Expires uint32
-}
-
-type Event struct {
-	Kind uint8
-
-	A uint16
-	B uint16
-	X uint16
-	Y uint16
-	C uint32
-	D uint8
 }
 
 type ChatMessage struct {

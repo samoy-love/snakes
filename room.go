@@ -45,6 +45,29 @@ const (
 	MutatorPowerSurge    = 2
 )
 
+// Кадансы снапшота: как часто клиенту уходит полный кадр вместо дельты и с
+// какого объёма изменений дельта перестаёт быть выгодной. Это политика тика, а
+// не формат, поэтому живёт здесь, а не в protocol.
+const (
+	FullSnapshotEveryTicks = 20
+	MaxDeltaChanges        = 9000
+)
+
+// Правила бонусов и ускорений: бюджет расхода, его регенерация и длительности
+// рывков. Клиент про них ничего не знает — он видит только последствия.
+const (
+	BonusBudgetMax          = 70
+	BonusBudgetRegenPerTick = 1
+
+	SpeedPickupLockTicks   = 80
+	DashDuration           = 45
+	DashDurationLocked     = 28
+	DashMaxFromNow         = 70
+	MegaDashDuration       = 95
+	MegaDashDurationLocked = 55
+	MegaDashMaxFromNow     = 130
+)
+
 type Hub struct {
 	mu         sync.RWMutex
 	rooms      map[int]*Room
@@ -377,8 +400,8 @@ func (r *Room) resetMatchLocked() {
 		r.minimapGrid = r.minimapGrid[:0]
 	}
 	r.minimapDirty = true
-	r.minimapFullActive = false
-	r.minimapFullCursor = 0
+	r.minimapCur.FullActive = false
+	r.minimapCur.FullCursor = 0
 
 	r.events = r.events[:0]
 	r.metaDirty = true
@@ -2334,19 +2357,19 @@ func (r *Room) step() {
 	r.tmpAnchors = anchors
 
 	var minimapMsg []byte
-	if !r.minimapFullActive && (r.tick%MinimapFullForcedEveryTicks == 0 || r.tick%MinimapFullEveryTicks == 0) {
-		r.minimapFullActive = true
-		r.minimapFullCursor = 0
+	if !r.minimapCur.FullActive && (r.tick%MinimapFullForcedEveryTicks == 0 || r.tick%MinimapFullEveryTicks == 0) {
+		r.minimapCur.FullActive = true
+		r.minimapCur.FullCursor = 0
 	}
 	if r.minimapDirty {
-		if !r.minimapFullActive {
-			r.minimapFullCursor = 0
+		if !r.minimapCur.FullActive {
+			r.minimapCur.FullCursor = 0
 		}
-		r.minimapFullActive = true
+		r.minimapCur.FullActive = true
 		r.minimapDirty = false
 	}
 	if r.tick%MinimapDeltaEveryTicks == 0 {
-		if r.minimapFullActive {
+		if r.minimapCur.FullActive {
 			minimapMsg = r.buildMinimapChunkBinary(true)
 		} else if len(r.minimapGrid) > 0 {
 			minimapMsg = r.buildMinimapChunkBinary(false)
@@ -2490,7 +2513,7 @@ func (r *Room) step() {
 	var minimapPD *pooledData
 	if minimapMsg != nil {
 		minimapPD = acquirePooledData(len(minimapMsg))
-		minimapPD.b = append(minimapPD.b, minimapMsg...)
+		minimapPD.B = append(minimapPD.B, minimapMsg...)
 	}
 	var sharedEventsPD *pooledData
 	if eventsPD != nil {

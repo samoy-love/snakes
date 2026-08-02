@@ -183,7 +183,7 @@ func TestEventPayloadLengths(t *testing.T) {
 				t.Fatal("buildEventsPooledLocked вернул nil")
 			}
 			defer releasePooledData(pd)
-			b := pd.b
+			b := pd.B
 
 			wantTotal := eventsHeaderBase + 2 + 1 + eventPayloadLen[kind]
 			if len(b) != wantTotal {
@@ -358,7 +358,7 @@ func TestEventPayloadExactBytes(t *testing.T) {
 			defer releasePooledData(pd)
 
 			off := eventsHeaderBase + 2
-			got := pd.b[off:]
+			got := pd.B[off:]
 			if len(got) != len(tc.want) {
 				t.Fatalf("len=%d, ожидалось %d (%v)", len(got), len(tc.want), got)
 			}
@@ -384,7 +384,7 @@ func TestEventUnknownKindFallback(t *testing.T) {
 	defer releasePooledData(pd)
 
 	off := eventsHeaderBase + 2
-	got := pd.b[off:]
+	got := pd.B[off:]
 	want := []byte{200, 0}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("fallback payload = %v, ожидалось %v", got, want)
@@ -441,11 +441,11 @@ func TestEventsPacketRoundTrip(t *testing.T) {
 	for _, e := range events {
 		wantLen += 1 + eventPayloadLen[e.Kind]
 	}
-	if len(pd.b) != wantLen {
-		t.Fatalf("длина пакета = %d, ожидалось %d", len(pd.b), wantLen)
+	if len(pd.B) != wantLen {
+		t.Fatalf("длина пакета = %d, ожидалось %d", len(pd.B), wantLen)
 	}
 
-	rd := &reader{b: pd.b, t: t}
+	rd := &reader{b: pd.B, t: t}
 	if got := rd.u8(); got != MsgEventsBinary {
 		t.Fatalf("тип = %d", got)
 	}
@@ -538,8 +538,8 @@ func TestEventsHeader(t *testing.T) {
 			t.Fatal("force=true вернул nil")
 		}
 		defer releasePooledData(pd)
-		if len(pd.b) != eventsHeaderBase+2 {
-			t.Fatalf("длина = %d, ожидалось %d", len(pd.b), eventsHeaderBase+2)
+		if len(pd.B) != eventsHeaderBase+2 {
+			t.Fatalf("длина = %d, ожидалось %d", len(pd.B), eventsHeaderBase+2)
 		}
 	})
 
@@ -551,7 +551,7 @@ func TestEventsHeader(t *testing.T) {
 			t.Fatal("metaDirty=true вернул nil")
 		}
 		defer releasePooledData(pd)
-		rd := &reader{b: pd.b, t: t}
+		rd := &reader{b: pd.B, t: t}
 		rd.u8()
 		rd.u32()
 		rd.u8()
@@ -583,8 +583,8 @@ func TestEventsHeader(t *testing.T) {
 		}
 		defer releasePooledData(pd)
 		want := eventsHeaderBase + 5*powerUpRecordLen + 2
-		if len(pd.b) != want {
-			t.Fatalf("длина = %d, ожидалось %d", len(pd.b), want)
+		if len(pd.B) != want {
+			t.Fatalf("длина = %d, ожидалось %d", len(pd.B), want)
 		}
 	})
 }
@@ -617,11 +617,11 @@ func TestROIPlayerRecordSizeAndLayout(t *testing.T) {
 	defer releasePooledData(pd)
 
 	wantLen := 1 + 4 + 2 + roiPlayerRecordLen*1 + 2 + 2 + 2 + 2 + 4 + 4
-	if len(pd.b) != wantLen {
-		t.Fatalf("длина ROI = %d, ожидалось %d", len(pd.b), wantLen)
+	if len(pd.B) != wantLen {
+		t.Fatalf("длина ROI = %d, ожидалось %d", len(pd.B), wantLen)
 	}
 
-	rd := &reader{b: pd.b, t: t}
+	rd := &reader{b: pd.B, t: t}
 	if got := rd.u8(); got != MsgROIBinary {
 		t.Fatalf("тип = %d, ожидалось %d", got, MsgROIBinary)
 	}
@@ -732,22 +732,22 @@ func TestROIFastLengthMatchesChanges(t *testing.T) {
 
 	wantLen := 1 + 4 + 2 + roiPlayerRecordLen*len(players) + 2 + 2 + 2 + 2 + 4 + 4 +
 		4*len(inGrid) + 4*len(inTrail)
-	if len(pd.b) != wantLen {
-		t.Fatalf("длина = %d, ожидалось %d", len(pd.b), wantLen)
+	if len(pd.B) != wantLen {
+		t.Fatalf("длина = %d, ожидалось %d", len(pd.B), wantLen)
 	}
 
 	// bytesDG/bytesDT в заголовке должны совпадать с реальным хвостом.
 	off := 1 + 4 + 2 + roiPlayerRecordLen*len(players) + 2 + 2 + 2 + 2
-	bytesDG := int(binary.LittleEndian.Uint32(pd.b[off:]))
-	bytesDT := int(binary.LittleEndian.Uint32(pd.b[off+4:]))
+	bytesDG := int(binary.LittleEndian.Uint32(pd.B[off:]))
+	bytesDT := int(binary.LittleEndian.Uint32(pd.B[off+4:]))
 	if bytesDG != 4*len(inGrid) {
 		t.Fatalf("bytesDG = %d, ожидалось %d", bytesDG, 4*len(inGrid))
 	}
 	if bytesDT != 4*len(inTrail) {
 		t.Fatalf("bytesDT = %d, ожидалось %d", bytesDT, 4*len(inTrail))
 	}
-	if off+8+bytesDG+bytesDT != len(pd.b) {
-		t.Fatalf("хвост не сходится: %d != %d", off+8+bytesDG+bytesDT, len(pd.b))
+	if off+8+bytesDG+bytesDT != len(pd.B) {
+		t.Fatalf("хвост не сходится: %d != %d", off+8+bytesDG+bytesDT, len(pd.B))
 	}
 }
 
@@ -766,13 +766,13 @@ func TestROIScanFullLength(t *testing.T) {
 
 	cells := rw * rh
 	wantLen := 1 + 4 + 2 + roiPlayerRecordLen + 2 + 2 + 2 + 2 + 4 + 4 + 4*cells + 4*cells
-	if len(pd.b) != wantLen {
-		t.Fatalf("длина = %d, ожидалось %d", len(pd.b), wantLen)
+	if len(pd.B) != wantLen {
+		t.Fatalf("длина = %d, ожидалось %d", len(pd.B), wantLen)
 	}
 
 	// Первая дельта должна ссылаться на клетку (4,6).
 	off := 1 + 4 + 2 + roiPlayerRecordLen + 2 + 2 + 2 + 2 + 4 + 4
-	first := binary.LittleEndian.Uint32(pd.b[off:])
+	first := binary.LittleEndian.Uint32(pd.B[off:])
 	if idx := int(first >> 16); idx != 6*W+4 {
 		t.Fatalf("первая клетка = %d, ожидалось %d", idx, 6*W+4)
 	}
@@ -796,15 +796,15 @@ func TestROIScanDeltaRespectsSinceTick(t *testing.T) {
 	defer releasePooledData(pd)
 
 	wantLen := 1 + 4 + 2 + roiPlayerRecordLen + 2 + 2 + 2 + 2 + 4 + 4 + 4 + 4
-	if len(pd.b) != wantLen {
-		t.Fatalf("длина = %d, ожидалось %d", len(pd.b), wantLen)
+	if len(pd.B) != wantLen {
+		t.Fatalf("длина = %d, ожидалось %d", len(pd.B), wantLen)
 	}
 	off := 1 + 4 + 2 + roiPlayerRecordLen + 2 + 2 + 2 + 2 + 4 + 4
-	dg := binary.LittleEndian.Uint32(pd.b[off:])
+	dg := binary.LittleEndian.Uint32(pd.B[off:])
 	if int(dg>>16) != 2*W+2 || uint16(dg&0xFFFF) != 9 {
 		t.Fatalf("gridChange = idx %d owner %d", dg>>16, dg&0xFFFF)
 	}
-	dt := binary.LittleEndian.Uint32(pd.b[off+4:])
+	dt := binary.LittleEndian.Uint32(pd.B[off+4:])
 	if int(dt>>16) != 3*W+3 {
 		t.Fatalf("trailChange idx = %d, ожидалось %d", dt>>16, 3*W+3)
 	}
@@ -832,12 +832,12 @@ func TestROIFastAndScanAgree(t *testing.T) {
 	scan := r.buildROIPooledScan(0, 0, 4, 4, false, 32, []*Player{p})
 	defer releasePooledData(scan)
 
-	if len(fast.b) != len(scan.b) {
-		t.Fatalf("длины расходятся: fast=%d scan=%d", len(fast.b), len(scan.b))
+	if len(fast.B) != len(scan.B) {
+		t.Fatalf("длины расходятся: fast=%d scan=%d", len(fast.B), len(scan.B))
 	}
-	for i := range fast.b {
-		if fast.b[i] != scan.b[i] {
-			t.Fatalf("байт %d: fast=0x%02X scan=0x%02X", i, fast.b[i], scan.b[i])
+	for i := range fast.B {
+		if fast.B[i] != scan.B[i] {
+			t.Fatalf("байт %d: fast=0x%02X scan=0x%02X", i, fast.B[i], scan.B[i])
 		}
 	}
 }
@@ -904,8 +904,8 @@ func TestMinimapChunkBinary(t *testing.T) {
 		}
 
 		// Cursor двигается: full-выдача пагинируется.
-		if total > MinimapMaxChunksPerMsg && r.minimapFullCursor != MinimapMaxChunksPerMsg {
-			t.Fatalf("minimapFullCursor = %d, ожидалось %d", r.minimapFullCursor, MinimapMaxChunksPerMsg)
+		if total > MinimapMaxChunksPerMsg && r.minimapCur.FullCursor != MinimapMaxChunksPerMsg {
+			t.Fatalf("minimapFullCursor = %d, ожидалось %d", r.minimapCur.FullCursor, MinimapMaxChunksPerMsg)
 		}
 	})
 

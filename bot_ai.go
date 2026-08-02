@@ -147,6 +147,10 @@ func (r *Room) botPickDirOutside(p *Player) (Dir, bool) {
 	return best, true
 }
 
+// aiRecentCap — глубина кольца недавних клеток головы. По нему бот ловит себя
+// на кружении по одному и тому же пятачку.
+const aiRecentCap = 12
+
 const (
 	BotCount = 14
 	// BotCountMin is the floor for the dynamic bot population (G7). Bots are
