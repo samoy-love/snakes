@@ -35,6 +35,7 @@ func (c *Client) closeWith(code websocket.StatusCode, reason string) {
 		return
 	}
 	log.Printf("ws_close ip=%q pid=%q code=%d reason=%q", c.ip, profiles.ShortPID(c.pid), code, reason)
+	metrics.WSClosedTotal.Inc(closeReasonLabel(reason))
 	metrics.WSActive.Add(-1)
 	c.leaveRoom(context.Background())
 	close(c.sendCh)

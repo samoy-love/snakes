@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"snakes/internal/profiles"
+
+	"snakes/internal/metrics"
 )
 
 // CosmeticsMaxID is the highest cosmetic id; the inventory mask is a uint8, so
@@ -468,6 +470,7 @@ func (r *Room) addDailyProgressLocked(p *Player, pr *profiles.Profile, kind uint
 		r.pushEvent(Event{Kind: EventDailyProgress, A: p.num, B: *prog, D: slot})
 		if *prog >= *goal {
 			r.pushEvent(Event{Kind: EventDailyComplete, A: p.num, D: slot})
+			metrics.DailiesCompletedTotal.Inc(dailyLabel(t))
 			rewardCount++
 		}
 	}
@@ -1090,6 +1093,7 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 		p.style = ^uint32(0)
 	}
 
+	metrics.StyleAwardedTotal.Add(styleReasonLabel(reason), uint64(delta))
 	if reason > 0 && int(reason) < StyleReasonCount {
 		if r.matchStyleEarned[p.num] < ^uint32(0)-uint32(delta) {
 			r.matchStyleEarned[p.num] += uint32(delta)
@@ -1148,6 +1152,7 @@ func (r *Room) addContractProgress(p *Player, inc uint16) {
 	}
 	if p.contractProgress >= p.contractGoal {
 		r.pushEvent(Event{Kind: EventContractComplete, A: p.num, D: p.contractType})
+		metrics.ContractsCompletedTotal.Inc(contractLabel(p.contractType))
 		if p.contractType > 0 && p.contractType < 4 {
 			v := r.matchContractsBy[p.num]
 			idx := p.contractType
