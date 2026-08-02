@@ -13,6 +13,10 @@ becomes yours. Let someone cross that trail and you lose the whole estate.
 Play: **[snakes.samoy.love](https://snakes.samoy.love)** — no sign-up, one tab,
 arrow keys or swipe.
 
+![A match: rival territories, a trail, the capture effect](docs/img/match.svg)
+
+![Main menu](docs/img/menu.svg)
+
 ## How the game works
 
 The field is 200×140 cells, one tick is 100 ms. A match runs five minutes in
@@ -205,3 +209,7 @@ for all of them. Adding a new service to the row costs a single
 `.deploy-kit/*.env` file.
 
 Written by Alexey Samoylov, <alex@samoy.love>.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The bundled Twemoji graphics are CC-BY 4.0.
