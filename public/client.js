@@ -2140,6 +2140,20 @@ const VIEW_CELLS_Y = 28;
 const CAM_LEAD_MAX = 0.22;
 let camLeadX = 0;
 let camLeadY = 0;
+
+/* Зеркало roiLookahead() из protocol.go: на сколько клеток сервер сдвигает
+   окно ROI вперёд по оси движения. Держим формулу идентичной, иначе камера
+   встанет не по центру окна и снова упрётся в его край. */
+const ROI_LOOKAHEAD_CAP = 8;
+const ROI_LOOKAHEAD_NUM = 1;
+const ROI_LOOKAHEAD_DEN = 4;
+
+function roiLeadCells(sizeAlongAxis) {
+  const half = Math.floor((Number(sizeAlongAxis) || 0) / 2);
+  if (half <= 0) return 0;
+  const la = Math.floor((half * ROI_LOOKAHEAD_NUM) / ROI_LOOKAHEAD_DEN);
+  return Math.max(0, Math.min(ROI_LOOKAHEAD_CAP, la));
+}
 /* C1: запас, который вычитается из фактического ROI при подборе масштаба.
    Сервер снапит окно по 8 клеток (main.go ROIStep) и сдвигает его на 12 клеток
    вперёд по направлению движения (ROILookahead), то есть относительно игрока
@@ -9965,16 +9979,40 @@ function draw() {
   {
     const halfW = cw / (2 * cell);
     const halfH = viewH / (2 * cell);
-    let wantX = 0;
-    let wantY = 0;
+    const roiW = Number(lastRoi?.rw) || Number(roiGrant?.w) || VIEW_CELLS_X * 2;
+    const roiH = Number(lastRoi?.rh) || Number(roiGrant?.h) || VIEW_CELLS_Y * 2;
+
+    /* Раньше сюда подставлялась поправка «затолкать вьюпорт внутрь ROI»:
+       расстояние от camX до ближайшего края окна. Начало ROI сервер снапит по
+       ROI_STEP клеток, поэтому та поправка была СТУПЕНЧАТОЙ — на каждом снапе
+       она скачком превращалась из 0 в ~5 клеток, и сглаживание не убирало
+       ступеньку, а растягивало её в рывок камеры (замер: скорость камеры
+       гуляла от 0.005 до 0.6 клетки за кадр, размах в 120 раз, каждые
+       ROI_STEP клеток пути).
+       Теперь ведём камеру вперёд по направлению движения ровно на столько же,
+       на сколько сервер сдвигает окно (см. roiLookahead в protocol.go). Тогда
+       вьюпорт центрирован в ROI ПО ПОСТРОЕНИЮ, гнаться за краями не нужно, и
+       величина непрерывна — рывков нет. */
+    const leadX = roiLeadCells(roiW);
+    const leadY = roiLeadCells(roiH);
+    const dir = my && my.a ? my.d : null;
+    let wantX = dir === 'left' ? -leadX : dir === 'right' ? leadX : 0;
+    let wantY = dir === 'up' ? -leadY : dir === 'down' ? leadY : 0;
+
+    // Страховка: если камеру всё же вынесло за окно (разворот, край карты),
+    // тянем её обратно. Считаем от УЖЕ желаемой позиции, чтобы поправка была
+    // нулевой в норме и не спорила с ведением.
     if (lastRoi) {
+      const cx = camX + wantX;
+      const cy = camY + wantY;
       const loX = lastRoi.rx + halfW;
-      const hiX = lastRoi.rx + lastRoi.rw - halfW;
-      if (hiX > loX) wantX = Math.max(loX, Math.min(hiX, camX)) - camX;
+      const hiX = lastRoi.rx + roiW - halfW;
+      if (hiX > loX) wantX += Math.max(loX, Math.min(hiX, cx)) - cx;
       const loY = lastRoi.ry + halfH;
-      const hiY = lastRoi.ry + lastRoi.rh - halfH;
-      if (hiY > loY) wantY = Math.max(loY, Math.min(hiY, camY)) - camY;
+      const hiY = lastRoi.ry + roiH - halfH;
+      if (hiY > loY) wantY += Math.max(loY, Math.min(hiY, cy)) - cy;
     }
+
     const capX = halfW * CAM_LEAD_MAX;
     const capY = halfH * CAM_LEAD_MAX;
     wantX = Math.max(-capX, Math.min(capX, wantX));
