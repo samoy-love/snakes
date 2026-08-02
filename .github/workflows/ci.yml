@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           # 22.x: `node --check` сам определяет ES-модуль по синтаксису.
           # На 20.x файлы с `export` (client_net.js и др.) падали бы как CJS.
