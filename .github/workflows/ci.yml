@@ -22,7 +22,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
+          # Версия берётся из go.mod, а не пишется здесь второй раз: '1.25'
+          # означало «любой 1.25.x, какой окажется у раннера», и прогон мог
+          # идти на toolchain со stdlib-уязвимостями, о которых go.mod уже
+          # знает. Одно место с версией — go.mod, где стоит точный 1.25.12.
+          go-version-file: go.mod
           cache: true
 
       - name: gofmt
@@ -45,7 +49,9 @@ jobs:
       # десятка, и версия фиксирована — линтер не должен краснеть сам по себе
       # после чужого релиза.
       - name: staticcheck
-        uses: dominikh/staticcheck-action@v1
+        # Приколот к SHA, а не к тегу: тег v1 мутабелен, и сторонний action
+        # выполняется в том же job'е, что и сборка.
+        uses: dominikh/staticcheck-action@9716614d4101e79b4340dd97b10e54d68234e431 # v1.4.1
         with:
           version: "2025.1.1"
           install-go: false
@@ -70,7 +76,9 @@ jobs:
       # Покрытие уезжает в Codecov: цифра в README должна обновляться сама,
       # иначе она превращается в украшение и врёт при первом же изменении.
       - name: Отправить покрытие в Codecov
-        uses: codecov/codecov-action@v5
+        # Приколот к SHA, а не к тегу: тег мутабелен, и у Codecov уже был
+        # прецедент компрометации релиза.
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
         with:
           files: ./coverage.out
           flags: go
