@@ -47,7 +47,7 @@ HMAC-SHA256 на ключе `PROFILE_SECRET`. Клиент сохраняет т
 1. `wsOriginAllowed` (`ws.go`) — собственный allowlist из `WS_ORIGINS`
    (`allowedWSOrigins` в `main.go`). Хосты `localhost`, `127.0.0.1` и `::1`
    разрешены всегда, независимо от списка.
-2. `websocket.Accept` из `nhooyr.io/websocket` — библиотека по умолчанию требует,
+2. `websocket.Accept` из `github.com/coder/websocket` — библиотека по умолчанию требует,
    чтобы хост из `Origin` совпадал с заголовком `Host` запроса, иначе сама
    отдаёт 403.
 

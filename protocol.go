@@ -109,10 +109,18 @@ type pooledData struct {
 }
 
 var pooledDataPool = sync.Pool{New: func() any { return &pooledData{b: make([]byte, 0, 64*1024)} }}
-var pooledU32Pool = sync.Pool{New: func() any { return make([]uint32, 0, 2048) }}
 
-var floodBytesPool = sync.Pool{New: func() any { return make([]byte, N) }}
-var floodIntPool = sync.Pool{New: func() any { return make([]int, N) }}
+// Пулы хранят УКАЗАТЕЛИ на срезы, а не срезы.
+//
+// sync.Pool.Put принимает any, и срез при укладке боксится в интерфейс — то
+// есть каждый Put сам по себе аллоцирует (staticcheck SA6002). Для пулов,
+// которые дёргаются в горячем пути (capture() — 5.5% CPU, буферы ROI — каждый
+// тик на каждого клиента), это ровно та аллокация, ради устранения которой пул
+// и заводили. С *[]T укладка бесплатна.
+var pooledU32Pool = sync.Pool{New: func() any { s := make([]uint32, 0, 2048); return &s }}
+
+var floodBytesPool = sync.Pool{New: func() any { s := make([]byte, N); return &s }}
+var floodIntPool = sync.Pool{New: func() any { s := make([]int, N); return &s }}
 
 func acquirePooledData(minCap int) *pooledData {
 	pd := pooledDataPool.Get().(*pooledData)
@@ -153,8 +161,12 @@ func decPooledRef(pd *pooledData) {
 }
 
 func acquireU32(minCap int) []uint32 {
-	s := pooledU32Pool.Get().([]uint32)
+	p := pooledU32Pool.Get().(*[]uint32)
+	s := *p
 	if cap(s) < minCap {
+		// Мелкий буфер из пула не подходит — возвращаем его обратно, иначе
+		// пул пустеет и следующий Get снова аллоцирует.
+		pooledU32Pool.Put(p)
 		return make([]uint32, 0, minCap)
 	}
 	return s[:0]
@@ -167,7 +179,8 @@ func releaseU32(s []uint32) {
 	if cap(s) > 1_000_000 {
 		return
 	}
-	pooledU32Pool.Put(s[:0])
+	s = s[:0]
+	pooledU32Pool.Put(&s)
 }
 
 func appendU16LE(dst []byte, v uint16) []byte {
@@ -605,9 +618,8 @@ func (r *Room) buildMinimapChunkBinary(full bool) []byte {
 			r.minimapFullActive = false
 			r.minimapFullCursor = 0
 		}
-	} else {
-		// chunks already collected for the delta case
 	}
+	// В дельта-режиме chunks уже собран выше — здесь делать нечего.
 
 	// type(1) + tick(4) + cw(1)+ch(1)+count(2)+flags(1) + chunks*(cx(1)+cy(1)+payload)
 	chunkCells := MinimapChunkW * MinimapChunkH

@@ -512,21 +512,26 @@ func (r *Room) floodFillOutside(blocked []byte, outside []byte, q []int) []byte 
 }
 
 func (r *Room) capture(playerNum uint16) {
-	blocked := floodBytesPool.Get().([]byte)
-	if len(blocked) != N {
-		blocked = make([]byte, N)
+	// Пулы отдают *[]T: класть в sync.Pool сам срез значит аллоцировать на
+	// каждом Put (SA6002), а capture() — горячий путь.
+	blockedP := floodBytesPool.Get().(*[]byte)
+	if len(*blockedP) != N {
+		*blockedP = make([]byte, N)
 	}
-	outside := floodBytesPool.Get().([]byte)
-	if len(outside) != N {
-		outside = make([]byte, N)
+	outsideP := floodBytesPool.Get().(*[]byte)
+	if len(*outsideP) != N {
+		*outsideP = make([]byte, N)
 	}
-	q := floodIntPool.Get().([]int)
-	if len(q) != N {
-		q = make([]int, N)
+	qP := floodIntPool.Get().(*[]int)
+	if len(*qP) != N {
+		*qP = make([]int, N)
 	}
-	defer floodBytesPool.Put(blocked)
-	defer floodBytesPool.Put(outside)
-	defer floodIntPool.Put(q)
+	defer floodBytesPool.Put(blockedP)
+	defer floodBytesPool.Put(outsideP)
+	defer floodIntPool.Put(qP)
+	blocked := *blockedP
+	outside := *outsideP
+	q := *qP
 
 	for i := 0; i < N; i++ {
 		blocked[i] = 0
