@@ -69,7 +69,6 @@
 | `Makefile` | Повседневные команды: build / test / vet / fmt / docker-* |
 | `.github/workflows/` | CI (`ci.yml`) и публикация образа в GHCR (`docker.yml`) |
 | `.env.example` | Шаблон конфигурации |
-| `launcher.conf` | Исторический конфиг nginx с прода (содержит и посторонние сайты) |
 | `BACKLOG.md` | Список задач |
 
 ---
