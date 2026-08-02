@@ -2124,7 +2124,7 @@ function trackEvent(name) {
   try {
     const url = `/e/${ev}`;
     if (typeof navigator.sendBeacon === 'function') {
-      navigator.sendBeacon(url, new Blob([], { type: 'text/plain' }));
+      navigator.sendBeacon(url);
     } else if (typeof fetch === 'function') {
       fetch(url, { method: 'POST', keepalive: true }).catch(() => {});
     }
