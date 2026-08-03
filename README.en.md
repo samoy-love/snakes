@@ -82,13 +82,23 @@ released through [deploy-kit](https://github.com/tr0llex/deploy-kit).
 Requires Go 1.25+.
 
 ```bash
-go run .
+WS_ALLOW_LOCALHOST=1 go run .
 ```
 
 Open <http://localhost:3000>. Static files are served from `./public` **relative
-to the working directory**, so run it from the repository root. `WS_ORIGINS` is
-not needed locally — loopback origins are allowed separately
-(`WS_ALLOW_LOCALHOST`) — and profiles land in `./data/profiles.json`.
+to the working directory**, so run it from the repository root, and profiles land
+in `./data/profiles.json`.
+
+`WS_ALLOW_LOCALHOST=1` is not a convenience: without it the game opens but never
+plays. An empty `WS_ORIGINS` does not mean "origin is not checked", it means
+"only our own is allowed", so the `/ws` handshake from `http://localhost:3000`
+gets a 403 — menu and profile are all there, and nothing connects. The default is
+off on purpose: on by default, any locally opened page could present a valid
+Origin, and that costs more in production than one variable costs locally.
+
+[deploy-kit](https://github.com/tr0llex/deploy-kit) starts the server the same
+way: `dk run snakes` takes the variable from `.deploy-kit/prod.env`, so there is
+nothing to remember.
 
 Every setting, its default and its reason: [docs/config.md](docs/config.md); the
 template to copy is `.env.example`.
