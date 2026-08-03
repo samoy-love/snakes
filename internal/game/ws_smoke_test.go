@@ -261,3 +261,110 @@ func TestWSSmokeReconnectKeepsProfileID(t *testing.T) {
 		t.Fatalf("close #2: %v", err)
 	}
 }
+
+// Ловит: недостижимую рассылку итогов матча. Блок с broadcastJSON("matchEnd")
+// однажды уже стоял ПОСЛЕ безусловного `if r.matchEnded { ... return }`, и
+// игроки молча теряли экран результатов: единственная точка отправки в
+// репозитории не выполнялась ни разу.
+func TestWSSmokeMatchEndIsBroadcast(t *testing.T) {
+	hub, wsURL := wsSmokeEnv(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	c.SetReadLimit(8 << 20)
+	defer c.Close(websocket.StatusNormalClosure, "test done")
+
+	wsSmokeHello(ctx, t, c)
+	wsSmokeSend(ctx, t, c, "join", map[string]any{"mode": "auto"})
+	initRaw := wsSmokeWaitJSON(ctx, t, c, "init")
+	var initMsg struct {
+		Room *int `json:"room"`
+	}
+	if err := json.Unmarshal(initRaw, &initMsg); err != nil || initMsg.Room == nil {
+		t.Fatalf("init не разобрался: %v (%s)", err, string(initRaw))
+	}
+
+	hub.mu.Lock()
+	rm := hub.rooms[*initMsg.Room]
+	hub.mu.Unlock()
+	if rm == nil {
+		t.Fatalf("комната %d не найдена в хабе", *initMsg.Room)
+	}
+
+	// Матч заканчивается на следующем тике комнаты.
+	rm.mu.Lock()
+	rm.matchEndTick = rm.tick + 1
+	rm.mu.Unlock()
+
+	raw := wsSmokeWaitJSON(ctx, t, c, "matchEnd")
+	var end struct {
+		Seq     *uint32          `json:"seq"`
+		Results []map[string]any `json:"results"`
+	}
+	if err := json.Unmarshal(raw, &end); err != nil {
+		t.Fatalf("matchEnd не разобрался: %v (%s)", err, string(raw))
+	}
+	if end.Seq == nil {
+		t.Fatalf("в matchEnd нет seq: %s", string(raw))
+	}
+	if len(end.Results) == 0 {
+		t.Fatalf("в matchEnd пустая таблица результатов: %s", string(raw))
+	}
+}
+
+// Ловит: снятие потолка одновременных соединений с одного адреса и утечку
+// ключей в счётчике. wsIPLimiter считает только разобранные сообщения, поэтому
+// молчащие соединения он не видит вовсе.
+func TestWSConnSlotCap(t *testing.T) {
+	savedLimit := wsIPConnLimit
+	t.Cleanup(func() {
+		wsIPConnLimit = savedLimit
+		wsIPConnMu.Lock()
+		clear(wsIPConnCount)
+		wsIPConnMu.Unlock()
+	})
+
+	// По умолчанию потолок выключен и не мешает никому.
+	wsIPConnLimit = 0
+	for i := 0; i < 100; i++ {
+		if !acquireWSConnSlot("10.0.0.1") {
+			t.Fatalf("выключенный потолок отказал на %d-м соединении", i+1)
+		}
+	}
+
+	wsIPConnLimit = 2
+	// Отдельными вызовами, а не через ||: у acquireWSConnSlot есть побочный
+	// эффект, и при коротком замыкании второй слот бы не занялся.
+	for i := 0; i < 2; i++ {
+		if !acquireWSConnSlot("10.0.0.1") {
+			t.Fatalf("соединение %d из первых двух не прошло", i+1)
+		}
+	}
+	if acquireWSConnSlot("10.0.0.1") {
+		t.Fatal("третье соединение прошло при потолке 2")
+	}
+	// Другой адрес живёт своей жизнью.
+	if !acquireWSConnSlot("10.0.0.2") {
+		t.Fatal("потолок одного адреса задел другой")
+	}
+
+	releaseWSConnSlot("10.0.0.1")
+	if !acquireWSConnSlot("10.0.0.1") {
+		t.Fatal("освободившийся слот не переиспользован")
+	}
+
+	releaseWSConnSlot("10.0.0.1")
+	releaseWSConnSlot("10.0.0.1")
+	releaseWSConnSlot("10.0.0.2")
+	wsIPConnMu.Lock()
+	left := len(wsIPConnCount)
+	wsIPConnMu.Unlock()
+	if left != 0 {
+		t.Fatalf("после освобождения в счётчике осталось %d ключей", left)
+	}
+}

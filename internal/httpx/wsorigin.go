@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -79,10 +80,34 @@ func SetWSOriginPolicy(origins []string, allowLocalhost bool) (restore func()) {
 	}
 	allowedWSOrigins = next
 	wsAllowLocalhost = allowLocalhost
+	// connect-src в CSP собран из этого же списка, иначе тест с живым
+	// рукопожатием увидел бы политику от прежнего окружения.
+	rebuildCSP()
 	return func() {
 		allowedWSOrigins = prevList
 		wsAllowLocalhost = prevFlag
+		rebuildCSP()
 	}
+}
+
+// wsConnectSources переводит allowlist рукопожатия в источники для CSP
+// connect-src: http:// -> ws://, https:// -> wss://. Сам http(s)-origin в
+// connect-src не нужен — по нему ходит только страница, а её покрывает 'self'.
+//
+// Порядок обхода карты случайный, а заголовок обязан быть побайтово
+// стабильным, иначе его не сравнить между ответами при разборе инцидента.
+func wsConnectSources() []string {
+	out := make([]string, 0, len(allowedWSOrigins))
+	for o := range allowedWSOrigins {
+		switch {
+		case strings.HasPrefix(o, "https://"):
+			out = append(out, "wss://"+strings.TrimPrefix(o, "https://"))
+		case strings.HasPrefix(o, "http://"):
+			out = append(out, "ws://"+strings.TrimPrefix(o, "http://"))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func isLoopbackOriginHost(h string) bool {
