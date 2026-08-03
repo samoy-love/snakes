@@ -725,6 +725,30 @@ func TestAddStyleCappedRespectsBudget(t *testing.T) {
 	}
 }
 
+// Ловит: списание бюджета за матч при нулевой выдаче. Потолок дохода в минуту
+// режет начисление до нуля, и если addStyleCapped спишет запрошенное, игрок
+// потеряет бюджет киллов/захватов до конца матча, ничего не получив, — доход не
+// возобновится и после смены минутного окна.
+func TestAddStyleCappedDebitsOnlyWhatWasGranted(t *testing.T) {
+	withEmptyProfileStore(t)
+	r := newRulesRoom(t, 41)
+	p := addHumanPlayer(r, 1, 30, 30, DirRight)
+	p.profileKey = "pid-capped"
+
+	// Выбираем минутное окно дохода целиком: 400 — весь его размер.
+	if got := r.addStyle(p, 400, StyleKill); got != 400 {
+		t.Fatalf("первое начисление = %d, ожидалось 400", got)
+	}
+
+	spent := uint16(0)
+	if got := r.addStyleCapped(p, 40, StyleKill, &spent, StyleKillMatchCap); got != 0 {
+		t.Fatalf("при исчерпанном окне выдано %d, ожидалось 0", got)
+	}
+	if spent != 0 {
+		t.Fatalf("бюджет матча израсходован на %d при нулевой выдаче", spent)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Стиль за киллы: затухание за ботов и потолок за матч.
 // ---------------------------------------------------------------------------

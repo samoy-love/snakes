@@ -40,8 +40,8 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 		"default-src 'self'",
 		"script-src 'self'",
 		"style-src 'self' 'unsafe-inline'",
-		"img-src 'self' data: https:",
-		"connect-src 'self' ws: wss:",
+		"img-src 'self' data:",
+		"connect-src 'self'",
 		"font-src 'self' data:",
 		"base-uri 'self'",
 		"form-action 'self'",
@@ -60,6 +60,17 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 		dir = strings.TrimSpace(dir)
 		if strings.Contains(dir, "'unsafe-inline'") && !strings.HasPrefix(dir, "style-src") {
 			t.Fatalf("'unsafe-inline' просочился в директиву %q", dir)
+		}
+	}
+
+	// Ловит: возврат голых источников-схем. `ws:`, `wss:`, `https:` матчат
+	// ЛЮБОЙ хост — директива с ними выглядит ограничением, но не ограничивает
+	// ничего. Именно так connect-src разрешал сокет на чужой домен.
+	for _, bare := range []string{"ws:", "wss:", "https:", "http:"} {
+		for _, tok := range strings.Fields(strings.ReplaceAll(csp, ";", " ")) {
+			if tok == bare {
+				t.Fatalf("в CSP голый источник-схема %q — он матчит любой хост: %s", bare, csp)
+			}
 		}
 	}
 
@@ -99,8 +110,59 @@ func TestIsVersionedAsset(t *testing.T) {
 	}
 }
 
+// Ловит: connect-src, оторванный от WS_ORIGINS. Если директива перестанет
+// следовать за allowlist, политика снова начнёт разрешать (или запрещать) не
+// то, что рукопожатие, и разойдётся с ним молча.
+func TestCSPConnectSrcFollowsWSOrigins(t *testing.T) {
+	restore := SetWSOriginPolicy([]string{"https://snakes.example", "http://localhost:8080"}, false)
+	defer restore()
+
+	rec := httptest.NewRecorder()
+	SecurityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	csp := rec.Header().Get("Content-Security-Policy")
+
+	for _, want := range []string{
+		"connect-src 'self' ws://localhost:8080 wss://snakes.example;",
+	} {
+		if !strings.Contains(csp, want) {
+			t.Fatalf("в CSP нет %q: %s", want, csp)
+		}
+	}
+
+	// Origin, которого нет в allowlist, не должен появиться и в политике.
+	if strings.Contains(csp, "evil") {
+		t.Fatalf("в connect-src просочился посторонний источник: %s", csp)
+	}
+}
+
+// Ловит: readiness, который отвечает «готов», пока сервис выбрасывает данные.
+// Именно так read-only хранилище профилей часами оставалось незамеченным:
+// пробы зелёные, метрик нет, прогресс игроков в никуда.
+func TestReadyzReportsDegradedState(t *testing.T) {
+	t.Cleanup(func() { SetReadinessProbe(nil) })
+
+	SetReadinessProbe(func() (bool, string) { return false, "profiles read-only (parse_error)" })
+	rec := httptest.NewRecorder()
+	ReadyzHandler(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("код %d, ожидалось 503", rec.Code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "parse_error") {
+		t.Fatalf("тело %q не называет причину", body)
+	}
+
+	// Снятая проверка возвращает прежнее поведение.
+	SetReadinessProbe(nil)
+	rec = httptest.NewRecorder()
+	ReadyzHandler(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != "ready\n" {
+		t.Fatalf("без проверки: код %d, тело %q", rec.Code, rec.Body.String())
+	}
+}
+
 // Ловит: пропажу no-store или смену кода/тела у проб. /healthz — это
-// HEALTHCHECK контейнера: закэшированный ответ означал бы «живой» после того,
+// liveness-проба выкатки: закэшированный ответ означал бы «живой» после того,
 // как процесс уже умер.
 func TestProbeHandlers(t *testing.T) {
 	cases := []struct {

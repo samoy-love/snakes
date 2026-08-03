@@ -60,6 +60,16 @@ func main() {
 
 	profiles.InitSecret()
 	profiles.Load(game.EnsureProfileCosmetics)
+	// Read-only хранилище — это живой процесс, который выбрасывает весь
+	// прогресс игроков. /healthz про это не скажет (процесс-то жив), поэтому
+	// признак деградации отдаётся через /readyz.
+	httpx.SetReadinessProbe(func() (bool, string) {
+		ro, reason := profiles.ReadOnly()
+		if !ro {
+			return true, ""
+		}
+		return false, "profiles read-only (" + reason + ")"
+	})
 	log.Printf("limits roomLimit=%d maxRooms=%d maxProfiles=%d profileEmptyTTL=%s wsAllowLocalhost=%t botDeathLog=%t",
 		roomLimit, game.MaxRooms(), profiles.MaxProfiles, profiles.EmptyTTL, httpx.WSAllowLocalhost(), game.BotDeathLogEnabled())
 	autosaveStop := make(chan struct{})
@@ -68,13 +78,24 @@ func main() {
 	hub := game.NewHub(roomLimit)
 	metrics.SetGameSnapshot(hub.Snapshot)
 
+	metricsAddr := strings.TrimSpace(os.Getenv("METRICS_ADDR"))
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", hub.HandleWS)
 	mux.HandleFunc("/favicon.ico", httpx.FaviconHandler)
 	// Liveness/readiness for systemd and whatever sits in front of it.
 	mux.HandleFunc("/healthz", httpx.HealthzHandler)
 	mux.HandleFunc("/readyz", httpx.ReadyzHandler)
-	mux.HandleFunc("/metrics", metrics.Handler)
+	// metrics.Handler намеренно без авторизации, и на игровом мультиплексоре он
+	// висел на том самом хосте, который проксирует nginx: единственное, что
+	// держало /metrics не в интернете, — location-блок в чужом репозитории.
+	// Когда есть выделенный слушатель, дублировать эндпоинт незачем — пусть
+	// закрывать его надо будет ровно в одном месте. Пусто — слушателя нет, и
+	// эндпоинт остаётся здесь, на loopback: локальный `curl` не должен
+	// требовать настройки.
+	if metricsAddr == "" {
+		mux.HandleFunc("/metrics", metrics.Handler)
+	}
 
 	publicDir := filepath.Join(mustCwd(), "public")
 	fs := http.FileServer(http.Dir(publicDir))
@@ -94,7 +115,7 @@ func main() {
 	// статику мимо nginx со всеми его лимитами и заголовками, поэтому наружу
 	// выставляется ровно один путь и ничего больше. Пусто — слушателя нет.
 	var metricsSrv *http.Server
-	if addr := strings.TrimSpace(os.Getenv("METRICS_ADDR")); addr != "" {
+	if addr := metricsAddr; addr != "" {
 		mmux := http.NewServeMux()
 		mmux.HandleFunc("/metrics", metrics.Handler)
 		metricsSrv = &http.Server{

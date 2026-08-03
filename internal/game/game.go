@@ -37,6 +37,9 @@ func init() {
 			MatchIntermissionTicks = uint32(n)
 		}
 	}
+	// The phase arc is measured in shares of the match, so it has to be derived
+	// AFTER the match length is known. See setPhaseBoundaries in room.go.
+	setPhaseBoundaries(MatchDurationTicks)
 }
 
 const (

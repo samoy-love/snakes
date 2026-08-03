@@ -28,6 +28,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"snakes/internal/metrics"
 )
 
 // ---------------------------------------------------------------------------
@@ -42,10 +44,22 @@ const (
 var profileSecret []byte
 
 // InitSecret loads PROFILE_SECRET or generates an ephemeral dev secret.
+//
+// An ephemeral secret means every token issued before the last restart fails
+// verification: each player silently gets a fresh pid with a zero balance and
+// an empty inventory, while the real profiles rot in profiles.json until TTL.
+// The process still starts and both probes stay green, so the only signal is
+// one log line. PROFILE_SECRET_REQUIRED turns that into a hard start failure —
+// off by default so `go run .` without a config keeps working, on in
+// production so a truncated env file fails the deploy instead of the players.
 func InitSecret() {
 	if s := strings.TrimSpace(os.Getenv("PROFILE_SECRET")); s != "" {
 		profileSecret = []byte(s)
 		return
+	}
+	if envFlagEnabled(os.Getenv("PROFILE_SECRET_REQUIRED")) {
+		log.Fatalf("PROFILE_SECRET is empty and PROFILE_SECRET_REQUIRED is set: " +
+			"refusing to start with an ephemeral secret, every player would lose their progress")
 	}
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
@@ -53,6 +67,22 @@ func InitSecret() {
 	}
 	profileSecret = buf
 	log.Printf("PROFILE_SECRET is not set: generated an ephemeral secret, player progress will NOT survive a restart")
+}
+
+// envFlagEnabled — то же прочтение булевой переменной, что и у
+// WS_ALLOW_LOCALHOST в internal/httpx: включено только явным 1/true/yes/on,
+// всё остальное (включая пустое и опечатки) — выключено. Умолчание всегда
+// «выключено», поэтому опечатка не может незаметно включить поведение.
+//
+// На вход идёт значение, а не имя: env_docs_test ищет по дереву литеральные
+// os.Getenv("ИМЯ"), и переменная, прочитанная через параметр, выпала бы из
+// сверки «код ↔ документация».
+func envFlagEnabled(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func b64u(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
@@ -572,6 +602,9 @@ var profilesReadOnlyReason string
 func enterProfilesReadOnly(path, reason string, err error) {
 	profilesReadOnlyReason = reason
 	profilesReadOnly.Store(true)
+	// Одной строки в логе для этого мало: без метрики и без /readyz режим
+	// виден только тому, кто в этот момент читал journalctl.
+	metrics.ProfilesReadOnly.Set(1)
 	log.Printf("profiles_read_only reason=%s path=%q err=%v: saving is DISABLED, "+
 		"player progress will not be persisted until the file is repaired or removed",
 		reason, path, err)
@@ -585,6 +618,16 @@ func enterProfilesReadOnly(path, reason string, err error) {
 
 // profilesSavingDisabled reports whether persistence is currently refused.
 func profilesSavingDisabled() bool { return profilesReadOnly.Load() }
+
+// ReadOnly reports the degraded state and why it was entered. It exists so the
+// readiness probe can fail instead of answering "ready" while every byte of
+// player progress is being dropped on the floor.
+func ReadOnly() (bool, string) {
+	if !profilesReadOnly.Load() {
+		return false, ""
+	}
+	return true, profilesReadOnlyReason
+}
 
 // Load reads the store from disk. A missing file is not an error;
 // anything else latches read-only mode (G6).
@@ -724,6 +767,7 @@ func Flush(force bool) {
 	profilesDirty.Store(false)
 	if err := saveProfiles(); err != nil {
 		profilesDirty.Store(true)
+		metrics.ProfilesSaveErrors.Inc()
 		log.Printf("profiles_save_error path=%q err=%v", profilesPath(), err)
 	}
 }

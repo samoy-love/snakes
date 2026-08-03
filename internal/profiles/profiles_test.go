@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"snakes/internal/metrics"
 )
 
 // ---------------------------------------------------------------------------
@@ -544,5 +546,65 @@ func TestStyleDayIncomeGrantLockedSoftCap(t *testing.T) {
 	}
 	if pr.DayIncome != 100 {
 		t.Fatalf("DayIncome после смены суток = %d, ожидалось 100", pr.DayIncome)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PROFILE_SECRET_REQUIRED
+// ---------------------------------------------------------------------------
+
+// Ловит: молчаливое включение гейта от постороннего значения и, наоборот,
+// «включил, а не сработало». Умолчание обязано быть «выключено»: опечатка в
+// env-файле не должна ни ронять прод, ни тихо снимать защиту.
+func TestEnvFlagEnabled(t *testing.T) {
+	for _, v := range []string{"1", "true", "TRUE", " yes ", "on"} {
+		if !envFlagEnabled(v) {
+			t.Errorf("envFlagEnabled(%q) = false, ожидалось true", v)
+		}
+	}
+	for _, v := range []string{"", "0", "false", "no", "off", "enabled", "Y", "х"} {
+		if envFlagEnabled(v) {
+			t.Errorf("envFlagEnabled(%q) = true, ожидалось false", v)
+		}
+	}
+}
+
+// Ловит: потерю гейта. С заданным PROFILE_SECRET флаг обязан быть безразличен,
+// иначе прод падает на ровном месте.
+func TestInitSecretWithRequiredFlagAndSecret(t *testing.T) {
+	t.Setenv("PROFILE_SECRET", "test-secret")
+	t.Setenv("PROFILE_SECRET_REQUIRED", "1")
+	prev := profileSecret
+	t.Cleanup(func() { profileSecret = prev })
+
+	InitSecret()
+	if string(profileSecret) != "test-secret" {
+		t.Fatalf("profileSecret = %q, ожидалось значение из окружения", string(profileSecret))
+	}
+}
+
+// Ловит: read-only режим, о котором наружу ничего не сообщается. Без ReadOnly()
+// /readyz нечем отличить «работаем» от «выбрасываем весь прогресс игроков».
+func TestReadOnlyReportsReason(t *testing.T) {
+	if ro, _ := ReadOnly(); ro {
+		t.Skip("хранилище уже в read-only от другого теста")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "profiles.json")
+	if err := os.WriteFile(path, []byte("{ это не json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PROFILES_PATH", path)
+
+	enterProfilesReadOnly(path, "parse_error", fmt.Errorf("boom"))
+	t.Cleanup(func() {
+		profilesReadOnly.Store(false)
+		profilesReadOnlyReason = ""
+		metrics.ProfilesReadOnly.Set(0)
+	})
+
+	ro, reason := ReadOnly()
+	if !ro || reason != "parse_error" {
+		t.Fatalf("ReadOnly() = %v, %q; ожидалось true, \"parse_error\"", ro, reason)
 	}
 }

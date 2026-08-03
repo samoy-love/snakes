@@ -603,6 +603,52 @@ func TestReclaimOnSteppingBackIntoCoolingPatch(t *testing.T) {
 	checkOwnedIndex(t, r, 0)
 }
 
+// Ловит: молчаливый сброс невозвращённой части пятна. clearCoolCell дельту не
+// пишет, а stepCoolExpiry такие клетки пропускает (coolOwner уже 0) — без явной
+// отправки клиент на дельтах рисует «остывающую» территорию до следующего
+// полного кадра.
+func TestReclaimEmitsDeltaForDroppedCells(t *testing.T) {
+	r := newRulesRoom(t, 173)
+	r.tick = 100
+	p := addHumanPlayer(r, 1, 10, 10, DirRight)
+
+	patch := make([]int, 0, 36)
+	for y := 20; y < 26; y++ {
+		for x := 20; x < 26; x++ {
+			i := r.idx(x, y)
+			r.setGrid(i, 1)
+			patch = append(patch, i)
+		}
+	}
+	r.killPlayerWithReason(1, 0, "wall", -1, 0, 0)
+	p.alive = true
+
+	r.changedGrid = r.changedGrid[:0]
+	r.minimapGrid = r.minimapGrid[:0]
+	kept := r.reclaimCoolRegion(p, r.idx(20, 20))
+	if kept <= 0 || kept >= len(patch) {
+		t.Fatalf("возвращено %d клеток из %d — сброшенной части нет, проверять нечего", kept, len(patch))
+	}
+
+	changed := make(map[uint16]uint16, len(r.changedGrid))
+	for _, ch := range r.changedGrid {
+		changed[uint16(ch>>16)] = uint16(ch)
+	}
+	for _, i := range patch {
+		if r.gridOwner[i] != 0 {
+			// Возвращённые клетки отправляет setGrid.
+			continue
+		}
+		v, ok := changed[uint16(i)]
+		if !ok {
+			t.Fatalf("сброшенная клетка %d не попала в дельту", i)
+		}
+		if v != 0 {
+			t.Fatalf("сброшенная клетка %d уехала со значением %d, ожидался 0", i, v)
+		}
+	}
+}
+
 // Ловит: реклейм за пределами окна ReclaimTicks — пятно обязано протухать.
 func TestReclaimExpiresAfterWindow(t *testing.T) {
 	r := newRulesRoom(t, 167)
@@ -706,6 +752,26 @@ func TestMeasureTerritoryShape(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Лобовые столкновения: scratch-карта.
+// ---------------------------------------------------------------------------
+
+// Ловит: возврат к «чистим только значения» в resolveHeadOnCollisions. Ключи
+// тогда копились по всем клеткам, где когда-либо была голова, карта росла до
+// размера поля, а очистка — это полный обход карты дважды за тик.
+func TestResolveHeadOnCollisionsScratchStaysSmall(t *testing.T) {
+	r := newRulesRoom(t, 47)
+	p := addHumanPlayer(r, 1, 10, 10, DirRight)
+	alive := []*Player{p}
+	for step := 0; step < 64; step++ {
+		p.nextI = r.idx(10+step, 10)
+		r.resolveHeadOnCollisions(alive)
+		if got := len(r.headOnCells); got > len(alive) {
+			t.Fatalf("шаг %d: в scratch-карте %d ключей при %d живых", step, got, len(alive))
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Фазы матча и сброс матча.
 // ---------------------------------------------------------------------------
 
@@ -740,6 +806,39 @@ func TestMatchPhaseBoundaries(t *testing.T) {
 	r.tick = r.matchStartTick + PhaseExpansionEndTick
 	if got := r.phaseUntilTick(); got != r.matchStartTick+PhaseConflictEndTick {
 		t.Fatalf("конец фазы конфликта = %d, ожидалось %d", got, r.matchStartTick+PhaseConflictEndTick)
+	}
+}
+
+// Ловит: возврат жёстко зашитых 900/2100 при настраиваемой MATCH_DURATION_TICKS.
+// На коротком матче фаза PhaseFinal (удвоение очков за захват) становится
+// недостижимой, а phaseUntilTick объявляет клиенту тик за концом матча.
+func TestPhaseBoundariesFollowMatchDuration(t *testing.T) {
+	savedExp, savedConf := PhaseExpansionEndTick, PhaseConflictEndTick
+	t.Cleanup(func() {
+		PhaseExpansionEndTick, PhaseConflictEndTick = savedExp, savedConf
+	})
+
+	// Длина по умолчанию обязана давать ровно исторические границы.
+	setPhaseBoundaries(3000)
+	if PhaseExpansionEndTick != 900 || PhaseConflictEndTick != 2100 {
+		t.Fatalf("на 3000 тиках границы %d/%d, ожидалось 900/2100", PhaseExpansionEndTick, PhaseConflictEndTick)
+	}
+
+	const short = 1200
+	setPhaseBoundaries(short)
+	r := newRulesRoom(t, 182)
+	r.matchStartTick = 1000
+	r.matchEndTick = r.matchStartTick + short
+
+	r.tick = r.matchEndTick - 1
+	if got := r.matchPhase(); got != PhaseFinal {
+		t.Fatalf("на последнем тике короткого матча фаза %d, ожидалась %d", got, PhaseFinal)
+	}
+	for _, el := range []uint32{0, PhaseExpansionEndTick, PhaseConflictEndTick} {
+		r.tick = r.matchStartTick + el
+		if got := r.phaseUntilTick(); got > r.matchEndTick {
+			t.Fatalf("на %d тике матча конец фазы = %d, за концом матча %d", el, got, r.matchEndTick)
+		}
 	}
 }
 

@@ -8,11 +8,15 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
 
+	"snakes/internal/envcfg"
 	"snakes/internal/httpx"
 	"snakes/internal/metrics"
 
@@ -25,12 +29,82 @@ import (
 // (IP, тип сообщения).
 var wsIPLimiter = httpx.NewIPRateLimiter()
 
+// wsIPConnLimit — потолок одновременных соединений с одного адреса.
+//
+// wsIPLimiter считает только разобранные сообщения, поэтому само рукопожатие
+// ничем не ограничено: молчащее соединение стоит очереди на 256 сообщений,
+// горутины writeLoop и удержанного профиля, но не тратит ни одного ведра.
+// Ноль (по умолчанию) отключает потолок: процесс слушает loopback за прокси,
+// который и держит лимиты соединений, а локальные прогоны открывают десятки
+// соединений с 127.0.0.1. Оператор, выставивший порт наружу, ставит
+// WS_MAX_CONNS_PER_IP.
+//
+// Атомик, а не обычная переменная: значение читается из горутины каждого
+// рукопожатия, а тесты выставляют потолок на живом сервере — обычная запись
+// была бы гонкой, и детектор её ловит.
+var wsIPConnLimit atomic.Int64
+
+func init() {
+	if v := os.Getenv("WS_MAX_CONNS_PER_IP"); v != "" {
+		if n, err := envcfg.ParseInt(v); err == nil && n >= 0 {
+			wsIPConnLimit.Store(int64(n))
+		}
+	}
+}
+
+var (
+	wsIPConnMu    sync.Mutex
+	wsIPConnCount = map[string]int{}
+)
+
+// acquireWSConnSlot reserves one connection slot for ip, or reports false when
+// the address is already at wsIPConnLimit.
+func acquireWSConnSlot(ip string) bool {
+	limit := int(wsIPConnLimit.Load())
+	if limit <= 0 || ip == "" {
+		return true
+	}
+	wsIPConnMu.Lock()
+	defer wsIPConnMu.Unlock()
+	if wsIPConnCount[ip] >= limit {
+		return false
+	}
+	wsIPConnCount[ip]++
+	return true
+}
+
+// releaseWSConnSlot gives the slot back. The key is dropped at zero so the map
+// cannot grow with every address that ever connected.
+func releaseWSConnSlot(ip string) {
+	if wsIPConnLimit.Load() <= 0 || ip == "" {
+		return
+	}
+	wsIPConnMu.Lock()
+	defer wsIPConnMu.Unlock()
+	if n := wsIPConnCount[ip]; n > 1 {
+		wsIPConnCount[ip] = n - 1
+	} else {
+		delete(wsIPConnCount, ip)
+	}
+}
+
 func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	if !httpx.WSOriginAllowed(r) {
 		metrics.WSHandshakeRejectedTotal.Inc("origin")
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+
+	ip := httpx.ClientIP(r)
+	// Before Accept: a rejected handshake must not allocate a send queue, a
+	// writeLoop goroutine or a profile retain entry. Deliberately not logged —
+	// this fires under a flood, and one line per rejection would turn the flood
+	// into disk pressure. The 429 is visible in the access log.
+	if !acquireWSConnSlot(ip) {
+		http.Error(w, "too many connections", http.StatusTooManyRequests)
+		return
+	}
+	defer releaseWSConnSlot(ip)
 
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionNoContextTakeover,
@@ -47,7 +121,7 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	c.SetReadLimit(MaxClientWSMsgBytes)
 	// Signed identity: the legacy ?pid= parameter is never trusted, only ?t=.
 	pid, token := profiles.ResolveToken(r.URL.Query().Get("t"))
-	client := &Client{conn: c, sendCh: make(chan outbound, 256), ip: httpx.ClientIP(r), pid: pid}
+	client := &Client{conn: c, sendCh: make(chan outbound, 256), ip: ip, pid: pid}
 	// G7: a profile held by a live connection is never an eviction candidate.
 	profiles.RetainPID(pid)
 	defer profiles.ReleasePID(pid)

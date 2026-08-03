@@ -29,10 +29,29 @@ const (
 	PhaseFinal     = 2 // 3:30-5:00  double capture points, faster bounty
 )
 
-const (
-	PhaseExpansionEndTick = 900
-	PhaseConflictEndTick  = 2100
+// Phase boundaries, in ticks since the start of the match. They are shares of
+// MatchDurationTicks, not fixed numbers: MATCH_DURATION_TICKS is an operator
+// knob, and hardcoding 900/2100 made PhaseFinal unreachable for any match
+// shorter than 3:30 while phaseUntilTick advertised boundaries past the end of
+// the match. At the default 3000 ticks these are still exactly 900 and 2100.
+//
+// Set by setPhaseBoundaries, which init() in game.go calls after reading the
+// environment. Treat them as read-only afterwards.
+var (
+	PhaseExpansionEndTick uint32 = 900
+	PhaseConflictEndTick  uint32 = 2100
 )
+
+const (
+	phaseExpansionEndPercent = 30
+	phaseConflictEndPercent  = 70
+)
+
+// setPhaseBoundaries recomputes the phase boundaries from the match length.
+func setPhaseBoundaries(matchTicks uint32) {
+	PhaseExpansionEndTick = matchTicks * phaseExpansionEndPercent / 100
+	PhaseConflictEndTick = matchTicks * phaseConflictEndPercent / 100
+}
 
 // ProfileTouchEveryTicks is how often a live human's profile LastSeen is
 // refreshed from the tick loop (G7): 600 ticks == 60s.
@@ -1039,6 +1058,11 @@ func (r *Room) scheduleCleanup() {
 }
 
 func (r *Room) broadcastJSON(ctx context.Context, typ string, data any) {
+	b, ok := marshalServerMsg(typ, data)
+	if !ok {
+		return
+	}
+
 	r.mu.Lock()
 	clients := make([]*Client, 0, len(r.clients))
 	for c := range r.clients {
@@ -1046,9 +1070,27 @@ func (r *Room) broadcastJSON(ctx context.Context, typ string, data any) {
 	}
 	r.mu.Unlock()
 
-	for _, c := range clients {
-		c.sendJSON(ctx, typ, data)
+	if len(clients) < 2 {
+		for _, c := range clients {
+			c.sendJSONRaw(b)
+		}
+		return
 	}
+	// enqueue blocks up to SendBackpressureTimeout on a client whose queue is
+	// full, and broadcastJSON runs on the room tick goroutine (matchStart,
+	// matchEnd, matchPhase). Done sequentially that is limit*100ms of frozen
+	// room; fanned out it costs one timeout no matter how many clients are
+	// wedged. Ordering is unchanged — every message is enqueued before the call
+	// returns.
+	var wg sync.WaitGroup
+	wg.Add(len(clients))
+	for _, c := range clients {
+		go func(c *Client) {
+			defer wg.Done()
+			c.sendJSONRaw(b)
+		}(c)
+	}
+	wg.Wait()
 }
 
 func (r *Room) removePlayer(num uint16) {
@@ -1791,16 +1833,16 @@ func (r *Room) stepPlayer(p *Player) {
 }
 
 func (r *Room) resolveHeadOnCollisions(alive []*Player) {
-	// G11: the map and its slices used to be allocated from scratch on every
-	// tick of every room. They are reused now; the per-cell slices are trimmed
-	// to zero length rather than dropped, so their backing arrays survive.
+	// G11: the map itself is reused across ticks instead of being allocated
+	// from scratch for every room on every tick. Its KEYS must still be dropped:
+	// trimming the value slices left every cell a head ever occupied in the map,
+	// so it grew to the whole grid (W*H) and this clearing walk — which runs
+	// twice per tick — grew with it.
 	if r.headOnCells == nil {
 		r.headOnCells = make(map[int][]uint16, len(alive))
 	}
 	cellToPlayers := r.headOnCells
-	for i, v := range cellToPlayers {
-		cellToPlayers[i] = v[:0]
-	}
+	clear(cellToPlayers)
 	touched := r.headOnTouched[:0]
 	for _, p := range alive {
 		if p == nil || !p.alive {
@@ -2181,25 +2223,9 @@ func (r *Room) step() {
 		matchEndedNow = true
 	}
 
-	if r.matchEnded {
-		if r.matchResetAt != 0 && tickNow >= r.matchResetAt {
-			r.resetMatchLocked()
-			matchStartPayload = map[string]any{
-				"tick":       r.tick,
-				"seq":        r.matchSeq,
-				"endTick":    r.matchEndTick,
-				"phase":      r.matchPhase(),
-				"phaseUntil": r.phaseUntilTick(),
-			}
-			r.phaseSent = r.matchPhase()
-			r.mu.Unlock()
-			r.broadcastJSON(context.Background(), "matchStart", matchStartPayload)
-			return
-		}
-		r.mu.Unlock()
-		return
-	}
-
+	// This has to come BEFORE the `r.matchEnded` branch below: matchEndedNow
+	// implies r.matchEnded, so anything placed after it is unreachable and the
+	// end-of-match summary never leaves the server.
 	if matchEndedNow {
 		r.mu.Unlock()
 		if len(matchEndClients) > 0 {
@@ -2221,6 +2247,25 @@ func (r *Room) step() {
 		if matchEndPayload != nil {
 			r.broadcastJSON(context.Background(), "matchEnd", matchEndPayload)
 		}
+		return
+	}
+
+	if r.matchEnded {
+		if r.matchResetAt != 0 && tickNow >= r.matchResetAt {
+			r.resetMatchLocked()
+			matchStartPayload = map[string]any{
+				"tick":       r.tick,
+				"seq":        r.matchSeq,
+				"endTick":    r.matchEndTick,
+				"phase":      r.matchPhase(),
+				"phaseUntil": r.phaseUntilTick(),
+			}
+			r.phaseSent = r.matchPhase()
+			r.mu.Unlock()
+			r.broadcastJSON(context.Background(), "matchStart", matchStartPayload)
+			return
+		}
+		r.mu.Unlock()
 		return
 	}
 
