@@ -110,7 +110,7 @@ template to copy is `.env.example`.
 | `tests/` | Client-side protocol tests on Node plus the golden buffers |
 | `tools/` | Offline visual harness; nothing here is ever served to a browser |
 | `scripts/backup_profiles.sh` | The snapshot script: the only safety net for player progress |
-| `deploy/systemd/` | Unit, drop-ins and the timer for hourly `profiles.json` snapshots |
+| `deploy/systemd/` | The timer for hourly `profiles.json` snapshots and a drop-in for `snakes.service`; `snakes.service` itself lives only on the server |
 | `.deploy-kit/` | Deployment target description |
 
 More detail in [docs/](docs/): [protocol](docs/protocol.md),

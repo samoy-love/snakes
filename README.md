@@ -108,7 +108,7 @@ go run .
 | `tests/` | Клиентские тесты протокола на Node и эталонные буферы |
 | `tools/` | Офлайн-стенд визуальной проверки; в браузер отсюда ничего не едет |
 | `scripts/backup_profiles.sh` | Скрипт снимков: единственная защита прогресса игроков |
-| `deploy/systemd/` | Юнит, drop-in'ы и таймер часовых снимков `profiles.json` |
+| `deploy/systemd/` | Таймер часовых снимков `profiles.json` и drop-in к `snakes.service`; сам `snakes.service` живёт только на сервере |
 | `.deploy-kit/` | Описание цели выкатки |
 
 Подробности — в [docs/](docs/): [протокол](docs/protocol.md),
