@@ -321,23 +321,23 @@ func TestWSSmokeMatchEndIsBroadcast(t *testing.T) {
 // ключей в счётчике. wsIPLimiter считает только разобранные сообщения, поэтому
 // молчащие соединения он не видит вовсе.
 func TestWSConnSlotCap(t *testing.T) {
-	savedLimit := wsIPConnLimit
+	savedLimit := wsIPConnLimit.Load()
 	t.Cleanup(func() {
-		wsIPConnLimit = savedLimit
+		wsIPConnLimit.Store(savedLimit)
 		wsIPConnMu.Lock()
 		clear(wsIPConnCount)
 		wsIPConnMu.Unlock()
 	})
 
 	// По умолчанию потолок выключен и не мешает никому.
-	wsIPConnLimit = 0
+	wsIPConnLimit.Store(0)
 	for i := 0; i < 100; i++ {
 		if !acquireWSConnSlot("10.0.0.1") {
 			t.Fatalf("выключенный потолок отказал на %d-м соединении", i+1)
 		}
 	}
 
-	wsIPConnLimit = 2
+	wsIPConnLimit.Store(2)
 	// Отдельными вызовами, а не через ||: у acquireWSConnSlot есть побочный
 	// эффект, и при коротком замыкании второй слот бы не занялся.
 	for i := 0; i < 2; i++ {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -37,14 +38,19 @@ var wsIPLimiter = httpx.NewIPRateLimiter()
 // который и держит лимиты соединений, а локальные прогоны открывают десятки
 // соединений с 127.0.0.1. Оператор, выставивший порт наружу, ставит
 // WS_MAX_CONNS_PER_IP.
-var wsIPConnLimit = func() int {
+//
+// Атомик, а не обычная переменная: значение читается из горутины каждого
+// рукопожатия, а тесты выставляют потолок на живом сервере — обычная запись
+// была бы гонкой, и детектор её ловит.
+var wsIPConnLimit atomic.Int64
+
+func init() {
 	if v := os.Getenv("WS_MAX_CONNS_PER_IP"); v != "" {
 		if n, err := envcfg.ParseInt(v); err == nil && n >= 0 {
-			return int(n)
+			wsIPConnLimit.Store(int64(n))
 		}
 	}
-	return 0
-}()
+}
 
 var (
 	wsIPConnMu    sync.Mutex
@@ -54,12 +60,13 @@ var (
 // acquireWSConnSlot reserves one connection slot for ip, or reports false when
 // the address is already at wsIPConnLimit.
 func acquireWSConnSlot(ip string) bool {
-	if wsIPConnLimit <= 0 || ip == "" {
+	limit := int(wsIPConnLimit.Load())
+	if limit <= 0 || ip == "" {
 		return true
 	}
 	wsIPConnMu.Lock()
 	defer wsIPConnMu.Unlock()
-	if wsIPConnCount[ip] >= wsIPConnLimit {
+	if wsIPConnCount[ip] >= limit {
 		return false
 	}
 	wsIPConnCount[ip]++
@@ -69,7 +76,7 @@ func acquireWSConnSlot(ip string) bool {
 // releaseWSConnSlot gives the slot back. The key is dropped at zero so the map
 // cannot grow with every address that ever connected.
 func releaseWSConnSlot(ip string) {
-	if wsIPConnLimit <= 0 || ip == "" {
+	if wsIPConnLimit.Load() <= 0 || ip == "" {
 		return
 	}
 	wsIPConnMu.Lock()
