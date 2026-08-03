@@ -270,6 +270,24 @@ func (r *Room) reclaimCoolRegion(p *Player, start int) int {
 	for k := 0; k < keep; k++ {
 		r.setGrid(q[k], p.num)
 	}
+	// The rest of the patch is dropped. clearCoolCell emits nothing (its
+	// contract assumes the caller is about to write a real owner) and
+	// stepCoolExpiry skips cells whose coolOwner is already 0, so without this
+	// nobody ever tells a delta-fed client the cooling territory is gone.
+	dropped := false
+	for k := keep; k < n; k++ {
+		i := q[k]
+		if r.gridOwner[i] != 0 {
+			continue
+		}
+		r.gridStamp[i] = r.tick
+		r.changedGrid = append(r.changedGrid, packChange(uint16(i), 0))
+		r.minimapGrid = append(r.minimapGrid, packChange(uint16(i), 0))
+		dropped = true
+	}
+	if dropped && len(r.minimapGrid) > MinimapMaxChanges {
+		r.minimapDirty = true
+	}
 	r.bfsQ = q[:0]
 	return keep
 }

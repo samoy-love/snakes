@@ -1035,9 +1035,14 @@ func (r *Room) ensureContract(p *Player) {
 	}
 }
 
-func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
+// addStyle credits Style to a player and returns the amount that was actually
+// credited. That is not always the requested delta: the re-entrancy guard, the
+// per-minute income window and the daily soft cap can all shrink it to zero, and
+// callers that keep a budget (addStyleCapped) must debit what was paid, not what
+// was asked for.
+func (r *Room) addStyle(p *Player, delta uint16, reason uint8) uint16 {
 	if p == nil || delta == 0 {
-		return
+		return 0
 	}
 	// E12: two independent brakes on the addStyle -> daily -> addStyle loop.
 	// styleDepth is a hard bound on re-entrancy, dailyRewardDepth marks Style
@@ -1045,7 +1050,7 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 	// non-daily-payout grant, so no single edit can reopen the cycle.
 	if p.styleDepth >= StyleAddMaxDepth {
 		log.Printf("style_recursion_guard room=%d player=%d reason=%d", r.id, p.num, reason)
-		return
+		return 0
 	}
 	p.styleDepth++
 	defer func() { p.styleDepth-- }()
@@ -1065,12 +1070,12 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 		granted := profiles.StyleIncomeGrantLocked(pr, p.profileKey, delta)
 		if granted == 0 {
 			profiles.Mu.Unlock()
-			return
+			return 0
 		}
 		granted = profiles.StyleDayIncomeGrantLocked(pr, granted)
 		if granted == 0 {
 			profiles.Mu.Unlock()
-			return
+			return 0
 		}
 		delta = granted
 		profiles.AddStyleLocked(pr, uint32(delta))
@@ -1112,6 +1117,7 @@ func (r *Room) addStyle(p *Player, delta uint16, reason uint8) {
 	r.pushEvent(Event{Kind: EventStyle, A: p.num, B: delta, C: p.style, D: reason})
 	r.grantDailyRewards(p, rewardCount)
 	r.grantAchievementRewards(p, achvCount)
+	return delta
 }
 
 // addStyleCapped grants Style while respecting a per-match budget counter.
@@ -1126,9 +1132,13 @@ func (r *Room) addStyleCapped(p *Player, delta uint16, reason uint8, spent *uint
 	if room := budget - *spent; delta > room {
 		delta = room
 	}
-	*spent += delta
-	r.addStyle(p, delta, reason)
-	return delta
+	// Debit what was actually paid out. Charging the request instead drained the
+	// per-match budget while the income throttle was swallowing the grants, so a
+	// throttled player stopped earning for the rest of the match instead of
+	// resuming when the window rolled over.
+	granted := r.addStyle(p, delta, reason)
+	*spent += granted
+	return granted
 }
 
 func (r *Room) addContractProgress(p *Player, inc uint16) {

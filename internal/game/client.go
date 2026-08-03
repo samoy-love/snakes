@@ -66,12 +66,13 @@ func (c *Client) writeLoop() {
 		if m.pd != nil {
 			decPooledRef(m.pd)
 		}
-		if c.closed.Load() && writeFailed {
-			// drain queued messages to release pooled refs
-			continue
-		}
 		if c.closed.Load() {
-			return
+			// Stop writing, but keep ranging: every queued message still holds a
+			// reference to a pooled buffer, and returning here abandoned up to a
+			// full queue of them (they fell to the GC instead of going back to
+			// pooledDataPool). closeWith closes sendCh, which ends the range.
+			writeFailed = true
+			continue
 		}
 	}
 }
@@ -125,12 +126,28 @@ func (c *Client) enqueue(msgType websocket.MessageType, b []byte, pd *pooledData
 	return false
 }
 
-func (c *Client) sendJSON(ctx context.Context, typ string, data any) {
+// marshalServerMsg encodes one server message. Broadcasts encode once and hand
+// the same bytes to every client, exactly as the binary pooled path does.
+func marshalServerMsg(typ string, data any) ([]byte, bool) {
 	b, err := json.Marshal(ServerMsg{Type: typ, Data: data})
 	if err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
+// sendJSONRaw enqueues an already-encoded ServerMsg. The buffer is read-only
+// from here on and may be shared between clients.
+func (c *Client) sendJSONRaw(b []byte) {
+	_ = c.enqueue(websocket.MessageText, b, nil, false)
+}
+
+func (c *Client) sendJSON(ctx context.Context, typ string, data any) {
+	b, ok := marshalServerMsg(typ, data)
+	if !ok {
 		return
 	}
-	_ = c.enqueue(websocket.MessageText, b, nil, false)
+	c.sendJSONRaw(b)
 }
 
 func (c *Client) sendBinaryPooled(pd *pooledData, drop bool) bool {
@@ -362,6 +379,9 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	if matchEnded {
 		matchResults = rm.buildMatchResultsLocked()
 	}
+	// pl is already published in rm.players, so the tick goroutine owns its
+	// style/cosmetic fields from here on: build the payload under rm.mu.
+	cosmetics := cosmeticsStatePayload(pl)
 	rm.mu.Unlock()
 
 	initPayload := map[string]any{
@@ -380,7 +400,7 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 		"phase":      matchPhaseNow,
 		"phaseUntil": matchPhaseUntil,
 	}
-	initPayload["cosmetics"] = cosmeticsStatePayload(pl)
+	initPayload["cosmetics"] = cosmetics
 	if matchEnded {
 		initPayload["matchResults"] = matchResults
 	}
