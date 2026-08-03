@@ -133,6 +133,8 @@ func TestExpectedMetricNamesArePresent(t *testing.T) {
 		// прогресс и экономика
 		"snakes_contracts_completed_total", "snakes_dailies_completed_total",
 		"snakes_style_awarded_total", "snakes_cosmetics_purchased_total",
+		// хранилище профилей
+		"snakes_profiles_read_only", "snakes_profiles_save_errors_total",
 		// транспорт
 		"snakes_ws_connections_total", "snakes_ws_active",
 		"snakes_ws_write_errors_total", "snakes_ws_dropped_messages_total",
