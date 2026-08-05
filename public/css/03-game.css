@@ -35,7 +35,7 @@
   padding: 5px 12px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border2));
-  background: linear-gradient(135deg, rgba(255, 45, 85, 0.26), rgba(0, 0, 0, 0.52));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 26%, transparent), rgba(0, 0, 0, 0.52));
   box-shadow: var(--shadow-float);
   backdrop-filter: blur(10px);
   font-size: var(--fs-13);
@@ -197,7 +197,7 @@
  body.inGame #hud:not(.lbPinned):hover,
  body.inGame #hud:not(.lbPinned):focus-within {
   opacity: 1;
-  background: linear-gradient(135deg, rgba(255, 45, 85, 0.10), rgba(0, 0, 0, 0.40));
+  background: linear-gradient(160deg, rgba(17, 26, 40, 0.72), rgba(7, 11, 19, 0.78));
   box-shadow: var(--shadow-float-strong);
  }
 
@@ -341,7 +341,7 @@
  }
 
  #stats tbody tr.me td {
-  background: rgba(96, 165, 250, 0.12);
+  background: color-mix(in srgb, var(--brand2) 14%, transparent);
  }
 
  #stats tbody tr.lbNear td {
@@ -478,7 +478,7 @@
   height: 100%;
   width: 0%;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(255, 45, 85, 0.85), rgba(96, 165, 250, 0.55));
+  background: linear-gradient(90deg, var(--brand), var(--brand2));
   transition: width 220ms ease;
  }
 
@@ -504,7 +504,7 @@
   padding: 10px 10px;
   border-radius: var(--r-md);
   border: 1px solid color-mix(in srgb, var(--focus) 28%, rgba(255, 255, 255, 0.10));
-  background: linear-gradient(135deg, rgba(96, 165, 250, 0.10), rgba(0, 0, 0, 0.18));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand2) 10%, transparent), rgba(0, 0, 0, 0.18));
  }
 
  #metaHud .metaSection:first-child .metaSectionTitle {
@@ -548,7 +548,7 @@
   top: 0;
   bottom: 0;
   width: calc(var(--p, 0) * 100%);
-  background: linear-gradient(90deg, rgba(255, 45, 85, 0.28), rgba(96, 165, 250, 0.18));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--brand) 30%, transparent), color-mix(in srgb, var(--brand2) 20%, transparent));
  }
 
  .metaRowProgress > * {
@@ -923,7 +923,7 @@
   height: 18px;
   padding: 0 6px;
   border-radius: 999px;
-  background: rgba(255, 45, 85, 0.9);
+  background: color-mix(in srgb, var(--accent) 90%, transparent);
   color: #fff;
   font-size: var(--fs-meta);
   font-weight: 800;
