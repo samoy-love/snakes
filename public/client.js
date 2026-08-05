@@ -7,6 +7,17 @@ import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
 import { filterAndSortRooms } from './client_rooms.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
 import {
+  ROI_MARGIN_CELLS,
+  VIEW_CELLS_X,
+  VIEW_CELLS_Y,
+  cellSizeFor,
+  clampToRoi,
+  decayShake,
+  followCamera,
+  viewRectOf,
+  visibleBounds
+} from './client_field_view.js';
+import {
   COS_STATE_CATS,
   applyCosPayload,
   cosPayloadOf,
@@ -2227,8 +2238,10 @@ let lastPacketAt = performance.now();
 let camX = null;
 let camY = null;
 
-const VIEW_CELLS_X = 40;
-const VIEW_CELLS_Y = 28;
+/* VIEW_CELLS_X/Y и ROI_MARGIN_CELLS переехали в client_field_view.js —
+   там же вся геометрия вида и тесты на неё. Здесь они только импортируются:
+   расчёт запрашиваемого ROI обязан идти от тех же чисел, что и масштаб
+   отрисовки, иначе окно и экран разъедутся. */
 /* Камера жёстко привязана к игроку и никуда не ведётся: смещение по ходу
    движения заказчик отверг — взгляд уезжал на каждом повороте. Смещения
    остаются нулями, чтобы не разносить эту правку по всему draw(); окно ROI
@@ -2240,8 +2253,8 @@ let camLeadY = 0;
    Сервер снапит окно по 8 клеток (main.go ROIStep) и сдвигает его на 12 клеток
    вперёд по направлению движения (ROILookahead), то есть относительно игрока
    окно гуляет на ~20 клеток. Полный запас (20) зажал бы телефон до 16 клеток
-   по ширине; 14 — компромисс между «поле видно» и «туман не лезет». */
-const ROI_MARGIN_CELLS = 14;
+   по ширине; 14 — компромисс между «поле видно» и «туман не лезет».
+   Значение живёт в client_field_view.js. */
 
 /* C2 «Адаптивный ROI». Раньше окно ROI на сервере было жёстко 80×56, и на
    портретном телефоне экран физически не влезал в него: масштаб приходилось
@@ -9892,30 +9905,21 @@ function draw() {
   const speedActive = !!(my && my.a && nt != null && youSpeedUntilTick && nt < youSpeedUntilTick);
   const targetX = my ? my.ix + 0.5 : W / 2;
   const targetY = my ? my.iy + 0.5 : H / 2;
-  if (camX == null || camY == null) {
-    camX = targetX;
-    camY = targetY;
-  } else {
-    camX = lerp(camX, targetX, 0.12);
-    camY = lerp(camY, targetY, 0.12);
-  }
+  camX = followCamera(camX, targetX);
+  camY = followCamera(camY, targetY);
 
   {
     const now = performance.now();
-    const dt = Math.min(50, now - (draw._shakeAt || now));
+    const dt = now - (draw._shakeAt || now);
     draw._shakeAt = now;
-    const k = Math.max(0, dt / 16);
-    shakeVelX *= Math.pow(0.78, k);
-    shakeVelY *= Math.pow(0.78, k);
-    shakeX += shakeVelX;
-    shakeY += shakeVelY;
-    shakeX *= Math.pow(0.72, k);
-    shakeY *= Math.pow(0.72, k);
-
-    // J14: потолок поднят до 0.8 клетки, иначе класс large физически незаметен.
-    const maxShake = 0.8 * Math.max(0, shakeIntensity);
-    shakeX = Math.max(-maxShake, Math.min(maxShake, shakeX));
-    shakeY = Math.max(-maxShake, Math.min(maxShake, shakeY));
+    const next = decayShake({
+      x: shakeX, y: shakeY, vx: shakeVelX, vy: shakeVelY,
+      dtMs: dt, intensity: shakeIntensity
+    });
+    shakeX = next.x;
+    shakeY = next.y;
+    shakeVelX = next.vx;
+    shakeVelY = next.vy;
   }
 
   /* C1: масштаб считался только от вьюпорта, а ROI сервера фиксирован (80×56).
@@ -9925,18 +9929,7 @@ function draw() {
      чтобы экран никогда не был больше фактического ROI. На десктопе
      (cw/viewH ≈ 1.6) обе поправки меньше базового значения и ничего не
      меняют. */
-  let cell = Math.max(6, Math.floor(Math.min(cw / VIEW_CELLS_X, viewH / VIEW_CELLS_Y)));
-  {
-    /* C2: до первого ROI-пакета опираемся на размер, подтверждённый сервером
-       (`viewport` ack), и только потом — на исторические 80×56. Иначе первые
-       кадры после входа рисуются в неверном масштабе и «схлопываются» на
-       первом же пакете. */
-    const fallbackW = Number(roiGrant?.w) || VIEW_CELLS_X * 2;
-    const fallbackH = Number(roiGrant?.h) || VIEW_CELLS_Y * 2;
-    const roiW = Math.max(8, (Number(lastRoi?.rw) || fallbackW) - ROI_MARGIN_CELLS);
-    const roiH = Math.max(8, (Number(lastRoi?.rh) || fallbackH) - ROI_MARGIN_CELLS);
-    cell = Math.max(cell, Math.ceil(cw / roiW), Math.ceil(viewH / roiH));
-  }
+  const cell = cellSizeFor({ cw, viewH, roi: lastRoi, roiGrant });
 
   /* Камера жёстко зафиксирована на игроке: никакого сдвига по направлению
      движения. Так просил заказчик — «взгляд» не должен уезжать вперёд при
@@ -9954,29 +9947,31 @@ function draw() {
 
   ctx.clearRect(0, 0, cw, ch);
 
-  const offsetX = cw / 2 - (camX + camLeadX + shakeX) * cell;
-  const offsetY = viewH / 2 - (camY + camLeadY + shakeY) * cell;
-
-  const minX = Math.max(0, Math.floor((-offsetX) / cell) - 2);
-  const minY = Math.max(0, Math.floor((-offsetY) / cell) - 2);
-  const maxX = Math.min(W - 1, Math.floor((cw - offsetX) / cell) + 2);
-  const maxY = Math.min(H - 1, Math.floor((viewH - offsetY) / cell) + 2);
+  const screenBounds = visibleBounds({
+    cw, viewH, cell,
+    camX: camX + camLeadX, camY: camY + camLeadY,
+    shakeX, shakeY, W, H
+  });
+  const { offsetX, offsetY, minX, minY, maxX, maxY } = screenBounds;
 
   /* K1: границы горячего цикла по сетке — пересечение экрана с последним
      полученным ROI. За его пределами gridOwner/trailOwner заведомо устарели. */
-  const roi = lastRoi;
-  const gMinX = roi ? Math.max(minX, roi.rx) : minX;
-  const gMinY = roi ? Math.max(minY, roi.ry) : minY;
-  const gMaxX = roi ? Math.min(maxX, roi.rx + roi.rw - 1) : maxX;
-  const gMaxY = roi ? Math.min(maxY, roi.ry + roi.rh - 1) : maxY;
+  const gb = clampToRoi(screenBounds, lastRoi);
+  const gMinX = gb.minX;
+  const gMinY = gb.minY;
+  const gMaxX = gb.maxX;
+  const gMaxY = gb.maxY;
 
   /* C1: рамка обзора на миникарте рисовалась по границам экрана и заявляла
      обзор больше реального — всё, что за ROI, на экране всё равно туман.
      Рамка = фактически видимая область. */
-  viewMinX = Math.min(gMinX, gMaxX);
-  viewMinY = Math.min(gMinY, gMaxY);
-  viewMaxX = Math.max(gMinX, gMaxX);
-  viewMaxY = Math.max(gMinY, gMaxY);
+  {
+    const vr = viewRectOf(gb);
+    viewMinX = vr.minX;
+    viewMinY = vr.minY;
+    viewMaxX = vr.maxX;
+    viewMaxY = vr.maxY;
+  }
 
   {
     // C10: оба градиента зависят только от размеров — раньше пересоздавались
