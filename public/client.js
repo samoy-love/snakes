@@ -18,6 +18,16 @@ import {
   visibleBounds
 } from './client_field_view.js';
 import {
+  COS_STATE_CATS,
+  applyCosPayload,
+  cosPayloadOf,
+  createCosState,
+  eqOf,
+  equip as cosEquip,
+  invOf,
+  markOwned
+} from './client_cos_state.js';
+import {
   keepUnsent,
   loadDesired,
   planDesiredApply,
@@ -1262,24 +1272,12 @@ let youSpeedUntilTick = 0;
 let youSpeedType = 0;
 
 let youStyle = 0;
-let youCosInvCaptureFx = 0;
-let youCosInvHead = 0;
-let youCosInvSeg = 0;
-let youCosInvNameplate = 0;
-let youCosInvFrame = 0;
-let youCosEqCaptureFx = 0;
-let youCosEqHead = 0;
-let youCosEqSeg = 0;
-let youCosEqNameplate = 0;
-let youCosEqFrame = 0;
-
-// Новые категории приходят отдельным JSON-сообщением `cosExtra` (бинарный
-// ROI-снапшот остаётся 21-байтным и не меняется). Сообщения может не быть
-// вовсе — тогда всё по нулям и всё выглядит как базовый вариант.
-let youCosInvTerr = 0;
-let youCosInvDeath = 0;
-let youCosEqTerr = 0;
-let youCosEqDeath = 0;
+/* Что куплено и что надето — по ключу-категории, а не четырнадцатью плоскими
+   переменными. Модель и правила живут в client_cos_state.js.
+   Категории terr и death приходят отдельным JSON-сообщением `cosExtra`
+   (бинарный ROI-снапшот остаётся 21-байтным и не меняется). Сообщения может
+   не быть вовсе — тогда всё по нулям и выглядит как базовый вариант. */
+const youCos = createCosState();
 let youTitleId = 0;
 let youTitleMask = 0;
 
@@ -6187,13 +6185,13 @@ function onInit(msg) {
 function onCosmetics(msg) {
   // C4: remember the previous inventory so we can detect what was just bought.
   const prevInv = {
-    capturefx: Number(youCosInvCaptureFx) || 0,
-    head: Number(youCosInvHead) || 0,
-    seg: Number(youCosInvSeg) || 0,
-    nameplate: Number(youCosInvNameplate) || 0,
-    frame: Number(youCosInvFrame) || 0,
-    terr: Number(youCosInvTerr) || 0,
-    death: Number(youCosInvDeath) || 0
+    capturefx: Number(youCos.inv.capturefx) || 0,
+    head: Number(youCos.inv.head) || 0,
+    seg: Number(youCos.inv.seg) || 0,
+    nameplate: Number(youCos.inv.nameplate) || 0,
+    frame: Number(youCos.inv.frame) || 0,
+    terr: Number(youCos.inv.terr) || 0,
+    death: Number(youCos.inv.death) || 0
   };
   const hadServerState = cosmeticsSource === 'server';
 
@@ -6203,25 +6201,15 @@ function onCosmetics(msg) {
   cosmeticsLoaded = true;
   cosmeticsSource = 'server';
 
-  youCosInvCaptureFx = Number(msg?.invCaptureFx) || 0;
-  youCosInvHead = Number(msg?.invHead) || 0;
-  youCosInvSeg = Number(msg?.invSeg) || 0;
-  youCosInvNameplate = Number(msg?.invNameplate) || 0;
-  youCosInvFrame = Number(msg?.invFrame) || 0;
+  // Полный снимок: категории, которых в сообщении нет, обнуляются.
+  applyCosPayload(youCos, msg, 'replace');
 
-  youCosEqCaptureFx = Number(msg?.eqCaptureFx) || 0;
-  youCosEqHead = Number(msg?.eqHead) || 0;
-  youCosEqSeg = Number(msg?.eqSeg) || 0;
-  youCosEqNameplate = Number(msg?.eqNameplate) || 0;
-  youCosEqFrame = Number(msg?.eqFrame) || 0;
 
   // Новые категории и титулы: сервер может их ещё не присылать. В этом случае
   // поля undefined -> нули, магазин показывает только базовый вариант, а
   // «Титулы» честно сообщают, что список пока недоступен.
-  if (msg?.invTerr !== undefined) youCosInvTerr = Number(msg.invTerr) || 0;
-  if (msg?.invDeath !== undefined) youCosInvDeath = Number(msg.invDeath) || 0;
-  if (msg?.eqTerr !== undefined) youCosEqTerr = cosClampId(msg.eqTerr);
-  if (msg?.eqDeath !== undefined) youCosEqDeath = cosClampId(msg.eqDeath);
+  // Частичное сообщение: трогаем только присланное.
+  applyCosPayload(youCos, msg, 'patch');
   if (msg?.titleMask !== undefined) youTitleMask = Number(msg.titleMask) || 0;
   if (msg?.titleId !== undefined) youTitleId = Math.max(0, Math.min(COS_TITLE_MAX, Number(msg.titleId) || 0));
   /* C3: прогресс по незакрытым ачивкам. Массив содержит ТОЛЬКО закрытые ещё
@@ -6243,8 +6231,8 @@ function onCosmetics(msg) {
     }
   }
   // Базовый вариант всегда доступен — иначе магазин выглядит полностью пустым.
-  youCosInvTerr |= 1;
-  youCosInvDeath |= 1;
+  youCos.inv.terr |= 1;
+  youCos.inv.death |= 1;
 
   cosmeticsCacheSave();
 
@@ -6254,13 +6242,13 @@ function onCosmetics(msg) {
 
   if (hadServerState) {
     const nextInv = {
-      capturefx: Number(youCosInvCaptureFx) || 0,
-      head: Number(youCosInvHead) || 0,
-      seg: Number(youCosInvSeg) || 0,
-      nameplate: Number(youCosInvNameplate) || 0,
-      frame: Number(youCosInvFrame) || 0,
-      terr: Number(youCosInvTerr) || 0,
-      death: Number(youCosInvDeath) || 0
+      capturefx: Number(youCos.inv.capturefx) || 0,
+      head: Number(youCos.inv.head) || 0,
+      seg: Number(youCos.inv.seg) || 0,
+      nameplate: Number(youCos.inv.nameplate) || 0,
+      frame: Number(youCos.inv.frame) || 0,
+      terr: Number(youCos.inv.terr) || 0,
+      death: Number(youCos.inv.death) || 0
     };
     let boughtCat = '';
     let boughtId = -1;
@@ -6425,8 +6413,12 @@ function showCosmeticsOverlay() {
   cosmeticsOverlay.classList.remove('hidden');
   overlayManager.open('cosmetics');
   cosmeticsOpClear();
-  // C13: open the preview on the item that is actually equipped.
-  const eq0 = cosmeticsEqForCat(cosmeticsCat);
+  /* C13: открываем превью на том предмете, который реально надет.
+     Титулы — не покупаемая категория, и раньше их выбор проваливался в
+     ветку по умолчанию цепочки if и указывал на id надетой РАМКИ. Теперь
+     неизвестная категория даёт 0, но у титулов есть своё «надетое», и его
+     надо взять явно — ровно так же, как это делает переключение вкладок. */
+  const eq0 = cosmeticsCat === 'title' ? youTitleId : cosmeticsEqForCat(cosmeticsCat);
   cosmeticsSelId = Number.isFinite(Number(eq0)) ? Number(eq0) : 0;
   setCosmeticsStatus('', '');
   if (!wsIsConnected()) setCosmeticsStatus(() => t('cosmetics.no_connection'), 'info');
@@ -6480,24 +6472,17 @@ function scheduleCosmeticsPreviewAnim() {
 // Порядок вкладок магазина: сверху то, что занимает больше всего экрана.
 const COSMETICS_TABS = [...COSMETICS_CATS, 'title'];
 
+/* Обе функции раньше были цепочками из семи if, заканчивавшимися
+   `return youCosEqFrame`. На НЕизвестной категории они молча отдавали данные
+   рамок — из-за этого вкладка титулов открывалась с выбором, указывающим на
+   id надетой рамки: 'title' не покупается, в цепочке его нет.
+   Теперь неизвестная категория честно даёт 0. */
 function cosmeticsMaskForCat(cat) {
-  if (cat === 'capturefx') return youCosInvCaptureFx;
-  if (cat === 'head') return youCosInvHead;
-  if (cat === 'seg') return youCosInvSeg;
-  if (cat === 'nameplate') return youCosInvNameplate;
-  if (cat === 'terr') return youCosInvTerr;
-  if (cat === 'death') return youCosInvDeath;
-  return youCosInvFrame;
+  return invOf(youCos, cat);
 }
 
 function cosmeticsEqForCat(cat) {
-  if (cat === 'capturefx') return youCosEqCaptureFx;
-  if (cat === 'head') return youCosEqHead;
-  if (cat === 'seg') return youCosEqSeg;
-  if (cat === 'nameplate') return youCosEqNameplate;
-  if (cat === 'terr') return youCosEqTerr;
-  if (cat === 'death') return youCosEqDeath;
-  return youCosEqFrame;
+  return eqOf(youCos, cat);
 }
 
 // Сервер шлёт массив цен по id: {"frame":[0,30,45,...], ...}.
@@ -6810,20 +6795,9 @@ function setYouStyle(v) {
 function cosmeticsGetStateObject() {
   return {
     style: Math.max(0, Math.floor(Number(youStyle) || 0)),
-    invCaptureFx: Number(youCosInvCaptureFx) || 0,
-    invHead: Number(youCosInvHead) || 0,
-    invSeg: Number(youCosInvSeg) || 0,
-    invNameplate: Number(youCosInvNameplate) || 0,
-    invFrame: Number(youCosInvFrame) || 0,
-    eqCaptureFx: Number(youCosEqCaptureFx) || 0,
-    eqHead: Number(youCosEqHead) || 0,
-    eqSeg: Number(youCosEqSeg) || 0,
-    eqNameplate: Number(youCosEqNameplate) || 0,
-    eqFrame: Number(youCosEqFrame) || 0,
-    invTerr: Number(youCosInvTerr) || 0,
-    invDeath: Number(youCosInvDeath) || 0,
-    eqTerr: Number(youCosEqTerr) || 0,
-    eqDeath: Number(youCosEqDeath) || 0,
+    // Имена полей выводит cosPayloadOf из того же соответствия, по которому
+    // разбирается сообщение сервера: разъехаться они не могут.
+    ...cosPayloadOf(youCos),
     titleId: Number(youTitleId) || 0,
     titleMask: Number(youTitleMask) || 0
   };
@@ -6834,20 +6808,7 @@ function cosmeticsApplyStateObject(s) {
   // C3: the balance is part of the cache, otherwise the shop always shows 0 before a match.
   const st = Number(s.style);
   if (Number.isFinite(st)) youStyle = Math.max(0, Math.floor(st));
-  youCosInvCaptureFx = Number(s.invCaptureFx) || 0;
-  youCosInvHead = Number(s.invHead) || 0;
-  youCosInvSeg = Number(s.invSeg) || 0;
-  youCosInvNameplate = Number(s.invNameplate) || 0;
-  youCosInvFrame = Number(s.invFrame) || 0;
-  youCosEqCaptureFx = Number(s.eqCaptureFx) || 0;
-  youCosEqHead = Number(s.eqHead) || 0;
-  youCosEqSeg = Number(s.eqSeg) || 0;
-  youCosEqNameplate = Number(s.eqNameplate) || 0;
-  youCosEqFrame = Number(s.eqFrame) || 0;
-  youCosInvTerr = Number(s.invTerr) || 0;
-  youCosInvDeath = Number(s.invDeath) || 0;
-  youCosEqTerr = Number(s.eqTerr) || 0;
-  youCosEqDeath = Number(s.eqDeath) || 0;
+  applyCosPayload(youCos, s, 'replace');
   youTitleId = Number(s.titleId) || 0;
   youTitleMask = Number(s.titleMask) || 0;
 }
@@ -6877,22 +6838,13 @@ function cosmeticsEnsureLocalReady() {
     cosmeticsApplyStateObject(cached);
   } else {
     youStyle = 0;
-    youCosInvCaptureFx = 1;
-    youCosInvHead = 1;
-    youCosInvSeg = 1;
-    youCosInvNameplate = 1;
-    youCosInvFrame = 1;
-    youCosInvTerr = 1;
-    youCosInvDeath = 1;
-    youCosEqTerr = 0;
-    youCosEqDeath = 0;
     youTitleId = 0;
     youTitleMask = 0;
-    youCosEqCaptureFx = 0;
-    youCosEqHead = 0;
-    youCosEqSeg = 0;
-    youCosEqNameplate = 0;
-    youCosEqFrame = 0;
+    // Без кэша: базовый вариант (id 0) есть у всех и он же надет.
+    for (const cat of COS_STATE_CATS) {
+      youCos.inv[cat] = 1;
+      youCos.eq[cat] = 0;
+    }
   }
   cosmeticsSource = 'cache';
   cosmeticsLoaded = true;
@@ -6915,13 +6867,7 @@ function cosmeticsEquipLocal(cat, id) {
   const bit = 1 << itemId;
   const mask = cosmeticsMaskForCat(c);
   if ((mask & bit) === 0) return;
-  if (c === 'capturefx') youCosEqCaptureFx = itemId;
-  else if (c === 'head') youCosEqHead = itemId;
-  else if (c === 'seg') youCosEqSeg = itemId;
-  else if (c === 'nameplate') youCosEqNameplate = itemId;
-  else if (c === 'terr') youCosEqTerr = itemId;
-  else if (c === 'death') youCosEqDeath = itemId;
-  else youCosEqFrame = itemId;
+  cosEquip(youCos, c, itemId);
   if (you) {
     if (c === 'terr') cosTerrByPlayer.set(you, itemId);
     if (c === 'death') cosDeathByPlayer.set(you, itemId);
@@ -7552,12 +7498,12 @@ function renderCosmeticsPreview() {
       reduceMotion,
       highlight: true,
       ids: {
-        head: pick('head', youCosEqHead),
-        seg: pick('seg', youCosEqSeg),
-        nameplate: pick('nameplate', youCosEqNameplate),
-        capturefx: pick('capturefx', youCosEqCaptureFx),
-        terr: pick('terr', youCosEqTerr),
-        death: pick('death', youCosEqDeath)
+        head: pick('head', youCos.eq.head),
+        seg: pick('seg', youCos.eq.seg),
+        nameplate: pick('nameplate', youCos.eq.nameplate),
+        capturefx: pick('capturefx', youCos.eq.capturefx),
+        terr: pick('terr', youCos.eq.terr),
+        death: pick('death', youCos.eq.death)
       }
     }
   );
@@ -7624,12 +7570,12 @@ function renderMenuSkinPreview() {
       reduceMotion,
       highlight: false,
       ids: {
-        head: youCosEqHead,
-        seg: youCosEqSeg,
-        nameplate: youCosEqNameplate,
-        capturefx: youCosEqCaptureFx,
-        terr: youCosEqTerr,
-        death: youCosEqDeath
+        head: youCos.eq.head,
+        seg: youCos.eq.seg,
+        nameplate: youCos.eq.nameplate,
+        capturefx: youCos.eq.capturefx,
+        terr: youCos.eq.terr,
+        death: youCos.eq.death
       }
     }
   );
@@ -9490,8 +9436,8 @@ function onCosExtra(m) {
       });
     }
     if (n === you) {
-      youCosEqTerr = terr;
-      youCosEqDeath = death;
+      youCos.eq.terr = terr;
+      youCos.eq.death = death;
       youTitleId = title;
     }
   }
