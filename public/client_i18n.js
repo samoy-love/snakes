@@ -121,6 +121,8 @@ export const I18N = {
     'settings.volume_hint': 'Применяется к звуковым сигналам и событиям',
     'settings.mute_on_blur': 'Глушить в фоне',
     'settings.mute_on_blur_hint': 'Если переключились на другое окно — игра не будет пищать',
+    'settings.haptics': 'Вибрация',
+    'settings.haptics_hint': 'Короткий отклик на киллы и смерть',
     'settings.test_beep': 'Проверить звук',
     'settings.reset': 'Сбросить по умолчанию',
     'settings.hud': 'HUD',
@@ -180,6 +182,7 @@ export const I18N = {
     'net.connecting': 'Соединение…',
     'net.reconnecting': 'Переподключение…',
     'net.offline': 'Нет соединения',
+    'net.join_offline': 'Нет соединения с сервером — пробуем переподключиться',
     'net.rejoin_hint': 'Не выходи — вернём в матч сами.',
     'net.rejoined': 'Снова в матче',
     'net.rejoin_failed': 'Не удалось вернуться в комнату',
@@ -205,6 +208,9 @@ export const I18N = {
     'hud.objective_capture': 'захват территории',
 
     'meta.details': 'Детали',
+    'meta.round': 'Раунд',
+    'meta.wallet': 'Кошелёк',
+    'meta.leaderboard': 'Таблица',
     'meta.fight': 'Бой',
     'meta.tasks': 'Задания',
 
@@ -243,6 +249,8 @@ export const I18N = {
     'death.top': 'Топ-5',
     'death.top1': 'Топ‑1! Отличная игра.',
     'death.try_again': 'Ещё попытка — и будет лучше.',
+    'death.best_zone': 'Рекорд зоны',
+    'death.new_record': 'Новый рекорд!',
 
     'cosmetics.earn_title': 'Как заработать стиль',
     'cosmetics.earn_kills': 'Киллы',
@@ -536,6 +544,8 @@ export const I18N = {
     'settings.volume_hint': 'Applies to beeps and event sounds',
     'settings.mute_on_blur': 'Mute in background',
     'settings.mute_on_blur_hint': "When you switch tabs/windows — the game won't beep",
+    'settings.haptics': 'Vibration',
+    'settings.haptics_hint': 'A short buzz on kills and deaths',
     'settings.test_beep': 'Test sound',
     'settings.reset': 'Reset defaults',
     'settings.hud': 'HUD',
@@ -593,6 +603,7 @@ export const I18N = {
     'net.connecting': 'Connecting…',
     'net.reconnecting': 'Reconnecting…',
     'net.offline': 'Offline',
+    'net.join_offline': 'No connection to the server — reconnecting',
     'net.rejoin_hint': 'Stay put — we will put you back in the match.',
     'net.rejoined': 'Back in the match',
     'net.rejoin_failed': 'Could not rejoin the room',
@@ -618,6 +629,9 @@ export const I18N = {
     'hud.objective_capture': 'capture territory',
 
     'meta.details': 'Details',
+    'meta.round': 'Round',
+    'meta.wallet': 'Wallet',
+    'meta.leaderboard': 'Standings',
     'meta.fight': 'Fight',
     'meta.tasks': 'Tasks',
 
@@ -656,6 +670,8 @@ export const I18N = {
     'death.top': 'Top 5',
     'death.top1': 'Top-1! Great game.',
     'death.try_again': 'One more try — you can do better.',
+    'death.best_zone': 'Zone record',
+    'death.new_record': 'New record!',
 
     'cosmetics.earn_title': 'How to earn Style',
     'cosmetics.earn_kills': 'Kills',

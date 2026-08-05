@@ -7,7 +7,16 @@
     <!-- V1: версионирование статики. Литерал __BUILD__ заменяет скрипт деплоя
          на идентификатор релиза; сервер отдаёт immutable только при непустом
          v, отличном от литерала, поэтому при `go run .` кэша не будет. -->
-    <link rel="stylesheet" href="/style.css?v=__BUILD__" />
+    <!-- Стили разрезаны на части по доменам. ПОРЯДОК ПОДКЛЮЧЕНИЯ ЗНАЧИМ:
+         каскад держится на нём, а не на !important — поздние файлы намеренно
+         перекрывают ранние. Менять порядок или пропускать номер нельзя;
+         tests/style_split.test.mjs следит за этим. -->
+    <link rel="stylesheet" href="/css/01-base.css?v=__BUILD__" />
+    <link rel="stylesheet" href="/css/02-cosmetics.css?v=__BUILD__" />
+    <link rel="stylesheet" href="/css/03-game.css?v=__BUILD__" />
+    <link rel="stylesheet" href="/css/04-hud-details.css?v=__BUILD__" />
+    <link rel="stylesheet" href="/css/05-ux-waves.css?v=__BUILD__" />
+    <link rel="stylesheet" href="/css/06-redesign.css?v=__BUILD__" />
   </head>
   <body>
     <div id="menuOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="menuOverlayTitle">
@@ -55,6 +64,11 @@
                   <span class="menuHowToText" data-i18n="menu.how_step3">Замкни петлю — территория твоя</span>
                 </li>
               </ol>
+              <!-- Мета-крючок возврата: дейлики и прогресс до первого скина.
+                   Раньше жили только в правой панели матча — то есть были не
+                   видны там, где игрок решает «зайти ещё раз».
+                   Наполняет client.js (renderMenuMeta). -->
+              <div id="menuMeta" class="menuMeta" aria-live="polite"></div>
               <div id="menuOnboarding" class="menuOnboarding hidden">
                 <div class="menuOnboardingTitle" data-i18n="menu.controls_title"></div>
                 <div class="menuOnboardingDesc" data-i18n="menu.controls_desc"></div>
@@ -337,6 +351,15 @@
                 <input id="muteOnBlur" type="checkbox" />
               </label>
               <div class="fieldHint" data-i18n="settings.mute_on_blur_hint"></div>
+              <!-- Вибрация: строка скрыта там, где navigator.vibrate не
+                   поддержан (десктоп, iOS) — см. syncHapticsRowUi в client.js -->
+              <div id="hapticsRow" class="hidden">
+                <label class="fieldInline">
+                  <span class="fieldLabel" data-i18n="settings.haptics"></span>
+                  <input id="hapticsEnabled" type="checkbox" checked />
+                </label>
+                <div class="fieldHint" data-i18n="settings.haptics_hint"></div>
+              </div>
               <div class="menuActions">
                 <button id="testBeepBtn" class="btnSecondary" type="button" data-i18n="settings.test_beep"></button>
               </div>
@@ -415,7 +438,6 @@
         <div id="stats"></div>
       </div>
 
-      <div id="help" data-i18n="hud.help">Управление: стрелки / WASD • Чат: Enter • Карта: M</div>
     </div>
 
     <!-- U10: на телефоне «WASD/стрелки/Esc» — бесполезный текст, а свайп нигде
@@ -425,6 +447,14 @@
          data-i18n сознательно НЕ проставлен: t() для отсутствующего ключа
          возвращает сам ключ, и игрок увидел бы «hud.help_touch». Когда
          клиентский агент заведёт ключ, заменить data-i18n-pending на data-i18n. -->
+    <!-- Подсказки по управлению живут ВНЕ #hud намеренно. Внутри они делали
+         панель шириной 340px, и она наезжала на центрированный #topHud
+         (замер 1076x970: #hud занимал 12..352, #topHud начинался с 258).
+         У #hud есть filter/backdrop-filter, а они создают containing block —
+         position: fixed внутри него не работает, поэтому вынос обязателен.
+         #help — для мыши и клавиатуры, #helpTouch — для пальца; CSS
+         показывает ровно одну из двух по (pointer: coarse). -->
+    <div id="help" data-i18n="hud.help">Управление: стрелки / WASD • Чат: Enter • Карта: M</div>
     <div id="helpTouch" data-i18n="hud.help_touch">Свайп по экрану — движение</div>
 
     <div id="topHud" aria-hidden="true">
@@ -435,10 +465,14 @@
            абсолютного числа клеток, поэтому проценты стоят перед клетками. -->
       <div class="topHudRow">
         <span id="topHudPlace" class="topHudPlace">—</span>
+        <!-- Абсолютное число клеток убрано: рядом стоит доля карты, и именно
+             она сравнима между игроками и матчами (в правой таблице колонка
+             «Зона» тоже в процентах). Две цифры об одном и том же занимали
+             место в полосе, которая и без того переносилась в три строки.
+             Точное число клеток осталось на экранах смерти и итогов. -->
         <div class="topHudZone">
           <span class="topHudLabel" data-i18n="hud.zone">Зона</span>
           <span id="topHudPct" class="topHudZonePct">—</span>
-          <span id="topHudCells" class="topHudZoneCells">—</span>
         </div>
         <div class="topHudRight">
           <span id="topHudTime" class="topHudTime"></span>

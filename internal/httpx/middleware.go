@@ -14,6 +14,14 @@ const BuildPlaceholder = "__BUILD__"
 
 const immutableCacheControl = "public, max-age=31536000, immutable"
 
+// revalidateCacheControl — «храни, но каждый раз спрашивай». Для соседних ES-модулей
+// это строго лучше no-store: no-store запрещает даже условный запрос, поэтому
+// каждый F5 тянул все ~20 КБ целиком. С no-cache браузер шлёт
+// If-Modified-Since, а http.FileServer отвечает 304 без тела.
+// Корректность не страдает: ревалидация происходит всегда, устаревший модуль
+// отдан быть не может.
+const revalidateCacheControl = "no-cache"
+
 // isVersionedAsset — запрос к статике с настоящим идентификатором релиза в
 // query (?v=20260802-abc1234). Пустой v и неподменённый литерал __BUILD__ не
 // считаются: в обоих случаях URL не меняется от релиза к релизу, и immutable
@@ -41,12 +49,16 @@ func CacheStaticMiddleware(next http.Handler) http.Handler {
 			//
 			// ВАЖНО. Соседние ES-модули (client_errors/audio/fx/net.js)
 			// импортируются из client.js по относительным путям, query из
-			// <script src> на них НЕ наследуется, и они приходят сюда без v —
-			// то есть остаются на no-store. Это осознанно: суммарно они ~20 КБ.
+			// <script src> на них НЕ наследуется, и они приходят сюда без v.
+			// Рассинхрона версий это не создаёт: index.html отдаётся no-store,
+			// поэтому новый релиз всегда приносит новый ?v= для client.js, а
+			// соседи ревалидируются на каждый запрос. Но no-store запрещал даже
+			// условный запрос — все ~20 КБ качались заново на каждый F5.
+			// no-cache оставляет ревалидацию обязательной и даёт 304 без тела.
 			if isVersionedAsset(r) {
 				w.Header().Set("Cache-Control", immutableCacheControl)
 			} else {
-				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Cache-Control", revalidateCacheControl)
 			}
 			next.ServeHTTP(w, r)
 			return

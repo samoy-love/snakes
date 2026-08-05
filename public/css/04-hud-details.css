@@ -1,0 +1,844 @@
+/* Рамки профиля, тосты, срочность, таблицы итогов.
+   Часть общего каскада, файл 04-hud-details.css. ПОРЯДОК ФАЙЛОВ ЗНАЧИМ:
+   поздние правила перекрывают ранние порядком, а не !important,
+   поэтому index.html подключает их строго по номеру. */
+
+/* ==========================================================================
+   Релизные доработки: рамки профиля (D1), анимация оповещений (J4),
+   индикация срочности (I10), появление строк лидерборда (I11).
+   ========================================================================== */
+
+/* --- D1. Рамки профиля -----------------------------------------------------
+   Классы frame0..frame7 навешиваются на <tr> в панели команды и в таблице
+   итогов матча (client.js). До этого правил не существовало вовсе, поэтому
+   купленная рамка была не видна никому. Семейство — «металлы и материалы»,
+   чтобы не дублировать палитру остальных категорий косметики.
+   Левый бордюр одинаковой ширины у всех вариантов, включая базовый, — иначе
+   строки с разными рамками разъезжаются по горизонтали. */
+.frame0,
+.frame1,
+.frame2,
+.frame3,
+.frame4,
+.frame5,
+.frame6,
+.frame7 {
+  border-left: 3px solid transparent;
+}
+
+/* Сталь — базовая, намеренно нейтральная */
+.frame0 {
+  border-left-color: #6b7280;
+}
+
+/* Медь */
+.frame1 {
+  border-left-color: #b87333;
+  background-image: linear-gradient(90deg, rgba(184, 115, 51, 0.16), transparent 60%);
+}
+
+/* Хром: серебристый борт + верхний блик */
+.frame2 {
+  border-left-color: #c9d1d9;
+  background-image: linear-gradient(90deg, rgba(201, 209, 217, 0.14), transparent 55%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* Изумруд: градиент + мягкое свечение имени */
+.frame3 {
+  border-left-color: #34d399;
+  background-image: linear-gradient(90deg, rgba(52, 211, 153, 0.18), transparent 62%);
+}
+.frame3 td:nth-child(2) {
+  text-shadow: 0 0 7px rgba(52, 211, 153, 0.55);
+}
+
+/* Обсидиан: тёмный градиент, внутренняя фиолетовая линия, разрядка имени */
+.frame4 {
+  border-left-color: #4c1d95;
+  background-image: linear-gradient(90deg, rgba(20, 12, 38, 0.72), rgba(0, 0, 0, 0.28) 70%);
+  box-shadow: inset 0 0 0 1px rgba(170, 120, 255, 0.28);
+}
+.frame4 td:nth-child(2) {
+  color: #ede9fe;
+  letter-spacing: 0.3px;
+}
+
+/* Северное сияние: многостоповый градиент, медленно «дышащий» по строке.
+   Переиспользует @keyframes shimmer (сдвиг background-position по X). */
+.frame5 {
+  border-left-color: #7dd3fc;
+  background-image: linear-gradient(
+    90deg,
+    rgba(125, 211, 252, 0.26),
+    rgba(52, 211, 153, 0.22) 26%,
+    rgba(167, 139, 250, 0.24) 52%,
+    rgba(125, 211, 252, 0.26) 78%,
+    transparent
+  );
+  background-size: 220% 100%;
+  animation: shimmer 9s linear infinite;
+}
+.frame5 td:nth-child(2) {
+  color: #ecfeff;
+  text-shadow: 0 0 8px rgba(125, 211, 252, 0.45);
+}
+
+/* Золотой век: золотой градиент + бегущая бликовая полоса.
+   <tr> не рендерит псевдоэлементы, поэтому блик живёт в ячейке с именем. */
+.frame6 {
+  border-left-color: var(--gold);
+  background-image: linear-gradient(90deg, rgba(245, 197, 66, 0.26), rgba(184, 134, 11, 0.12) 46%, transparent 74%);
+}
+.frame6 td:nth-child(2) {
+  position: relative;
+  overflow: hidden;
+  color: #fffbeb;
+  text-shadow: 0 0 8px rgba(245, 197, 66, 0.5);
+}
+.frame6 td:nth-child(2)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 62%
+  );
+  background-size: 260% 100%;
+  animation: frameGoldSweep 4.2s linear infinite;
+}
+
+@keyframes frameGoldSweep {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+/* Призма: конический бордюр через background-clip padding-box/border-box.
+   Вращаем не геометрию, а оттенок — так строка не «мигает» на периферии. */
+.frame7 {
+  border-left-color: #a78bfa;
+  background-image: linear-gradient(90deg, rgba(167, 139, 250, 0.18), transparent 66%);
+}
+.frame7 td:nth-child(2) {
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background:
+    linear-gradient(rgba(9, 12, 18, 0.62), rgba(9, 12, 18, 0.62)) padding-box,
+    conic-gradient(
+      from 0deg,
+      #ff3d71,
+      #f5a524,
+      #34d399,
+      #35c4f0,
+      #a855f7,
+      #ff3d71
+    ) border-box;
+  animation: framePrismHue 14s linear infinite;
+}
+
+@keyframes framePrismHue {
+  from {
+    filter: hue-rotate(0deg);
+  }
+  to {
+    filter: hue-rotate(360deg);
+  }
+}
+
+/* --- J4. Анимация оповещений ----------------------------------------------
+   @keyframes toastIn существовал в файле, но не был применён ни к одному
+   селектору: тосты появлялись мгновенным щелчком. */
+.eventToast {
+  animation: toastIn 260ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+@keyframes toastPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.7) translateY(14px);
+  }
+  55% {
+    transform: scale(1.06) translateY(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.eventToastBig {
+  animation: toastPop 420ms cubic-bezier(0.16, 1.6, 0.3, 1) both;
+}
+
+/* Пульс при повторе уже показанного события (client.js переключает .bump) */
+@keyframes toastBump {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.07);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.eventToast.bump {
+  animation: toastBump 220ms ease;
+}
+
+/* --- I10. Индикация срочности ----------------------------------------------
+   client.js вешает .metaRowUrgent, когда до конца матча меньше 10 секунд либо
+   истекает контракт/баунти/мутатор. Правил не существовало — вся логика
+   срочности была визуально немой. */
+@keyframes urgentPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.metaRowUrgent {
+  color: var(--accent);
+  font-weight: 800;
+  border-left: 2px solid var(--accent);
+  padding-left: 6px;
+  animation: urgentPulse 1.2s ease-in-out infinite;
+}
+
+/* --- I11. Появление строки лидерборда -------------------------------------- */
+@keyframes lbEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lb-enter {
+  animation: lbEnter 200ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eventToast,
+  .eventToastBig,
+  .eventToast.bump,
+  .metaRowUrgent,
+  .lb-enter,
+  /* Новые анимации релизной волны: блок точечный, поэтому перечисляем явно */
+  .menuOnlineDot,
+  #hudCombo.isOn,
+  #bigBanner.isOn,
+  .cosmeticsItem.tierMythic,
+  .cosmeticsItem.tierMythic::before,
+  /* Рамки профиля 5–7: сияние, бегущий блик и вращение оттенка призмы */
+  .frame5,
+  .frame6 td:nth-child(2)::after,
+  .frame7 td:nth-child(2) {
+    animation: none;
+  }
+
+  /* Блик «Золотого века» без анимации превращается в статичную засветку
+     поперёк имени — убираем его целиком, градиент строки остаётся. */
+  .frame6 td:nth-child(2)::after {
+    display: none;
+  }
+
+  /* Оставляем видимыми, но без «влёта» и без пульсации */
+  #bigBanner.isOn {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  #fxFlash,
+  .cosmeticsItemProgress > *,
+  .roomsDetailsChevron,
+  body.inGame #hud:not(.lbPinned) {
+    transition: none;
+  }
+
+  .counting {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* --- H4 (доработка). Приоритет главного CTA -------------------------------
+   .btnPlay объявлен раньше базового правила .btnPrimary/.btnSecondary/.btnGhost,
+   поэтому при равной специфичности (0,1,0) базовое правило перебивало высоту
+   и кнопка «Играть» оставалась 40px. Повышаем специфичность до (0,2,0). */
+.menuActions .btnPlay {
+  min-height: 56px;
+  font-size: var(--fs-18);
+  font-weight: 800;
+}
+
+/* ==========================================================================
+   ВОЛНА ОНБОРДИНГА. Разметку создаёт client.js, здесь только оформление.
+   ========================================================================== */
+
+/* client.js уже собирает две строки причины смерти — правил для них не было */
+.deathReasonMain {
+  font-size: var(--fs-13);
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.deathReasonHint {
+  margin-top: 2px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   ЭКРАН РЕЗУЛЬТАТОВ МАТЧА: «итоги», а не отладочный дамп.
+   ========================================================================== */
+
+/* Место — самое крупное число экрана; остальные KPI выравниваются по нему. */
+.matchKpiGrid .matchKpi:first-child .matchKpiValue {
+  font-size: clamp(30px, 8vw, 42px);
+  line-height: 1;
+  color: var(--gold);
+  text-shadow: 0 0 18px color-mix(in srgb, var(--gold) 30%, transparent);
+}
+
+.matchKpiGrid .matchKpi:first-child .matchKpiOf {
+  font-size: var(--fs-13);
+  color: var(--muted2);
+  text-shadow: none;
+  /* Число места растёт, «из N» — нет, поэтому выравниваем по базовой линии */
+  vertical-align: baseline;
+}
+
+/* Каскад count-up перерисовывает числа: резервируем ширину заранее, иначе
+   соседние блоки прыгают, пока разряды набегают. */
+.matchKpiValue,
+.matchMiniValue {
+  font-variant-numeric: tabular-nums;
+}
+
+.matchKpiValue [data-count],
+.matchMiniValue[data-count],
+.matchMiniValue [data-count] {
+  display: inline-block;
+  min-width: 2ch;
+}
+
+/* Зебра объявлена ДО .matchRowMe: у обоих правил специфичность (0,3,0),
+   и при равенстве побеждает последнее — своя строка обязана перебивать зебру. */
+.matchTable tbody tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.025);
+}
+
+/* --- Строка игрока в таблице итогов ----------------------------------------
+   Раньше .matchRowMe навешивался client.js, но правила не существовало: своя
+   строка ничем не отличалась от чужих. Фон + левый маркер, но БЕЗ изменения
+   padding/border-width — иначе колонки разъезжаются относительно шапки.
+   border-left уже занят рамками профиля .frame0..7, поэтому маркер рисуем
+   box-shadow'ом внутрь первой ячейки. */
+.matchTable tbody tr.matchRowMe {
+  background-color: color-mix(in srgb, var(--accent2) 16%, transparent);
+  color: #fff;
+  font-weight: 800;
+}
+
+.matchTable tbody tr.matchRowMe td {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent2) 24%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--accent2) 24%, transparent);
+}
+
+.matchTable tbody tr.matchRowMe td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent2),
+    inset 0 1px 0 color-mix(in srgb, var(--accent2) 24%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--accent2) 24%, transparent);
+}
+
+/* Пьедестал: первые три места читаются без счёта в уме */
+.matchTable tbody tr:nth-child(1) td:first-child {
+  color: var(--gold);
+  font-weight: 800;
+}
+
+.matchTable tbody tr:nth-child(2) td:first-child {
+  color: #cbd5e1;
+  font-weight: 800;
+}
+
+.matchTable tbody tr:nth-child(3) td:first-child {
+  color: #d09a6a;
+  font-weight: 800;
+}
+
+/* Шапка таблицы: подписи колонок — служебные, они не должны спорить с числами */
+.matchTable thead th {
+  font-size: var(--fs-11);
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--muted2);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.matchTable th.num,
+.matchTable td.num {
+  text-align: right;
+}
+
+/* Имя игрока — единственная резиновая колонка; остальные держат ширину чисел */
+.matchTable tbody td:nth-child(2) {
+  max-width: 0;
+  width: 99%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- «До первого скина N ✨» ----------------------------------------------- */
+.matchFirstSkin {
+  margin-top: 10px;
+  padding: var(--pad-md) var(--pad-lg);
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--gold) 28%, var(--border2));
+  background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--gold) 10%, transparent),
+      transparent 62%
+    ),
+    rgba(0, 0, 0, 0.18);
+}
+
+.matchFirstSkinTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.matchFirstSkinLabel {
+  font-size: var(--fs-11);
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.matchFirstSkinValue {
+  flex: 0 0 auto;
+  font-size: var(--fs-14);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--gold);
+}
+
+.matchFirstSkinBar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+
+/* Ширину client.js задаёт инлайновым style="width:…%" */
+.matchFirstSkinFill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  max-width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 85%, transparent), var(--gold));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--gold) 45%, transparent);
+  transition: width 420ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.matchFirstSkinSub {
+  margin-top: 6px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   ЗАКРЫТИЕ ПРОБЕЛОВ: классы, которые client.js уже навешивает, но правил для
+   них в файле не было — визуально логика была немой.
+   ========================================================================== */
+
+/* Разделитель тиров в магазине. Цвет берёт из .tierBase/.tierRare/... */
+.cosmeticsTierSep {
+  margin-top: 10px;
+  padding: 4px 2px;
+  font-size: var(--fs-11);
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted2);
+  border-bottom: 1px solid var(--border2);
+}
+
+.cosmeticsTierSep.tierCommon { color: var(--tier-common); }
+.cosmeticsTierSep.tierRare { color: var(--tier-rare); }
+.cosmeticsTierSep.tierEpic { color: var(--tier-epic); }
+.cosmeticsTierSep.tierLegendary { color: var(--tier-legendary); }
+.cosmeticsTierSep.tierMythic { color: var(--tier-mythic); }
+
+/* Покупка отправлена, но сервер ещё не подтвердил — состояние было немым */
+.cosmeticsItemSub.isUnconfirmed {
+  color: var(--tier-legendary);
+  font-style: italic;
+}
+
+/* Заливка прогресса до покупки: client.js даёт ей собственный класс */
+.cosmeticsItemProgressFill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  max-width: 100%;
+  border-radius: 999px;
+}
+
+/* --- Верхний HUD: контракт, баунти, срочность ------------------------------
+   .topHudObjective удалён вместе со строкой «Цель: захват территории»:
+   это была константа, занимавшая место во всегда видимой полосе. */
+
+.topHudChip {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent2) 38%, var(--border2));
+  background: color-mix(in srgb, var(--accent2) 12%, rgba(0, 0, 0, 0.24));
+  color: rgba(255, 255, 255, 0.92);
+  font-size: var(--fs-11);
+  font-weight: 800;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.topHudBounty {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--tier-legendary) 45%, var(--border2));
+  background: color-mix(in srgb, var(--tier-legendary) 14%, rgba(0, 0, 0, 0.24));
+  color: #fff3d6;
+  font-size: var(--fs-11);
+  font-weight: 800;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Баунти на самом игроке — это уже не информация, а угроза */
+.topHudBounty.isMe {
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  background: color-mix(in srgb, var(--accent) 20%, rgba(0, 0, 0, 0.24));
+  color: #ffe3ec;
+  animation: urgentPulse 1.1s ease-in-out infinite;
+}
+
+/* Меньше 30 секунд до конца матча */
+.topHudTime.isUrgent {
+  color: var(--accent);
+  animation: urgentPulse 1.2s ease-in-out infinite;
+}
+
+/* --- Панель команды и перф ------------------------------------------------- */
+.teamTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+
+.teamTable td {
+  padding: 3px 6px;
+}
+
+/* Имя — единственная резиновая колонка; рамки профиля .frame0..7 живут на <tr> */
+.teamTable td:nth-child(2) {
+  max-width: 0;
+  width: 99%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamTable td.num,
+.teamTable td:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.perfValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.perfValue.bad {
+  color: var(--accent);
+}
+
+/* Счётчик киллов в боевом чипе */
+.hudComboKills {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Уход строки из лидерборда — парная анимация к .lb-enter, правила не было */
+@keyframes lbLeave {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.lb-leave {
+  animation: lbLeave 180ms ease-in both;
+}
+
+/* Подсветка ввода чата под инпутом (twemoji-парсинг) не должна ловить клики */
+.chatInputText {
+  pointer-events: none;
+  white-space: pre;
+}
+
+/* ==========================================================================
+   ТИТУЛЫ: страховка на текущую разметку client.js.
+   Правила .titleItem/.titleMedal/... выше рассчитаны на выделенную разметку.
+   Фактически renderCosmeticsTitles() переиспользует .cosmeticsItem — поэтому
+   золотой «наградной» вид навешиваем и на него, через контейнер .isTitles.
+   Когда client.js перейдёт на .titleItem, оба набора дадут один результат.
+   ========================================================================== */
+.cosmeticsItems.isTitles .cosmeticsItem {
+  border-color: color-mix(in srgb, var(--gold) 22%, var(--border2));
+  border-left: 4px solid color-mix(in srgb, var(--gold) 45%, transparent);
+  background: radial-gradient(
+      120% 140% at 0% 50%,
+      color-mix(in srgb, var(--gold) 10%, transparent),
+      transparent 60%
+    ),
+    rgba(0, 0, 0, 0.18);
+}
+
+/* Титул не покупается — тировая раскраска и валюта сюда не приходят */
+.cosmeticsItems.isTitles .cosmeticsItem::before {
+  content: none;
+}
+
+.cosmeticsItems.isTitles .cosmeticsItem.isLocked {
+  border-left-color: var(--border);
+  background: rgba(0, 0, 0, 0.26);
+}
+
+.cosmeticsItems.isTitles .cosmeticsItem.isLocked .cosmeticsItemPreview {
+  filter: grayscale(1);
+  opacity: 0.7;
+}
+
+.cosmeticsItems.isTitles .cosmeticsItem.isEquipped {
+  border-color: color-mix(in srgb, var(--gold) 60%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 24%, transparent);
+}
+
+.cosmeticsItems.isTitles .cosmeticsItem.isEquipped .cosmeticsItemTitle {
+  color: color-mix(in srgb, var(--gold) 45%, #fff);
+}
+
+/* «Условие получения» вместо «где это видно» — тот же элемент, другой смысл */
+.cosmeticsItems.isTitles .cosmeticsItemWhere {
+  color: color-mix(in srgb, var(--gold) 62%, var(--text));
+  font-weight: 800;
+}
+
+.cosmeticsItems.isTitles .cosmeticsItemProgress {
+  --tier-color: var(--gold);
+}
+
+/* Список из 13 карточек длиннее экрана. Прокручивается сама лента предметов,
+   а фильтры и вкладки категорий остаются на месте — иначе на 375px до
+   последнего титула нужно проскроллить всю карточку оверлея. */
+.cosmeticsItems {
+  max-height: min(52dvh, 460px);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  /* место под скроллбар, чтобы фокус-кольцо карточки не срезалось */
+  padding-right: 4px;
+  scroll-padding-block: 8px;
+}
+
+/* ==========================================================================
+   МОБИЛЬНЫЙ ИГРОВОЙ ЭКРАН: добор после аудита 375×667.
+   ========================================================================== */
+
+@media (max-width: 720px) {
+  :root {
+    /* Единственный источник правды для высоты развёрнутого чата: её читают
+       и сам #chat, и смещение стека тостов над ним. */
+    --chat-max-mobile: min(30dvh, 220px);
+  }
+
+  /* Чат по умолчанию свёрнут в кнопку; развёрнутый не должен занимать пол-экрана.
+     Потолок 30dvh держит верхнюю кромку чата ниже 69% высоты — голова змейки
+     (камера центрирует её ровно на 50%) остаётся открытой при любом состоянии.
+     Тот же размер читает стек тостов выше — держим его в одной переменной. */
+  #chat:not(.collapsed) {
+    max-height: var(--chat-max-mobile);
+  }
+
+  /* #emojiBtn оставался 40px шириной: min-height ниже его не расширял */
+  #emojiBtn,
+  #chatBtn {
+    min-width: 44px;
+  }
+
+  /* Восемь колонок эмодзи на 375px давали ячейку 32px. auto-fill сам подбирает
+     столько колонок, сколько влезает при минимуме 44px. */
+  #emojiGrid {
+    grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    padding-right: 46px;
+  }
+
+  #emojiGrid button,
+  #emojiRecent button {
+    min-width: 44px;
+    min-height: 44px;
+    /* aspect-ratio выше уже держит квадрат, но при растянутой колонке
+       высота не должна опускаться ниже тач-минимума */
+    aspect-ratio: auto;
+    height: 44px;
+  }
+
+  #emojiCloseBtn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Тач-цель свёрнутого чата — целиком шапка, а не текст внутри */
+  #chat.collapsed #chatHeader {
+    min-height: 44px;
+  }
+
+  /* .chatCollapseBtn создаётся из client.js и наследует .iconBtn 40×40 —
+     единственная тач-цель игрового экрана, не дотягивавшая до 44px. */
+  .chatCollapseBtn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Магазин на телефоне: лента предметов и так внутри скроллящейся карточки —
+     двойной скролл мешает, отдаём прокрутку карточке. */
+  .cosmeticsItems {
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  /* Итоги матча: место крупнее, но не в ущерб ширине */
+  .matchKpiGrid .matchKpi:first-child .matchKpiValue {
+    font-size: var(--fs-lead);
+  }
+
+  .matchTable td,
+  .matchTable th {
+    padding: 6px 6px;
+    font-size: var(--fs-12);
+  }
+}
+
+@media (max-width: 520px) {
+  /* Шесть колонок в 375px помещаются только «в упор»: числа и так табличные,
+     поэтому режем горизонтальные отступы, а не колонки — прятать смерти/киллы
+     нельзя, они и есть новые данные, ради которых экран переделан. */
+  .matchTable td,
+  .matchTable th {
+    padding: 6px 4px;
+  }
+}
+
+/* Тач-цели: игровые контролы вне .overlay блок @media (pointer: coarse) выше
+   не покрывал — там перечислены только элементы внутри оверлеев. */
+@media (pointer: coarse) {
+  #hud .iconBtn,
+  #chat button,
+  .chatCollapseBtn,
+  #emojiPanel button,
+  #nameRow button,
+  #rightSidebar summary,
+  .rightDetailsSummary {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  #emojiGrid button,
+  .emojiRow button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Свёрнутый чат — основная кнопка нижнего края экрана */
+  #chat.collapsed #chatHeader {
+    min-height: 44px;
+  }
+
+  /* Итоговые кнопки матча и смерти: на тач-экране это три соседние цели */
+  .matchNextActions > *,
+  .matchActions > * {
+    min-height: 48px;
+  }
+}
+
+/* ==========================================================================
+   Точечное отключение анимаций волны. Общий блок выше уже сводит длительности
+   к 0.001ms, но здесь снимаем именно бесконечные и «влётные» анимации, чтобы
+   элементы оставались в конечном, читаемом состоянии.
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .topHudBounty.isMe,
+  .topHudTime.isUrgent,
+  .lb-leave,
+  .overlay .card {
+    animation: none;
+  }
+
+  .lb-leave {
+    opacity: 0;
+  }
+
+  .matchFirstSkinFill {
+    transition: none;
+  }
+}
+

@@ -4,6 +4,31 @@ import { createFxModule } from './client_fx.js';
 import { createNetModule } from './client_net.js';
 import { BOT_NAMES_EN, BOT_NAMES_RU, EN, I18N, RU } from './client_i18n.js';
 import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
+import { filterAndSortRooms } from './client_rooms.js';
+import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
+import {
+  COSMETICS_CATS,
+  COSMETICS_MAX_ID,
+  bitHas,
+  cheapestPrice,
+  missingFor,
+  tierClass,
+  ownedCountFromMask,
+  priceOf,
+  tierOf
+} from './client_cos_model.js';
+import {
+  approxTickNow,
+  formatClock,
+  formatGroupedCount,
+  formatInt,
+  formatNumber as formatNumberIntl,
+  formatPct1,
+  formatRate as formatRateOf,
+  formatRemainMs,
+  numberLocale as localeOf,
+  remainMsToTick
+} from './client_format.js';
 import {
   COS_DEATH_MS,
   COS_FONT,
@@ -253,18 +278,15 @@ function tfmt(key, vars) {
   return s.replace(/\{(\w+)\}/g, (m, name) => (vars[name] === undefined ? m : String(vars[name])));
 }
 
+/* Форматирование переехало в client_format.js вместе с тестами. Здесь —
+   обёртки, подставляющие текущий язык: так все вызовы по файлу остались как
+   были, а формулы стали проверяемыми. */
 function numberLocale() {
-  return lang === 'en' ? 'en-US' : 'ru-RU';
+  return localeOf(lang);
 }
 
 function formatNumber(value, options) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return String(value ?? '');
-  try {
-    return new Intl.NumberFormat(numberLocale(), options || {}).format(n);
-  } catch {
-    return String(n);
-  }
+  return formatNumberIntl(value, lang, options);
 }
 
 function applyTranslations(root) {
@@ -634,11 +656,13 @@ function drawMiniCosmeticPreview(canvasEl, cat, id) {
 
   if (cat === 'seg') {
     // Квадратные плитки — ровно как след в игре (раньше рисовалась цепочка кружков).
-    const cell = 13;
+    // cell 10, а не 13: с 13 голова оказывалась в x≈47 при ширине канваса 44
+    // и обрезалась правым краем.
+    const cell = 10;
     for (let i = 0; i < 3; i++) {
       drawSegTile(c, 2 + i * cell, cy - cell / 2, cell, base, id, i, 0.95, now);
     }
-    drawHead(c, 2 + 3 * cell + cell * 0.5, cy, cell, base, 0, 1, 0, now);
+    drawHead(c, 2 + 3 * cell + cell * 0.55, cy, cell, base, 0, 1, 0, now);
     return;
   }
 
@@ -726,7 +750,6 @@ const chatInputOverlay = document.getElementById('chatInputOverlay');
 const emojiBtn = document.getElementById('emojiBtn');
 const chatBtn = document.getElementById('chatBtn');
 const emojiPanel = document.getElementById('emojiPanel');
-const emojiSearch = document.getElementById('emojiSearch');
 const emojiCloseBtn = document.getElementById('emojiCloseBtn');
 const emojiRecent = document.getElementById('emojiRecent');
 const emojiGrid = document.getElementById('emojiGrid');
@@ -753,7 +776,6 @@ const eventToastsEl = document.getElementById('eventToasts');
 const settingsBtn = document.getElementById('settingsBtn');
 const settingsOverlay = document.getElementById('settingsOverlay');
 const closeSettingsBtn = document.getElementById('closeSettingsBtn');
-const hudDensitySelect = document.getElementById('hudDensitySelect');
 const fxEnabledInput = document.getElementById('fxEnabled');
 const fxIntensityInput = document.getElementById('fxIntensity');
 const shakeIntensityInput = document.getElementById('shakeIntensity');
@@ -762,6 +784,7 @@ const perfCompactInput = document.getElementById('perfCompact');
 const soundEnabledInput = document.getElementById('soundEnabled');
 const soundVolumeInput = document.getElementById('soundVolume');
 const muteOnBlurInput = document.getElementById('muteOnBlur');
+const hapticsInput = document.getElementById('hapticsEnabled');
 const testBeepBtn = document.getElementById('testBeepBtn');
 const resetSettingsBtn = document.getElementById('resetSettingsBtn');
 
@@ -1267,10 +1290,9 @@ let cosmeticsPreviewRaf = 0;
 
 let cosmeticsPreviewLastAt = 0;
 
-// Превью реагирует на наведение/фокус карточки; по уходу курсора возвращается
-// к выбранному варианту.
-let cosmeticsHoverId = null;
-let cosmeticsHoverCat = null;
+// Превью показывает ВЫБРАННЫЙ предмет (клик или фокус с клавиатуры).
+// Наведение мыши превью не переключает: раньше hover перебивал выбор, пока
+// курсор был над списком, и клик по карточке визуально «не работал».
 
 let pendingCosmeticsOp = null;
 let cosmeticsOpTimer = 0;
@@ -1301,6 +1323,10 @@ function dailySetAssign(slot, type, goal, prog) {
   const s = Number(slot) || 0;
   if (s <= 0) return;
   youDailies.set(s, { type: Number(type) || 0, goal: Number(goal) || 0, prog: Number(prog) || 0 });
+  // Дейлики видны и на экране меню — держим блок в актуальном состоянии.
+  try {
+    renderMenuMeta();
+  } catch {}
 }
 
 function dailySetProgress(slot, prog) {
@@ -1312,6 +1338,9 @@ function dailySetProgress(slot, prog) {
     return;
   }
   it.prog = Number(prog) || 0;
+  try {
+    renderMenuMeta();
+  } catch {}
 }
 
 let fxEnabled = true;
@@ -1322,6 +1351,10 @@ let perfCompact = false;
 let soundEnabled = true;
 let soundVolume = 0.7;
 let muteOnBlur = true;
+/* Тактильный отклик. По умолчанию включён, но реально срабатывает только там,
+   где navigator.vibrate поддержан (Android/Chrome); iOS Safari его не знает —
+   там настройка просто ничего не делает и в UI не показывается. */
+let hapticsEnabled = true;
 let hudBrightness = 1;
 let hudContrast = 1;
 let hudPanelOpacity = 0.82;
@@ -1381,15 +1414,42 @@ function applyHudDensity(next) {
   try {
     localStorage.setItem(HUD_DENSITY_KEY, hudDensity);
   } catch {}
-  if (hudDensitySelect) {
-    try {
-      hudDensitySelect.value = hudDensity;
-    } catch {}
-  }
 }
 
 function applyPerfUi() {
   if (perfEl) perfEl.classList.toggle('perfCompact', !!perfCompact);
+}
+
+/* --- Тактильный отклик ------------------------------------------------------
+   navigator.vibrate есть только на части устройств (Android/Chrome), и на
+   десктопе он бессмысленен. Строку настройки показываем лишь там, где API
+   реально существует, — иначе игрок щёлкает выключателем в пустоту. */
+function hapticsSupported() {
+  try {
+    if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return false;
+    // Desktop Chrome объявляет vibrate и молча ничего не делает — по одному
+    // наличию метода строка настройки вылезала бы на десктопе. Требуем ещё и
+    // признак тач-устройства.
+    const coarse = !!window.matchMedia?.('(pointer: coarse)')?.matches;
+    const touch = Number(navigator.maxTouchPoints) > 0;
+    return coarse && touch;
+  } catch {
+    return false;
+  }
+}
+
+function syncHapticsRowUi() {
+  const row = document.getElementById('hapticsRow');
+  if (row) row.classList.toggle('hidden', !hapticsSupported());
+}
+
+function vibrate(pattern) {
+  if (!hapticsEnabled) return;
+  if (prefersReducedMotion()) return;
+  if (!hapticsSupported()) return;
+  try {
+    navigator.vibrate(pattern);
+  } catch {}
 }
 
 function addFxBurst(x, y, kind, extra) {
@@ -2109,6 +2169,15 @@ let roomsAutoRefreshAt = 0;
    Запись в localStorage осталась от прежней версии: она никем не читается —
    ни здесь, ни на сервере, — но и не мешает, а на отладке в консоли иногда
    удобна. */
+/* Счётчик пользовательских событий.
+   Раньше отсюда же уходил sendBeacon на /e/<событие>. Такого маршрута на
+   сервере нет и никогда не было (см. main.go: mux знает только /ws, /healthz,
+   /readyz, /metrics и статику), поэтому каждый «Играть» и «Обновить» давал
+   404: пять ошибок в консоли за сессию, лишние запросы через nginx и мусор в
+   его логах. Продуктовая аналитика в проекте живёт в Prometheus на стороне
+   сервера, отдельный клиентский канал ей не нужен.
+   Локальные счётчики оставлены: они бесплатны и полезны при разборе жалоб
+   («сколько раз игрок вообще жал Играть») — читать их можно из консоли. */
 function trackEvent(name) {
   const ev = String(name || '').trim();
   if (!ev) return;
@@ -2119,17 +2188,6 @@ function trackEvent(name) {
     localStorage.setItem(key, String(cur + 1));
   } catch {
     // Приватный режим, переполненное хранилище — счётчик не важнее игры.
-  }
-
-  try {
-    const url = `/e/${ev}`;
-    if (typeof navigator.sendBeacon === 'function') {
-      navigator.sendBeacon(url);
-    } else if (typeof fetch === 'function') {
-      fetch(url, { method: 'POST', keepalive: true }).catch(() => {});
-    }
-  } catch {
-    // Блокировщик, офлайн — событие теряется молча.
   }
 }
 
@@ -2630,23 +2688,11 @@ function refreshOwnGeometry(force) {
 }
 
 function fmtInt(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return '0';
-  try {
-    return Math.round(v).toLocaleString(numberLocale());
-  } catch {
-    return String(Math.round(v));
-  }
+  return formatInt(n, lang);
 }
 
 function fmtPct1(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return '0,0%';
-  try {
-    return v.toLocaleString(numberLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
-  } catch {
-    return v.toFixed(1) + '%';
-  }
+  return formatPct1(n, lang);
 }
 
 function deathReasonText(info) {
@@ -3176,16 +3222,19 @@ function renderTopHud() {
   {
     const placeEl = ensureTopHudPlaceEl();
     if (placeEl) {
+      // points в подписи остаётся, хотя в текст больше не попадает: их
+      // изменение — признак того, что мог поменяться и порядок в таблице,
+      // то есть само место. Это триггер пересчёта, а не выводимое значение.
       const points = Number(me?.p) || 0;
       const sig = `${lastPacketAt}|${points}|${lang}`;
       if (renderTopHud._placeSig !== sig) {
         renderTopHud._placeSig = sig;
         const ordered = computeTopSorted(lastState.players);
         const idx = ordered.findIndex((p) => p.n === you);
-        const txt =
-          idx >= 0
-            ? `${t('hud.place_short')} ${idx + 1}/${ordered.length} · ${t('hud.points_short')} ${fmtInt(points)}`
-            : '';
+        /* Очки из полосы убраны: место уже ранжирует игрока, а сами очки
+           стоят колонкой в правой таблице (и в итогах матча). В полосе
+           шириной ~370px «· Очки 0» стоило целой строки переноса. */
+        const txt = idx >= 0 ? `${t('hud.place_short')} ${idx + 1}/${ordered.length}` : '';
         if (placeEl.textContent !== txt) {
           placeEl.textContent = txt;
           placeEl.classList.toggle('hidden', !txt);
@@ -3273,28 +3322,24 @@ function renderTopHud() {
     }
   }
 
+  /* Строка «Цель: захват территории» отсюда убрана. Цель матча не меняется
+     никогда и ничего не сообщает игроку, который уже в матче, — а место в
+     всегда видимой полосе занимала. Правила объясняет меню (блок «Как
+     играть»), а верхняя полоса оставлена под то, что действительно меняется:
+     место, зона, время, фаза, киллы и контракт. */
   const ensureContractParts = () => {
-    if (!topHudContractEl) return { obj: null, chip: null };
-    let obj = topHudContractEl.querySelector('.topHudObjective');
+    if (!topHudContractEl) return { chip: null };
     let chip = topHudContractEl.querySelector('.topHudChip');
-    if (!obj || !chip) {
+    if (!chip) {
       topHudContractEl.replaceChildren();
-      obj = document.createElement('span');
-      obj.className = 'topHudObjective';
       chip = document.createElement('span');
       chip.className = 'topHudChip hidden';
-      topHudContractEl.appendChild(obj);
       topHudContractEl.appendChild(chip);
     }
-    return { obj, chip };
+    return { chip };
   };
 
-  const { obj, chip } = ensureContractParts();
-  // C7: строка-константа при неизменном языке, а писалась каждый кадр.
-  if (obj) {
-    const objTxt = `${t('hud.objective')}: ${t('hud.objective_capture')}`;
-    if (obj.textContent !== objTxt) obj.textContent = objTxt;
-  }
+  const { chip } = ensureContractParts();
 
   if (chip) {
     if (youContractType && obContract) {
@@ -3482,12 +3527,50 @@ function submitNameFromInput(el) {
   return nm;
 }
 
+/* Итог по рекорду за ЭТУ смерть: считается один раз при показе оверлея,
+   иначе повторные renderDeathStats() затирали бы «Новый рекорд». */
+let deathBestShown = null;
+
+/* Пауза между гибелью и оверлеем: игрок должен увидеть кадр, в котором его
+   убили. Длительность идёт через тот же fx-пресет, что и остальная «сочность»,
+   и полностью выключается при «Спокойно» / prefers-reduced-motion. */
+const DEATH_SLOWMO_MS = 480;
+let deathSlowMoTimer = 0;
+
+function beginDeathSlowMo() {
+  if (deathSlowMoTimer) {
+    clearTimeout(deathSlowMoTimer);
+    deathSlowMoTimer = 0;
+  }
+  const k = fxHitstopScale();
+  const dur = Math.round(DEATH_SLOWMO_MS * k);
+  if (dur <= 0) {
+    showDeathOverlay();
+    return;
+  }
+  triggerHitstop(DEATH_SLOWMO_MS);
+  vibrate([40, 60, 90]);
+  deathSlowMoTimer = setTimeout(() => {
+    deathSlowMoTimer = 0;
+    showDeathOverlay();
+  }, dur);
+}
+
+/* Матч может закончиться (или игрок — выйти) прямо во время паузы: тогда
+   оверлей смерти уже не нужен, и таймер обязан быть снят. */
+function cancelDeathSlowMo() {
+  if (!deathSlowMoTimer) return;
+  clearTimeout(deathSlowMoTimer);
+  deathSlowMoTimer = 0;
+}
+
 function showDeathOverlay() {
   if (deathOverlay) deathOverlay.classList.remove('hidden');
   overlayManager.open('death');
   syncOverlayUiState();
   setChatCollapsed(true);
   toggleEmojiPanel(false);
+  deathBestShown = null;
   renderDeathStats();
   lastDeathStatsAt = 0;
 
@@ -3568,6 +3651,7 @@ function syncMatchOverlayActions() {
 }
 
 function showMatchOverlay() {
+  cancelDeathSlowMo();
   if (matchOverlay) matchOverlay.classList.remove('hidden');
   if (matchActionsEl) matchActionsEl.classList.add('hidden');
   overlayManager.open('match');
@@ -3807,7 +3891,7 @@ function firstSkinHookHtml() {
   const price = cosmeticsCheapestPrice();
   if (price <= 0) return '';
   const have = Math.max(0, Math.floor(Number(youStyle) || 0));
-  const left = Math.max(0, price - have);
+  const left = missingFor(price, have);
   const pct = Math.max(0, Math.min(100, (have / price) * 100));
 
   return `
@@ -4260,6 +4344,9 @@ function onMatchStart(d) {
 }
 
 function hideOverlays() {
+  // Пауза перед оверлеем смерти могла «выстрелить» уже после конца матча —
+  // тогда экран смерти всплывал поверх итогов. Снимаем таймер вместе с ними.
+  cancelDeathSlowMo();
   // K7: флаг залипал — оверлей магазина скрыт, а cosmeticsOpen остаётся true,
   // и каждое начисление Стиля запускало полную пересборку DOM скрытого
   // магазина (замер 3.3 мс на начисление).
@@ -4293,6 +4380,7 @@ deathMenuBtn?.addEventListener('click', () => {
 });
 
 function showMenuOverlay() {
+  cancelDeathSlowMo();
   if (menuOverlay) menuOverlay.classList.remove('hidden');
   if (deathOverlay) deathOverlay.classList.add('hidden');
   overlayManager.close('death');
@@ -4320,6 +4408,7 @@ function showMenuOverlay() {
   syncOverlayUiState();
   // C3: панель «Ваш облик» — рисуем сразу, как только меню показано.
   scheduleMenuSkinPreview();
+  renderMenuMeta();
 }
 
 function hideMenuOverlay() {
@@ -4327,6 +4416,52 @@ function hideMenuOverlay() {
   stopMenuSkinPreview();
   overlayManager.close('menu');
   syncOverlayUiState();
+}
+
+/* Мета-крючок на экране меню: активные дейлики и прогресс до первого скина.
+   Блок пустой (и скрыт CSS-ом), пока сервер не прислал ни задач, ни баланса —
+   на первом экране новичка он ничего не должен обещать. */
+const menuMetaEl = document.getElementById('menuMeta');
+
+function renderMenuMeta() {
+  if (!menuMetaEl) return;
+  if (menuOverlay?.classList.contains('hidden')) return;
+
+  const rows = [];
+
+  for (const slot of dailySlots()) {
+    const it = youDailies.get(slot);
+    if (!it || !it.type || it.goal <= 0) continue;
+    const prog = Math.max(0, Math.min(it.goal, Number(it.prog) || 0));
+    const done = prog >= it.goal;
+    const pct = (prog / it.goal) * 100;
+    rows.push(`
+      <div class="menuMetaRow${done ? ' isDone' : ''}">
+        <span class="menuMetaIcon" aria-hidden="true">${done ? '🏁' : '📅'}</span>
+        <span class="menuMetaText">${escapeHtml(dailyLabel(it.type))}</span>
+        <span class="menuMetaValue">${fmtInt(prog)}/${fmtInt(it.goal)}</span>
+        <span class="menuMetaBar"><span class="menuMetaBarFill" style="width:${pct.toFixed(1)}%"></span></span>
+      </div>`);
+  }
+
+  // Прогресс до первого скина — только пока он действительно первый.
+  let ownedExtra = 0;
+  for (const cat of COSMETICS_CATS) ownedExtra += Math.max(0, cosmeticsOwnedCount(cat) - 1);
+  const price = cosmeticsCheapestPrice();
+  if (ownedExtra === 0 && price > 0) {
+    const have = Math.max(0, Math.floor(Number(youStyle) || 0));
+    const left = missingFor(price, have);
+    const pct = Math.max(0, Math.min(100, (have / price) * 100));
+    rows.push(`
+      <div class="menuMetaRow${left === 0 ? ' isDone' : ''}">
+        <span class="menuMetaIcon" aria-hidden="true">✨</span>
+        <span class="menuMetaText">${escapeHtml(t('match.first_skin'))}</span>
+        <span class="menuMetaValue">${left > 0 ? `${fmtInt(have)}/${fmtInt(price)}` : escapeHtml(t('cosmetics.buy'))}</span>
+        <span class="menuMetaBar"><span class="menuMetaBarFill" style="width:${pct.toFixed(1)}%"></span></span>
+      </div>`);
+  }
+
+  setSafeHtml(menuMetaEl, rows.join(''));
 }
 
 leaveBtn?.addEventListener('click', () => {
@@ -4551,16 +4686,6 @@ function renderRoomsEmpty(kind, message) {
   roomsListEl.appendChild(wrap);
 }
 
-function roomsQueryText(r) {
-  const rid = r?.id;
-  const title = String(r?.title || '').trim();
-  const humans = Number(r?.humans) || 0;
-  const limit = Number(r?.limit) || 0;
-  const names = Array.isArray(r?.names) ? r.names : [];
-  const nameCount = Number(r?.nameCount) || names.length;
-  return `${rid} ${title} ${humans}/${limit} ${nameCount} ${names.join(' ')}`.toLowerCase();
-}
-
 function updateRoomsStats(rawRooms) {
   const rooms = Array.isArray(rawRooms) ? rawRooms : [];
   const totalHumans = rooms.reduce((acc, r) => acc + (Number(r?.humans) || 0), 0);
@@ -4583,59 +4708,14 @@ function updateRoomsStats(rawRooms) {
   roomsStatsEl.textContent = `${t('rooms.stats_prefix')}: ${formatNumber(rooms.length)} • ${t('rooms.stats_online')}: ${formatNumber(totalHumans)}${wsStatusSuffix()}${status}`;
 }
 
-function sortRooms(rooms) {
-  const mode = String(roomsSortSelect?.value || 'free');
-  const out = [...rooms];
-
-  if (mode === 'id') {
-    out.sort((a, b) => (Number(a?.id) || 0) - (Number(b?.id) || 0));
-    return out;
-  }
-
-  if (mode === 'free') {
-    out.sort((a, b) => {
-      const ah = Number(a?.humans) || 0;
-      const al = Math.max(1, Number(a?.limit) || 1);
-      const bh = Number(b?.humans) || 0;
-      const bl = Math.max(1, Number(b?.limit) || 1);
-      const aFull = ah >= al;
-      const bFull = bh >= bl;
-      if (aFull !== bFull) return aFull ? 1 : -1;
-      if (bh !== ah) return bh - ah;
-      return (Number(a?.id) || 0) - (Number(b?.id) || 0);
-    });
-    return out;
-  }
-
-  if (mode === 'humans') {
-    out.sort((a, b) => {
-      const ah = Number(a?.humans) || 0;
-      const bh = Number(b?.humans) || 0;
-      if (bh !== ah) return bh - ah;
-      return (Number(a?.id) || 0) - (Number(b?.id) || 0);
-    });
-    return out;
-  }
-
-  out.sort((a, b) => {
-    const ah = Number(a?.humans) || 0;
-    const al = Math.max(1, Number(a?.limit) || 1);
-    const bh = Number(b?.humans) || 0;
-    const bl = Math.max(1, Number(b?.limit) || 1);
-    const af = ah / al;
-    const bf = bh / bl;
-    if (bf !== af) return bf - af;
-    if (bh !== ah) return bh - ah;
-    return (Number(a?.id) || 0) - (Number(b?.id) || 0);
-  });
-  return out;
-}
-
+/* Порядок и отбор комнат переехали в client_rooms.js — вместе с тестами.
+   Здесь остаётся единственное, что действительно принадлежит этому файлу:
+   откуда взять режим сортировки и строку поиска. */
 function applyRoomsFilterSort() {
-  const raw = Array.isArray(lastRooms) ? lastRooms : [];
-  const q = String(roomsSearchInput?.value || '').trim().toLowerCase();
-  const filtered = q ? raw.filter((r) => roomsQueryText(r).includes(q)) : raw;
-  return sortRooms(filtered);
+  return filterAndSortRooms(lastRooms, {
+    query: roomsSearchInput?.value,
+    sort: roomsSortSelect?.value
+  });
 }
 
 function updateRoomsUi() {
@@ -4681,6 +4761,12 @@ playBtn?.addEventListener('click', () => {
     menuNameInput?.focus();
     return;
   }
+  // Без соединения join раньше молча проглатывался — кнопка «не работала».
+  if (!wsIsConnected()) {
+    addToast('📡', t('net.join_offline'), null, null, { key: 'join_offline' });
+    connectWs();
+    return;
+  }
   userLeftRoom = false;
   trackEvent('quick_start');
   wsSend('join', { mode: 'auto' });
@@ -4692,6 +4778,11 @@ joinRoomBtn?.addEventListener('click', () => {
   if (!nm) {
     updateMenuNameUi();
     menuNameInput?.focus();
+    return;
+  }
+  if (!wsIsConnected()) {
+    addToast('📡', t('net.join_offline'), null, null, { key: 'join_offline' });
+    connectWs();
     return;
   }
   userLeftRoom = false;
@@ -4830,8 +4921,13 @@ function createLeaderboardRow(p) {
 }
 
 function computeTopSorted(players) {
-  const ordered = [...(players || [])].sort((a, b) => (b.p || 0) - (a.p || 0) || (b.s || 0) - (a.s || 0));
-  return ordered;
+  return sortPlayersByScore(players);
+}
+
+/* Личный рекорд по доле карты живёт в client_stats.js вместе с тестами.
+   Здесь остаётся только подстановка хранилища. */
+function commitBestPct(pct) {
+  return commitBest(pct, localStorage);
 }
 
 function renderDeathStats() {
@@ -4910,6 +5006,11 @@ function renderDeathStats() {
     `
       : '';
 
+  // Рекорд считаем один раз на показ оверлея: renderDeathStats зовётся и на
+  // обновлениях состояния, поэтому «новый рекорд» сохраняется в deathBestShown.
+  const bestInfo = deathBestShown || commitBestPct(pct);
+  deathBestShown = bestInfo;
+
   setSafeHtml(
     deathStatsEl,
     `
@@ -4926,6 +5027,17 @@ function renderDeathStats() {
         <div class="deathStatLabel">${escapeHtml(t('death.kills'))}</div>
         <div class="deathStatValue">${fmtInt(youKills)}</div>
       </div>
+      ${
+        // До первого осмысленного забега рекорда нет, и «Рекорд зоны 0,0%» —
+        // не мотиватор, а насмешка. Карточка появляется вместе с рекордом.
+        bestInfo.best > 0
+          ? `
+      <div class="deathStat${bestInfo.isRecord ? ' deathStatRecord' : ''}">
+        <div class="deathStatLabel">${escapeHtml(bestInfo.isRecord ? t('death.new_record') : t('death.best_zone'))}</div>
+        <div class="deathStatValue">${fmtPct1(bestInfo.best)}</div>
+      </div>`
+          : ''
+      }
     </div>
 
     <div class="toastSub">${place && place !== '—' && place.startsWith('1/') ? escapeHtml(t('death.top1')) : escapeHtml(t('death.try_again'))}</div>
@@ -5190,9 +5302,7 @@ function toggleEmojiPanel(open) {
   if (shouldOpen) chatOpenUntil = performance.now() + 12000;
   if (shouldOpen) {
     renderEmojiRecent();
-    emojiSearch?.focus();
   } else {
-    emojiSearch && (emojiSearch.value = '');
     renderEmojiGrid(EMOJIS);
   }
 }
@@ -5274,20 +5384,6 @@ setSafeEmojiHtml(emojiBtn, '\u{1F600}');
 
 emojiCloseBtn?.addEventListener('click', () => {
   toggleEmojiPanel(false);
-});
-
-emojiSearch?.addEventListener('input', () => {
-  const q = String(emojiSearch.value || '').trim().toLowerCase();
-  if (!q) {
-    renderEmojiGrid(EMOJIS);
-    return;
-  }
-
-  const filtered = EMOJIS.filter((e) => {
-    if (String(e).includes(q)) return true;
-    return getEmojiCode(e).includes(q);
-  });
-  renderEmojiGrid(filtered);
 });
 
 function setChatCollapsed(v) {
@@ -5493,10 +5589,7 @@ nameInput.addEventListener('keydown', (e) => {
 });
 
 function formatTime(t) {
-  const d = new Date(t);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
+  return formatClock(t);
 }
 
 function addChatLine(msg) {
@@ -5916,7 +6009,12 @@ canvas.addEventListener(
     swipePointerId = e.pointerId;
     swipeX0 = e.clientX;
     swipeY0 = e.clientY;
-    canvas.setPointerCapture?.(e.pointerId);
+    try {
+      canvas.setPointerCapture?.(e.pointerId);
+    } catch {
+      // Захват — оптимизация: свайп работает и без него, а setPointerCapture
+      // кидает NotFoundError, если указатель уже отпущен.
+    }
     e.preventDefault();
   },
   { passive: false }
@@ -6367,8 +6465,6 @@ function hideCosmeticsOverlay() {
   overlayManager.close('cosmetics');
   cosmeticsOpClear();
   setCosmeticsStatus('', '');
-  cosmeticsHoverId = null;
-  cosmeticsHoverCat = null;
   syncOverlayUiState();
   if (cosmeticsPreviewRaf) {
     try {
@@ -6396,17 +6492,10 @@ function scheduleCosmeticsPreviewAnim() {
   cosmeticsPreviewRaf = requestAnimationFrame(tick);
 }
 
-// Потолок id косметики: маска инвентаря — uint8, ровно 8 слотов (0..7).
-const COSMETICS_MAX_ID = 7;
-// Покупаемые категории. `title` сюда НЕ входит: титулы не продаются.
-const COSMETICS_CATS = ['terr', 'seg', 'head', 'death', 'capturefx', 'nameplate', 'frame'];
+/* COSMETICS_MAX_ID, COSMETICS_CATS, запасной прайс, bitHas и лестница тиров
+   переехали в client_cos_model.js — там же тесты на цены и владение. */
 // Порядок вкладок магазина: сверху то, что занимает больше всего экрана.
 const COSMETICS_TABS = [...COSMETICS_CATS, 'title'];
-
-function bitHas(mask, id) {
-  const bit = 1 << (Number(id) || 0);
-  return (Number(mask) & bit) !== 0;
-}
 
 function cosmeticsMaskForCat(cat) {
   if (cat === 'capturefx') return youCosInvCaptureFx;
@@ -6428,46 +6517,15 @@ function cosmeticsEqForCat(cat) {
   return youCosEqFrame;
 }
 
-// Фолбэк-цены по id, если сервер ещё не прислал `cosmeticsPrices` в hello.
-const COSMETICS_FALLBACK_PRICES = {
-  frame: [0, 30, 45, 85, 115, 200, 330, 550],
-  nameplate: [0, 40, 60, 105, 140, 240, 390, 640],
-  seg: [0, 160, 55, 210, 360, 90, 580, 950],
-  head: [0, 50, 75, 135, 175, 300, 500, 800],
-  capturefx: [0, 65, 100, 180, 240, 410, 660, 1050],
-  terr: [0, 60, 90, 150, 220, 360, 600, 980],
-  death: [0, 55, 85, 140, 210, 340, 560, 900]
-};
-
 // Сервер шлёт массив цен по id: {"frame":[0,30,45,...], ...}.
 // Старый формат (одно число на категорию) поддерживаем как деградацию.
 function cosmeticsPrice(cat, id) {
-  const c = String(cat || '');
-  const i = Math.max(0, Math.min(COSMETICS_MAX_ID, Number(id) || 0));
-  if (cosmeticsPrices && typeof cosmeticsPrices === 'object') {
-    const row = cosmeticsPrices[c];
-    if (Array.isArray(row)) {
-      const v = Number(row[i]);
-      if (Number.isFinite(v) && v >= 0) return v;
-    } else {
-      const v = Number(row);
-      if (Number.isFinite(v) && v >= 0) return i === 0 ? 0 : v;
-    }
-  }
-  const fb = COSMETICS_FALLBACK_PRICES[c] || COSMETICS_FALLBACK_PRICES.frame;
-  const v = Number(fb[i]);
-  return Number.isFinite(v) ? v : 0;
+  return priceOf(cat, id, cosmeticsPrices);
 }
 
 // D11: тир считается из цены — единая лестница редкости для всех категорий.
 function cosmeticsTier(price) {
-  const p = Math.max(0, Number(price) || 0);
-  if (p <= 0) return 'base';
-  if (p <= 100) return 'common';
-  if (p <= 250) return 'rare';
-  if (p <= 450) return 'epic';
-  if (p <= 700) return 'legendary';
-  return 'mythic';
+  return tierOf(price);
 }
 
 function cosmeticsTierLabel(tier) {
@@ -6476,23 +6534,11 @@ function cosmeticsTierLabel(tier) {
 
 // Самый дешёвый платный предмет во всём магазине — крючок «до первого скина».
 function cosmeticsCheapestPrice() {
-  let best = Infinity;
-  for (const cat of COSMETICS_CATS) {
-    for (let id = 1; id <= COSMETICS_MAX_ID; id++) {
-      const p = cosmeticsPrice(cat, id);
-      if (p > 0 && p < best) best = p;
-    }
-  }
-  return Number.isFinite(best) ? best : 0;
+  return cheapestPrice(cosmeticsPrices);
 }
 
 function cosmeticsOwnedCount(cat) {
-  const mask = cosmeticsMaskForCat(cat);
-  let n = 0;
-  for (let id = 0; id <= COSMETICS_MAX_ID; id++) {
-    if (bitHas(mask, id)) n++;
-  }
-  return n;
+  return ownedCountFromMask(cosmeticsMaskForCat(cat));
 }
 
 function cosmeticsLabel(cat) {
@@ -6578,10 +6624,9 @@ function cosTitleProgress(id) {
 }
 
 /* C3: «37/100», «0/100 000» — разряды через УЗКИЙ НЕРАЗРЫВНЫЙ пробел (U+202F).
-   Обычный пробел дал бы перенос строки посреди числа. */
+   Сама группировка и константа разделителя — в client_format.js. */
 function cosFormatCount(n) {
-  const v = Math.max(0, Math.floor(Number(n) || 0));
-  return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return formatGroupedCount(n);
 }
 
 function cosTitlesUnlockedCount() {
@@ -6644,10 +6689,8 @@ function renderCosmeticsTitles() {
     card.addEventListener('click', () => {
       cosmeticsSelectItem(id);
     });
-    card.addEventListener('mouseenter', () => cosmeticsSetHover('title', id));
-    card.addEventListener('focus', () => cosmeticsSetHover('title', id));
-    card.addEventListener('mouseleave', () => cosmeticsSetHover(null, null));
-    card.addEventListener('blur', () => cosmeticsSetHover(null, null));
+    // Фокус с клавиатуры равен выбору: Tab по списку сразу меняет превью.
+    card.addEventListener('focus', () => cosmeticsSelectItem(id));
 
     const medal = document.createElement('span');
     medal.className = 'titleMedal';
@@ -6775,6 +6818,10 @@ function setYouStyle(v) {
       syncCosmeticsUi();
     } catch {}
   }
+  // Прогресс «до первого скина» на экране меню считается от баланса.
+  try {
+    renderMenuMeta();
+  } catch {}
 }
 
 function cosmeticsGetStateObject() {
@@ -7029,8 +7076,6 @@ function syncCosmeticsUi() {
       b.setAttribute('aria-selected', cid === cosmeticsCat ? 'true' : 'false');
       b.addEventListener('click', () => {
         cosmeticsCat = cid;
-        cosmeticsHoverId = null;
-        cosmeticsHoverCat = null;
         cosmeticsSelId = cid === 'title' ? Math.max(0, Number(youTitleId) || 0) : (Number(cosmeticsEqForCat(cid)) || 0);
         syncCosmeticsUi();
       });
@@ -7100,13 +7145,18 @@ function syncCosmeticsUi() {
       if (tier !== lastTier) {
         lastTier = tier;
         const sep = document.createElement('div');
-        sep.className = `cosmeticsTierSep tier${tier.charAt(0).toUpperCase()}${tier.slice(1)}`;
+        sep.className = `cosmeticsTierSep ${tierClass(tier)}`;
         sep.textContent = cosmeticsTierLabel(tier);
         items.push(sep);
       }
 
       const card = document.createElement('div');
-      card.className = 'cosmeticsItem' + (cosmeticsSelId === id ? ' isSelected' : '');
+      /* Модификатор тира на самой карточке. Его не было вовсе: класс вешался
+         только на разделитель групп, поэтому вся лестница редкости в CSS была
+         мёртвой — полоса тира, цвет цены, свечение legendary и анимированная
+         рамка mythic не рисовались ни разу, хотя правила для них написаны
+         (style.css, блок D11) и комментарий там это прямо обещает. */
+      card.className = `cosmeticsItem ${tierClass(tier)}` + (cosmeticsSelId === id ? ' isSelected' : '');
       // K7: выбор предмета раньше пересобирал весь список, и фокус улетал в
       // <body>. Теперь у карточки есть стабильный id, а выбор только
       // переключает класс на уже существующих карточках.
@@ -7118,12 +7168,8 @@ function syncCosmeticsUi() {
       card.addEventListener('click', () => {
         cosmeticsSelectItem(id);
       });
-      // Превью следует за наведением и за фокусом с клавиатуры.
-      const catNow = cosmeticsCat;
-      card.addEventListener('mouseenter', () => cosmeticsSetHover(catNow, id));
-      card.addEventListener('focus', () => cosmeticsSetHover(catNow, id));
-      card.addEventListener('mouseleave', () => cosmeticsSetHover(null, null));
-      card.addEventListener('blur', () => cosmeticsSetHover(null, null));
+      // Фокус с клавиатуры равен выбору: Tab по списку сразу меняет превью.
+      card.addEventListener('focus', () => cosmeticsSelectItem(id));
       card.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -7150,7 +7196,7 @@ function syncCosmeticsUi() {
          .cosmeticsItemWhere (то же самое стоит один раз в шапке категории,
          #cosmeticsWhere) и .cosmeticsItemSub.isBlocked («до покупки N» дублирует
          ценник и подпись кнопки). Больше их не создаём вовсе. */
-      const missing = Math.max(0, Math.ceil(price - balance));
+      const missing = missingFor(price, balance);
       let sub = null;
       if (!owned && missing > 0) {
         // текста нет: он целиком в ценнике и на кнопке
@@ -7324,8 +7370,6 @@ function syncCosmeticsUi() {
    не строился или отрисован пустой заглушкой). */
 function cosmeticsSelectItem(id) {
   const next = Number(id) || 0;
-  cosmeticsHoverId = null;
-  cosmeticsHoverCat = null;
   if (cosmeticsSelId === next) {
     renderCosmeticsPreview();
     return;
@@ -7348,19 +7392,7 @@ function cosmeticsPreviewId() {
   const clamp = cosmeticsCat === 'title'
     ? (v) => Math.max(0, Math.min(COS_TITLE_MAX, Number(v) || 0))
     : cosClampId;
-  if (cosmeticsHoverId != null && cosmeticsHoverCat === cosmeticsCat) return clamp(cosmeticsHoverId);
   return clamp(cosmeticsSelId);
-}
-
-function cosmeticsSetHover(cat, id) {
-  const nextCat = id == null ? null : String(cat);
-  const nextId = id == null
-    ? null
-    : (nextCat === 'title' ? Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0)) : cosClampId(id));
-  if (cosmeticsHoverCat === nextCat && cosmeticsHoverId === nextId) return;
-  cosmeticsHoverCat = nextCat;
-  cosmeticsHoverId = nextId;
-  renderCosmeticsPreview();
 }
 
 function renderCosmeticsPreview() {
@@ -7379,6 +7411,11 @@ function renderCosmeticsPreview() {
   const selId = cosmeticsPreviewId();
 
   const setHint = () => {
+    // Снимаем клип сцены (см. save/clip после drawCosmeticsFieldBackdrop).
+    // Ветка 'frame' возвращается раньше клипа — там restore не нужен, но
+    // избыточный restore на чистом стеке безопасен только при парности,
+    // поэтому в 'frame' setHint вызывается до установки клипа.
+    if (cosmeticsCat !== 'frame') ctx2.restore();
     if (!cosmeticsHintEl) return;
     // C11: раньше сюда дописывалось «где это видно» — слово в слово то же, что
     // уже стоит в #cosmeticsWhere прямо над списком. Оставляем только предмет.
@@ -7397,6 +7434,14 @@ function renderCosmeticsPreview() {
   const fw = w - fieldPad * 2;
   const fh = h - fieldPad * 2;
   drawCosmeticsFieldBackdrop(ctx2, fx, fy, fw, fh);
+
+  // Сцена не имеет права рисовать за пределами поля: хвост змейки раньше
+  // вылезал на рамку и читался как мусор. setHint() ниже снимает клип —
+  // он вызывается последним в каждой ветке.
+  ctx2.save();
+  ctx2.beginPath();
+  ctx2.rect(fx, fy, fw, fh);
+  ctx2.clip();
 
   const cell = Math.min(fw, fh) * 0.12;
   const scell = Math.max(14, Math.round(cell * 0.85));
@@ -7606,6 +7651,13 @@ function renderMenuSkinPreview() {
   const fh = cssH - pad * 2;
   drawCosmeticsFieldBackdrop(c, fx, fy, fw, fh);
 
+  // Хвост змейки заезжает из-за левого края поля — клип не даёт ему
+  // вылезти на рамку и за пределы подложки.
+  c.save();
+  c.beginPath();
+  c.rect(fx, fy, fw, fh);
+  c.clip();
+
   const scell = Math.max(12, Math.round(Math.min(fw, fh) * 0.13));
 
   // Территория — справа, змейка идёт к ней слева.
@@ -7619,7 +7671,9 @@ function renderMenuSkinPreview() {
 
   const period = 2600;
   const p = reduceMotion ? 0.45 : (now % period) / period;
-  const hx = fx + fw * (0.16 + 0.26 * Math.min(1, p / 0.55));
+  // Змейка доезжает до кромки зоны к моменту вспышки захвата (0.52 fw),
+  // а не замирает в пустоте на 0.42, как раньше.
+  const hx = fx + fw * (0.18 + 0.33 * Math.min(1, p / 0.60));
   const hy = Math.round(fy + fh * 0.62);
 
   drawCosmeticsSnake(c, hx, hy, scell, you, youCosEqSeg, youCosEqHead, baseC, 6);
@@ -7645,6 +7699,8 @@ function renderMenuSkinPreview() {
       burstP
     );
   }
+
+  c.restore();
 }
 
 function menuSkinPreviewTick(ts) {
@@ -7737,12 +7793,12 @@ function drawCosmeticsFramesScene(ctx2, w, h, frameId) {
 function drawCosmeticsFieldBackdrop(ctx2, x, y, w, h) {
   ctx2.save();
   const bg = ctx2.createLinearGradient(x, y, x + w, y + h);
-  bg.addColorStop(0, '#070a0f');
-  bg.addColorStop(1, '#0b0f14');
+  bg.addColorStop(0, '#05100f');
+  bg.addColorStop(1, '#0a0714');
   ctx2.fillStyle = bg;
   ctx2.fillRect(x, y, w, h);
 
-  ctx2.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx2.strokeStyle = 'rgba(120,220,190,0.06)';
   ctx2.lineWidth = 1;
   const step = Math.max(16, Math.min(28, Math.round(Math.min(w, h) * 0.11)));
   for (let px = x + step; px < x + w; px += step) {
@@ -7859,34 +7915,19 @@ function flushStyleToast() {
   });
 }
 
+/* Обратный отсчёт: арифметика — в client_format.js, здесь только чтение
+   состояния (tickMs, последний известный тик и когда он пришёл). */
 function approxNowTick() {
-  if (!tickMs) return null;
-  if (!lastEventsTick || !lastEventsAt) return null;
-  const dtMs = Date.now() - lastEventsAt;
-  return lastEventsTick + Math.max(0, dtMs / tickMs);
+  return approxTickNow({ tickMs, lastEventsTick, lastEventsAt, nowMs: Date.now() });
 }
 
 function formatTickRemain(untilTick) {
-  const ut = Number(untilTick) || 0;
-  if (!ut || !tickMs) return '';
-  const nt = approxNowTick();
-  if (nt == null) return '';
-  const remTicks = ut - nt;
-  const remMs = Math.max(0, remTicks * tickMs);
-  const sec = Math.ceil(remMs / 1000);
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
+  return formatRemainMs(remainMsToTick(untilTick, approxNowTick(), tickMs));
 }
 
 function tickRemainSeconds(untilTick) {
-  const ut = Number(untilTick) || 0;
-  if (!ut || !tickMs) return null;
-  const nt = approxNowTick();
-  if (nt == null) return null;
-  const remTicks = ut - nt;
-  const remMs = Math.max(0, remTicks * tickMs);
-  return remMs / 1000;
+  const ms = remainMsToTick(untilTick, approxNowTick(), tickMs);
+  return ms == null ? null : ms / 1000;
 }
 
 function ensureSettingsState() {
@@ -7902,6 +7943,7 @@ function ensureSettingsState() {
       soundEnabled = s.soundEnabled ?? soundEnabled;
       soundVolume = s.soundVolume ?? soundVolume;
       muteOnBlur = s.muteOnBlur ?? muteOnBlur;
+      hapticsEnabled = s.hapticsEnabled ?? hapticsEnabled;
       hudBrightness = s.hudBrightness ?? hudBrightness;
       hudContrast = s.hudContrast ?? hudContrast;
       hudPanelOpacity = s.hudPanelOpacity ?? hudPanelOpacity;
@@ -7925,9 +7967,12 @@ function ensureSettingsState() {
   if (soundEnabledInput) soundEnabledInput.checked = !!soundEnabled;
   if (soundVolumeInput) soundVolumeInput.value = String(soundVolume);
   if (muteOnBlurInput) muteOnBlurInput.checked = !!muteOnBlur;
+  if (hapticsInput) hapticsInput.checked = !!hapticsEnabled;
   if (hudBrightnessInput) hudBrightnessInput.value = String(hudBrightness);
   if (hudContrastInput) hudContrastInput.value = String(hudContrast);
   if (hudPanelOpacityInput) hudPanelOpacityInput.value = String(hudPanelOpacity);
+
+  syncHapticsRowUi();
 
   if (perfEl) perfEl.style.display = perfEnabled ? '' : 'none';
   applyPerfUi();
@@ -7949,6 +7994,7 @@ function saveSettingsState() {
         soundEnabled,
         soundVolume,
         muteOnBlur,
+        hapticsEnabled,
         hudBrightness,
         hudContrast,
         hudPanelOpacity,
@@ -7968,6 +8014,7 @@ function resetSettingsState() {
   soundEnabled = true;
   soundVolume = 0.7;
   muteOnBlur = true;
+  hapticsEnabled = true;
   hudBrightness = 1;
   hudContrast = 1;
   hudPanelOpacity = 0.82;
@@ -7983,6 +8030,7 @@ function resetSettingsState() {
   if (soundEnabledInput) soundEnabledInput.checked = !!soundEnabled;
   if (soundVolumeInput) soundVolumeInput.value = String(soundVolume);
   if (muteOnBlurInput) muteOnBlurInput.checked = !!muteOnBlur;
+  if (hapticsInput) hapticsInput.checked = !!hapticsEnabled;
   if (hudBrightnessInput) hudBrightnessInput.value = String(hudBrightness);
   if (hudContrastInput) hudContrastInput.value = String(hudContrast);
   if (hudPanelOpacityInput) hudPanelOpacityInput.value = String(hudPanelOpacity);
@@ -8070,15 +8118,6 @@ function bindSettingsUi() {
     sfx.ui();
   });
 
-  if (hudDensitySelect) {
-    try {
-      hudDensitySelect.value = hudDensity;
-    } catch {}
-    hudDensitySelect.addEventListener('change', () => {
-      applyHudDensity(hudDensitySelect.value);
-    });
-  }
-
   settingsBtn?.addEventListener('click', () => {
     showSettingsOverlay();
   });
@@ -8128,6 +8167,13 @@ function bindSettingsUi() {
     muteOnBlur = !!muteOnBlurInput.checked;
     if (!muteOnBlur) soundMutedByBlur = false;
     saveSettingsState();
+  });
+
+  hapticsInput?.addEventListener('change', () => {
+    hapticsEnabled = !!hapticsInput.checked;
+    saveSettingsState();
+    // Отклик на сам переключатель: игрок сразу чувствует, что именно включил.
+    if (hapticsEnabled) vibrate(30);
   });
 
   hudBrightnessInput?.addEventListener('input', () => {
@@ -8412,27 +8458,16 @@ function renderMetaHud() {
   const obKills = obUnlocked('bounty');
   const obDaily = obSecondMatchPlus();
 
+  /* Мутатор раунда и баунти отсюда убраны: оба уже стоят в верхней полосе
+     (#topHudPhase и #topHudBounty), причём там они и нужнее — это события с
+     обратным отсчётом, требующие немедленной реакции, а полоса видна всегда.
+     Дублирование стоило правой панели двух строк, а полосе — ничего. */
   const matchRows = [];
-  if (mutatorType && obBonus) {
-    const mt = mutatorLabel(mutatorType);
-    const rem = formatTickRemain(mutatorUntil);
-    if (mt) {
-      const sec = tickRemainSeconds(mutatorUntil);
-      addRow(matchRows, infoPack().labels.round, rem ? `${mt} (${rem})` : mt, sec != null && sec <= 6);
-    }
-  }
-  if (bountyTarget && obKills) {
-    const bn = displayNameOf(bountyTarget);
-    const rem = formatTickRemain(bountyUntil);
-    const sec = tickRemainSeconds(bountyUntil);
-    addRow(matchRows, infoPack().labels.bounty, rem ? `${bn} (${rem})` : bn, sec != null && sec <= 6);
-  }
 
   const fightRows = [];
-  if (obKills) {
-    addRow(fightRows, t('meta.kills'), String(youKills));
-    if (youStreak >= 2) addRow(fightRows, t('meta.streak'), `x${youStreak}`);
-  }
+  // «Киллы» живут в #topHudKills. Здесь остаётся только серия: её в верхней
+  // полосе нет, а она объясняет, откуда взялся множитель очков.
+  if (obKills && youStreak >= 2) addRow(fightRows, t('meta.streak'), `x${youStreak}`);
   const buffs = [];
   if (youShield && obBonus) buffs.push(infoName(infoPack().powerups, 1, powerupLabel(1)));
   if (obBonus && youSpeedUntilTick && lastEventsTick && youSpeedUntilTick > lastEventsTick) {
@@ -8443,16 +8478,16 @@ function renderMetaHud() {
   }
   if (buffs.length) addRow(fightRows, infoPack().labels.buffs, buffs.join(' • '));
 
+  /* Панель показывает ТОЛЬКО то, чего нет в верхней полосе.
+     Убраны как дубли (замер на живом экране, 1076x970):
+       - «Цель: захват территории» — цель матча не меняется никогда, а слово
+         «Цель» и без того стоит заголовком этой же секции;
+       - «Зона: N • M%»  — ровно это показывают #topHudPct и #topHudCells;
+       - «До конца: м:сс» — это #topHudTime;
+       - «Киллы: N» ниже — это #topHudKills.
+     Верхняя полоса видна всегда и читается одним взглядом; правая панель —
+     для того, что в строку не помещается. */
   const mainRows = [];
-  addRow(mainRows, t('hud.objective'), t('hud.objective_capture'));
-  if (started && lastState) addProgressRow(mainRows, t('match.zone'), pct, String(cells), `${pct.toFixed(1)}%`);
-  if (matchEndTick) {
-    const rem = formatTickRemain(matchEndTick);
-    const sec = tickRemainSeconds(matchEndTick);
-    addRow(mainRows, t('meta.until_end'), rem || '—', sec != null && sec <= 10);
-  }
-  // I6: контракт живёт только в чипе #topHudContract. Третья копия здесь
-  // (плюс копия в строке таймера) просто съедала место в HUD.
   // Стиль как валюта имеет смысл только вместе с контрактом, который его даёт.
   if (youStyle && obUnlocked('contract')) addRow(mainRows, infoPack().labels.style, String(youStyle));
 
@@ -8472,7 +8507,9 @@ function renderMetaHud() {
     if (!rows.length) return;
     detailSections.push({ title, rows });
   };
-  addDetailSection(t('right.match'), matchRows);
+  // Заголовок «Матч» уже стоит в summary этого <details> — внутри он был
+  // третьей копией того же слова. Секция про мутатор и баунти — это раунд.
+  addDetailSection(t('meta.round'), matchRows);
   addDetailSection(t('meta.fight'), fightRows);
   addDetailSection(t('meta.tasks'), dailyRows);
 
@@ -8503,7 +8540,7 @@ function renderMetaHud() {
   metaHudEl.style.display = '';
   const frag = document.createDocumentFragment();
   if (mainRows.length) {
-    frag.appendChild(buildSection(t('hud.objective'), mainRows));
+    frag.appendChild(buildSection(t('meta.wallet'), mainRows));
   }
 
   if (detailSections.length) {
@@ -8538,12 +8575,8 @@ function renderTeamHud() {
     return;
   }
   const ordered = computeTopSorted(lastState.players);
-  const meIndex = ordered.findIndex((p) => p.n === you);
-  const me = meIndex >= 0 ? ordered[meIndex] : null;
-  const cells = Number(me?.s) || 0;
-  const pct = mapCells ? (cells / mapCells) * 100 : 0;
-  const place = meIndex >= 0 ? `${meIndex + 1}/${ordered.length}` : '—';
-
+  // cells/pct/place отсюда убраны вместе со строками «Место» и «Очки»:
+  // ровно эти числа стоят в #topHudPlace, который виден всегда.
   const small = window.innerWidth <= 720;
   const maxRows = small ? 10 : 12;
   const topN = ordered.slice(0, maxRows);
@@ -8567,16 +8600,15 @@ function renderTeamHud() {
     })
     .join('');
 
+  /* Панель — это только таблица. Убрано:
+       - заголовок «Команда»: он уже стоит в summary этого же <details>;
+       - строки «Место» и «Очки»: обе цифры есть в #topHudPlace;
+       - подпись «Топ-5» над таблицей на 12 строк — она врала. Сколько строк
+         показано, видно по самой таблице, отдельная подпись не нужна. */
   setSafeHtml(
     teamHudEl,
     `
     <div class="metaSection">
-      <div class="metaSectionTitle">${escapeHtml(t('right.team'))}</div>
-      <div class="metaRow"><span class="metaLabel">${escapeHtml(t('death.place'))}:</span><span class="metaValue">${escapeHtml(place)}</span></div>
-      <div class="metaRow"><span class="metaLabel">${escapeHtml(t('death.points'))}:</span><span class="metaValue">${escapeHtml(String(Number(me?.p) || 0))}</span></div>
-    </div>
-    <div class="metaSection">
-      <div class="metaSectionTitle">${escapeHtml(t('death.top'))}</div>
       <table class="teamTable">
         <thead>
           <tr>
@@ -8860,6 +8892,7 @@ function handleStateBinary(buf) {
           sfx.kill();
           fxFlashScreen([255, 96, 96], 0.75);
           comboBump();
+          vibrate(35);
           // K5: первое убийство — открываем контракты.
           obFireEvent('kill');
         }
@@ -9762,7 +9795,9 @@ function onState(s) {
       youAlive = false;
       lastDirSent = null;
       youStreak = 0;
-      showDeathOverlay();
+      // Момент смерти стоит увидеть: модалка мгновенно накрывала кадр, в
+      // котором игрока убили. Держим паузу, пока идёт hitstop + вспышка.
+      beginDeathSlowMo();
     }
   }
 }
@@ -9862,11 +9897,7 @@ function drawMinimap() {
 }
 
 function formatRate(bps) {
-  const v = Number(bps);
-  if (!Number.isFinite(v) || v < 0) return '…';
-  const kb = v / 1024;
-  if (kb >= 1024) return `${(kb / 1024).toFixed(1)}MB/s`;
-  return `${kb.toFixed(1)}KB/s`;
+  return formatRateOf(bps);
 }
 
 function perfValueSpan(text, bad) {
@@ -10035,10 +10066,12 @@ function draw() {
     const key = `${cw}x${ch}x${viewH}`;
     if (bgGradCacheKey !== key) {
       bgGradCacheKey = key;
+      // Волна 9: поле живёт в той же гамме, что и оверлеи, — «неоновый сад».
+      // Изумруд в левом верхнем углу, фиолет в правом нижнем, как в .overlay.
       const bg = ctx.createLinearGradient(0, 0, cw, ch);
-      bg.addColorStop(0, '#070a0f');
-      bg.addColorStop(0.55, '#0b0f14');
-      bg.addColorStop(1, '#070812');
+      bg.addColorStop(0, '#05100f');
+      bg.addColorStop(0.55, '#060a12');
+      bg.addColorStop(1, '#0a0714');
       bgGradLinear = bg;
 
       const vg = ctx.createRadialGradient(cw * 0.52, viewH * 0.46, Math.min(cw, viewH) * 0.25, cw * 0.52, viewH * 0.46, Math.min(cw, viewH) * 0.85);
@@ -10327,7 +10360,8 @@ function draw() {
   }
 
   {
-    ctx.strokeStyle = 'rgba(255,255,255,0.045)';
+    // Сетка в бренд-гамме: чистый белый на #060a12 читался холодным «дребезгом».
+    ctx.strokeStyle = 'rgba(120,220,190,0.055)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     const step = cell >= 16 ? 1 : 2;

@@ -1,0 +1,577 @@
+/* Волны 9-10: редизайн, мета, геймфил, доступность.
+   Часть общего каскада, файл 06-redesign.css. ПОРЯДОК ФАЙЛОВ ЗНАЧИМ:
+   поздние правила перекрывают ранние порядком, а не !important,
+   поэтому index.html подключает их строго по номеру. */
+
+/* ==========================================================================
+   ВОЛНА 9. РЕДИЗАЙН + МОБИЛЬНАЯ ИГРАБЕЛЬНОСТЬ.
+   Единый визуальный язык: тёмный «неоновый сад» — изумрудный бренд-акцент
+   (--brand) + циановый вторичный (--brand2). Красный остаётся ТОЛЬКО
+   опасности/смерти (--accent). Блок идёт последним и перекрывает ранние
+   правила порядком, а не !important.
+   ========================================================================== */
+
+:root,
+html[data-theme],
+html[data-theme="light"] {
+  --bg: #060a12;
+  --brand: #2ee6a0;
+  --brand2: #4cc9f0;
+  --accent2: rgba(76, 201, 240, 0.88);
+  --focus: rgba(76, 201, 240, 0.92);
+  --panel: rgba(9, 14, 22, 0.80);
+  --panel2: rgba(6, 11, 19, 0.58);
+  --border: rgba(148, 163, 184, 0.18);
+  --border2: rgba(148, 163, 184, 0.13);
+  --btn: rgba(148, 163, 184, 0.10);
+  --btn2: rgba(148, 163, 184, 0.17);
+  --grid: rgba(255, 255, 255, 0.045);
+  --r-lg: 18px;
+}
+
+/* --- Мобильные свайпы: без touch-action браузер сам съедает pointermove ----
+   Главная причина «на телефоне змейка не слушается свайпов»: жест уходил в
+   пан/pull-to-refresh, и canvas получал pointercancel вместо движения. */
+#game {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* --- Оверлеи: глубина вместо красной засветки ------------------------------ */
+.overlay,
+.deathOverlay,
+.matchOverlay {
+  background:
+    radial-gradient(1000px 620px at 18% 12%, rgba(46, 230, 160, 0.10), transparent 55%),
+    radial-gradient(900px 560px at 84% 88%, rgba(124, 92, 255, 0.10), transparent 55%),
+    rgba(3, 6, 12, 0.66);
+  backdrop-filter: blur(14px);
+}
+
+.overlay .card {
+  background: linear-gradient(180deg, rgba(15, 23, 36, 0.94), rgba(8, 13, 21, 0.96));
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 20px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.overlayTitle,
+.overlay .card .overlayTitle {
+  background: linear-gradient(120deg, #f8fafc 0%, var(--brand) 55%, var(--brand2) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -1px;
+}
+
+.overlayKicker {
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--border2));
+  background: color-mix(in srgb, var(--brand) 10%, rgba(0, 0, 0, 0.25));
+  color: color-mix(in srgb, var(--brand) 60%, var(--text));
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+/* --- Панели ---------------------------------------------------------------- */
+.menuPanel {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 16px;
+}
+
+.menuPanelPrimary {
+  border-color: color-mix(in srgb, var(--brand) 32%, var(--border2));
+  background:
+    radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--brand) 9%, transparent), transparent 62%),
+    rgba(255, 255, 255, 0.02);
+}
+
+.menuHowTo {
+  border-color: color-mix(in srgb, var(--brand2) 24%, var(--border2));
+  background: linear-gradient(180deg, rgba(76, 201, 240, 0.07), rgba(0, 0, 0, 0.18));
+}
+
+.menuHowToStep::before {
+  border-color: color-mix(in srgb, var(--brand) 50%, var(--border2));
+  background: color-mix(in srgb, var(--brand) 16%, rgba(0, 0, 0, 0.3));
+}
+
+.menuSkinPreviewWrap,
+.cosmeticsPreviewWrap {
+  border-color: color-mix(in srgb, var(--brand2) 22%, var(--border2));
+  background: radial-gradient(520px 260px at 50% 30%, rgba(76, 201, 240, 0.08), rgba(0, 0, 0, 0.30));
+}
+
+/* --- Кнопки ---------------------------------------------------------------- */
+.btnPrimary {
+  border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent);
+  background: linear-gradient(135deg, #2bd694, #3fb9dd);
+  color: #04170f;
+  text-shadow: none;
+}
+
+.btnPrimary:hover {
+  filter: brightness(1.07) saturate(1.05);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.45;
+  filter: saturate(0.4);
+}
+
+.btnPlay,
+.menuActions .btnPlay,
+.overlay .card .btnPlay {
+  min-height: 58px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--brand) 65%, transparent);
+  background: linear-gradient(135deg, var(--brand), var(--brand2));
+  color: #03130c;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  box-shadow: 0 12px 36px rgba(46, 230, 160, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.btnPlay:hover {
+  box-shadow: 0 16px 44px rgba(46, 230, 160, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* Спиннер isLoading на ярком фоне — тёмный, а не белый */
+.btnPrimary.isLoading::before,
+.btnPlay.isLoading::before {
+  border-color: rgba(4, 23, 15, 0.35);
+  border-top-color: rgba(4, 23, 15, 0.95);
+}
+
+.btnSecondary,
+.btnGhost,
+.iconBtn {
+  background: rgba(148, 163, 184, 0.08);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+.btnSecondary:hover,
+.btnGhost:hover,
+.iconBtn:hover {
+  background: rgba(148, 163, 184, 0.16);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+/* --- Поля ввода ------------------------------------------------------------ */
+.menuPanelBody input,
+.menuPanelBody select,
+.roomsControls input,
+.roomsControls select,
+.toastRow input,
+#nameInput {
+  background: rgba(3, 8, 16, 0.55);
+  border-color: rgba(148, 163, 184, 0.20);
+  border-radius: 12px;
+}
+
+/* --- Комнаты --------------------------------------------------------------- */
+.roomRow {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.roomRow.selected {
+  border-color: color-mix(in srgb, var(--brand2) 60%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand2) 14%, transparent);
+}
+
+/* --- Игровой HUD: нейтральное стекло вместо красного градиента ------------- */
+body.inGame #hud:not(.lbPinned):hover,
+body.inGame #hud:not(.lbPinned):focus-within {
+  background: linear-gradient(160deg, rgba(17, 26, 40, 0.82), rgba(7, 11, 19, 0.88));
+}
+
+.topHudBarFill {
+  background: linear-gradient(90deg, var(--brand), var(--brand2));
+}
+
+#topHud,
+#rightInfo .rightDetails,
+#rightSidebar #minimap,
+#rightSidebar #teamHud,
+#rightSidebar #perf,
+#rightSidebar #killfeed,
+#chat {
+  border-radius: 14px;
+}
+
+/* --- Чат ------------------------------------------------------------------- */
+.chatLine {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.chatLine.me {
+  border-color: color-mix(in srgb, var(--brand) 26%, rgba(255, 255, 255, 0.06));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 8%, transparent), rgba(0, 0, 0, 0.14));
+}
+
+/* --- Экран итогов матча: бренд, а не сине-красная пара --------------------- */
+.matchCard {
+  border-color: color-mix(in srgb, var(--brand2) 35%, var(--border2));
+  background: linear-gradient(150deg, rgba(76, 201, 240, 0.10), rgba(5, 9, 16, 0.92));
+}
+
+.matchResultWin {
+  border-color: color-mix(in srgb, var(--brand) 60%, rgba(255, 255, 255, 0.12));
+  box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
+.eventToastBig {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border2));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 14%, transparent), rgba(0, 0, 0, 0.45));
+}
+
+/* Экран смерти остаётся в опасно-красном — это его смысл. */
+
+/* --- Скроллбары ------------------------------------------------------------ */
+.overlay .card::-webkit-scrollbar,
+.cosmeticsItems::-webkit-scrollbar,
+#roomsList::-webkit-scrollbar,
+#chatLog::-webkit-scrollbar,
+#rightInfo::-webkit-scrollbar,
+.matchTableWrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.overlay .card::-webkit-scrollbar-thumb,
+.cosmeticsItems::-webkit-scrollbar-thumb,
+#roomsList::-webkit-scrollbar-thumb,
+#chatLog::-webkit-scrollbar-thumb,
+#rightInfo::-webkit-scrollbar-thumb,
+.matchTableWrap::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.25);
+}
+
+.overlay .card::-webkit-scrollbar-track,
+.cosmeticsItems::-webkit-scrollbar-track,
+#roomsList::-webkit-scrollbar-track,
+#chatLog::-webkit-scrollbar-track,
+#rightInfo::-webkit-scrollbar-track,
+.matchTableWrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* --- Мобильное упрощение интерфейса ----------------------------------------
+   В матче на телефоне остаются только три иконки: карта, настройки, выход.
+   Лидерборд-пин бессмыслен (панель #stats на телефоне скрыта), косметика и
+   язык доступны из меню — им не место над игровым полем. */
+@media (max-width: 720px) {
+  body.inGame #lbBtn,
+  body.inGame #cosmeticsBtn,
+  body.inGame #langToggle {
+    display: none;
+  }
+
+  /* На узком экране подсказка «WASD / Enter…» раздувала компактный ряд иконок
+     до 77px, и HUD наезжал на #topHud (его смещение рассчитано на 52px).
+     Правило U10 показывало её с !important — перекрываем той же
+     специфичностью, позже в файле. */
+  body.inGame #hud:not(.lbPinned) #help {
+    display: none !important;
+  }
+
+  body.inGame #hud:not(.lbPinned) .hudActions {
+    gap: 8px;
+  }
+
+  /* Кнопка «Играть» на телефоне — главная тач-цель */
+  .btnPlay,
+  .menuActions .btnPlay {
+    min-height: 60px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Волна 9 новых анимаций не вводит. */
+  .btnPlay,
+  .btnPrimary {
+    transition: none;
+  }
+}
+
+/* ==========================================================================
+   ВОЛНА 10. Мета, геймфил и доступность.
+   Блок идёт последним в файле: перекрывает ранние правила порядком.
+   ========================================================================== */
+
+/* --- Личный рекорд на экране смерти ----------------------------------------
+   Четвёртая карточка в .deathStatsGrid. Обычное состояние — нейтральное,
+   «Новый рекорд» подсвечивается золотом: это единственная хорошая новость на
+   экране проигрыша, и она обязана читаться первой после места. */
+.deathStat.deathStatRecord {
+  border-color: color-mix(in srgb, var(--gold) 55%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 16%, transparent), rgba(0, 0, 0, 0.2));
+  animation: recordPop 420ms cubic-bezier(0.16, 1.5, 0.3, 1) both;
+}
+
+.deathStat.deathStatRecord .deathStatLabel {
+  color: var(--gold);
+}
+
+.deathStat.deathStatRecord .deathStatValue {
+  color: var(--gold);
+  text-shadow: 0 0 14px color-mix(in srgb, var(--gold) 45%, transparent);
+}
+
+@keyframes recordPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  60% {
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* --- Мета на экране меню ---------------------------------------------------
+   Дейлики и прогресс до первого скина жили только в правой панели матча —
+   то есть были не видны ровно там, где принимается решение «зайти ещё раз». */
+.menuMeta {
+  display: grid;
+  gap: var(--pad-sm);
+  margin-top: var(--pad-md);
+}
+
+.menuMeta:empty {
+  display: none;
+}
+
+.menuMetaRow {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border2);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.menuMetaIcon {
+  font-size: var(--fs-body);
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.menuMetaText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuMetaValue {
+  flex: 0 0 auto;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--brand) 70%, var(--text));
+}
+
+.menuMetaRow.isDone .menuMetaValue {
+  color: var(--brand);
+}
+
+.menuMetaBar {
+  grid-column: 1 / -1;
+  height: 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+
+.menuMetaBarFill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  max-width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--brand), var(--brand2));
+  transition: width 420ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deathStat.deathStatRecord,
+  .menuMetaBarFill {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* --- Подсказка управления переехала из #hud наружу -------------------------
+   Причина — замеренное наложение: строка «Управление: стрелки / WASD…»
+   шириной 320px раздувала плавающую панель до 340px, и та перекрывала
+   центрированный #topHud (на 1076px они делили полосу 258..352).
+   Теперь подсказка живёт отдельным фиксированным элементом у нижнего края и
+   на ширину HUD не влияет вовсе. Тач-вариант (#helpTouch) уже жил так же —
+   правила ниже приводят мышиный вариант к тому же виду. */
+#help {
+  position: fixed;
+  left: calc(12px + var(--sa-left));
+  bottom: calc(12px + var(--sa-bottom));
+  z-index: var(--z-hud);
+  max-width: min(46vw, 340px);
+  padding: 6px 12px;
+  border: 1px solid var(--border2);
+  border-top: 1px solid var(--border2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(10px);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--muted);
+  pointer-events: none;
+  /* Вне матча подсказка не нужна: показываем её только в игре (см. ниже). */
+  display: none;
+}
+
+/* В матче — показываем, но не поверх развёрнутого чата и не под оверлеями. */
+body.inGame #help {
+  display: block;
+}
+
+body.overlayActive #help,
+body:has(#chat:not(.collapsed)) #help {
+  display: none;
+}
+
+/* Стек тостов делит с подсказкой левый нижний угол — поднимаем его над ней.
+   Только для мыши: на телефоне #help скрыт (там #helpTouch), а мобильное
+   правило уже поднимает тосты на 52px под свёрнутый чат. Без ограничения по
+   ширине это правило опускало их обратно и тосты налезали на чат. */
+@media (min-width: 721px) {
+  body.inGame #eventToasts {
+    bottom: calc(12px + var(--sa-bottom) + 40px);
+  }
+}
+
+/* На тач-устройстве вместо неё — #helpTouch: «WASD/Enter/Esc/M» там бессмысленны. */
+@media (pointer: coarse) {
+  body.inGame #help {
+    display: none;
+  }
+}
+
+/* Резервы под боковые панели. Саму раскладку #topHud задаёт 03-game.css —
+   здесь только числа, от которых она считается.
+   Слева: 12 + фактическая ширина ряда иконок (247) + запас; справа: 12 +
+   потолок #rightSidebar (320) + 12. */
+:root {
+  --hud-left-reserve: 276px;
+  --hud-right-reserve: 344px;
+}
+
+/* Между 721 и 900px правая колонка уже уехала вниз (её собственное правило),
+   поэтому резерв справа не нужен и полоса забирает освободившееся место. */
+@media (min-width: 721px) and (max-width: 900px) {
+  :root {
+    --hud-right-reserve: 12px;
+  }
+}
+
+/* --- Верхняя полоса: одна строка вместо четырёх ----------------------------
+   Замер: 135px высоты на 368px ширины. Причина — .topHudRight был вложенной
+   сеткой, где таймер и контракт занимали `grid-column: 1 / -1`, то есть
+   каждый вставал на свою строку; сверху добавлялся ряд «место + зона».
+   Для полосы состояния, которая висит поверх поля, это непозволительно
+   много: она закрывала верх карты.
+
+   Стало: всё в одну flex-строку с переносом по необходимости. Порядок слева
+   направо — по убыванию важности: место, зона, время, фаза, киллы, контракт. */
+.topHudRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 14px;
+  row-gap: 4px;
+}
+
+.topHudRight {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 4px;
+  min-width: 0;
+  /* Забирает остаток строки, чтобы контракт прижимался вправо. */
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+/* Отменяем растяжку на всю ширину: в строке она и создавала лишние ряды. */
+.topHudTime,
+.topHudContract,
+.topHudChip {
+  grid-column: auto;
+  margin-top: 0;
+}
+
+.topHudContract {
+  /* Контракт длиннее всех: пусть ужимается он, а не цифры слева. */
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.topHudBar {
+  margin-top: 6px;
+}
+
+/* --- Ряд иконок в матче: только то, что нужно ПО ХОДУ матча ----------------
+   Косметика и переключатель языка мид-матчем бесполезны: экипировка
+   применяется со следующего возрождения, а язык меняют один раз в жизни.
+   Обе кнопки остаются в меню, в настройках и на экранах смерти/итогов.
+   Здесь они стоили ширины: шесть кнопок держали #hud на 340px, из-за чего
+   верхней полосе оставалось всего 368px и она переносилась в три строки. */
+body.inGame #hud:not(.lbPinned) #cosmeticsBtn,
+body.inGame #hud:not(.lbPinned) #langToggle {
+  display: none;
+}
+
+/* --- Тосты и чат не делят нижний край на узком десктопе --------------------
+   Замер 768x1024: стек тостов (слева, 420px) доставал до x=432, а чат
+   (справа, 420px) начинался с x=336 — наложение 96px. На 1076px его нет,
+   потому что чат начинается с 644. Порог: 12 + 420 + 420 + 12 = 864px.
+
+   Ниже порога тосты уезжают ВЫШЕ чата, а не сужаются: узкий тост с обрезанным
+   текстом бесполезен, а вертикального места внизу хватает.
+   Высота свёрнутого чата ~67px, развёрнутого — до 264px (это уже посчитано
+   в --right-bottom-reserve, который держит правую колонку). */
+@media (min-width: 721px) and (max-width: 880px) {
+  body.inGame #eventToasts {
+    bottom: calc(12px + var(--sa-bottom) + var(--right-bottom-reserve, 80px));
+  }
+}
+
+/* Правая колонка на 721..900px уходит ПОД верхнюю полосу, и её смещение было
+   зашито константой 104px, рассчитанной на прежнюю высоту полосы. Полоса
+   перестроена и на 768px занимает 107px — колонка налезала на неё на 3px.
+   Берём запас: 120px покрывает полосу и в две строки. */
+@media (max-width: 900px) {
+  :root {
+    --right-top: calc(12px + var(--sa-top) + 128px);
+  }
+
+  #rightSidebar {
+    top: var(--right-top);
+  }
+}
