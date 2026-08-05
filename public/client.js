@@ -7,6 +7,13 @@ import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
 import { filterAndSortRooms } from './client_rooms.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
 import {
+  keepUnsent,
+  loadDesired,
+  planDesiredApply,
+  saveDesired,
+  setDesired
+} from './client_cos_desired.js';
+import {
   COSMETICS_CATS,
   COSMETICS_MAX_ID,
   bitHas,
@@ -1298,7 +1305,6 @@ let pendingCosmeticsOp = null;
 let cosmeticsOpTimer = 0;
 
 const COSMETICS_CACHE_KEY = 'snakes_cosmetics_cache_v1';
-const COSMETICS_DESIRED_KEY = 'snakes_cosmetics_desired_v1';
 
 let styleToastAcc = 0;
 let styleToastReason = 0;
@@ -6284,77 +6290,36 @@ function onCosmetics(msg) {
   } catch {}
 }
 
-function cosmeticsDesiredLoad() {
-  try {
-    const raw = localStorage.getItem(COSMETICS_DESIRED_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw);
-    if (!s || typeof s !== 'object') return null;
-    return s;
-  } catch {
-    return null;
-  }
-}
-
-function cosmeticsDesiredSave(s) {
-  try {
-    if (!s) {
-      localStorage.removeItem(COSMETICS_DESIRED_KEY);
-      return;
-    }
-    localStorage.setItem(COSMETICS_DESIRED_KEY, JSON.stringify(s));
-  } catch {}
-}
-
+/* Модель «желаемой» экипировки — в client_cos_desired.js вместе с тестами.
+   Здесь остаётся только подстановка хранилища. */
 function cosmeticsSetDesiredEq(cat, id) {
-  const c = String(cat || '').trim().toLowerCase();
-  const itemId = Math.max(0, Math.min(7, Number(id) || 0));
-  const d = cosmeticsDesiredLoad() || {};
-  if (c === 'capturefx') d.eqCaptureFx = itemId;
-  else if (c === 'head') d.eqHead = itemId;
-  else if (c === 'seg') d.eqSeg = itemId;
-  else if (c === 'nameplate') d.eqNameplate = itemId;
-  else if (c === 'frame') d.eqFrame = itemId;
-  else if (c === 'terr') d.eqTerr = itemId;
-  else if (c === 'death') d.eqDeath = itemId;
-  cosmeticsDesiredSave(d);
+  setDesired(localStorage, cat, id);
 }
 
+/* Применить сохранённый выбор к серверу. Решение «что кому отправить»
+   принимает planDesiredApply в client_cos_desired.js — здесь только отправка
+   и разговор с игроком. Раньше соответствие «категория -> поле» было выписано
+   тут семью строками подряд, дублируя такую же цепочку в записи выбора. */
 function cosmeticsApplyDesiredServer() {
   if (cosmeticsSource !== 'server') return;
-  const d = cosmeticsDesiredLoad();
-  if (!d) return;
 
-  const failed = [];
-  const kept = {};
+  const { toSend, missing } = planDesiredApply({
+    desired: loadDesired(localStorage),
+    inventory: cosmeticsMaskForCat,
+    equipped: cosmeticsEqForCat
+  });
 
-  const apply = (cat, desiredId, invMask, currentEq, keyName) => {
-    if (desiredId === undefined || desiredId === null) return;
-    const want = Math.max(0, Math.min(7, Number(desiredId) || 0));
-    if (want === Math.max(0, Math.min(7, Number(currentEq) || 0))) return;
-    const bit = 1 << want;
-    if ((Number(invMask) & bit) === 0) {
-      // C9: the cache promised an item the account does not have — say so out loud.
-      failed.push(`${cosmeticsLabel(cat)} — ${cosmeticsVariantName(cat, want)}`);
-      return;
-    }
-    if (!wsSend('cosmeticsEquip', { cat, id: want })) kept[keyName] = want;
-  };
+  const results = toSend.map((it) => ({
+    ...it,
+    ok: wsSend('cosmeticsEquip', { cat: it.cat, id: it.id })
+  }));
 
-  apply('capturefx', d.eqCaptureFx, youCosInvCaptureFx, youCosEqCaptureFx, 'eqCaptureFx');
-  apply('head', d.eqHead, youCosInvHead, youCosEqHead, 'eqHead');
-  apply('seg', d.eqSeg, youCosInvSeg, youCosEqSeg, 'eqSeg');
-  apply('nameplate', d.eqNameplate, youCosInvNameplate, youCosEqNameplate, 'eqNameplate');
-  apply('frame', d.eqFrame, youCosInvFrame, youCosEqFrame, 'eqFrame');
-  apply('terr', d.eqTerr, youCosInvTerr, youCosEqTerr, 'eqTerr');
-  apply('death', d.eqDeath, youCosInvDeath, youCosEqDeath, 'eqDeath');
-
-  if (failed.length) {
-    setCosmeticsStatus(() => `${t('cosmetics.desired_not_applied')}: ${failed.join(', ')}`, 'error');
+  if (missing.length) {
+    const names = missing.map((m) => `${cosmeticsLabel(m.cat)} — ${cosmeticsVariantName(m.cat, m.id)}`);
+    setCosmeticsStatus(() => `${t('cosmetics.desired_not_applied')}: ${names.join(', ')}`, 'error');
   }
 
-  // Keep only what could not be sent; drop everything that was applied or is impossible.
-  cosmeticsDesiredSave(Object.keys(kept).length ? kept : null);
+  saveDesired(localStorage, keepUnsent(results));
 }
 
 // C1: shop feedback goes into a dedicated in-overlay line (#cosmeticsStatus),
@@ -6459,6 +6424,11 @@ function showCosmeticsOverlay() {
 }
 
 function hideCosmeticsOverlay() {
+  // Возврат в меню: панель «Ваш облик» снова видна — будим её отрисовку.
+  // showMenuOverlay() здесь не вызывается, поэтому сама она бы не ожила.
+  try {
+    setTimeout(() => scheduleMenuSkinPreview(), 0);
+  } catch {}
   if (!cosmeticsOverlay) return;
   cosmeticsOpen = false;
   cosmeticsOverlay.classList.add('hidden');
@@ -7395,210 +7365,189 @@ function cosmeticsPreviewId() {
   return clamp(cosmeticsSelId);
 }
 
+/* ==========================================================================
+   ЕДИНАЯ СЦЕНА ПРЕДПРОСМОТРА.
+
+   Было: каждая категория рисовала свою композицию в своём масштабе. У
+   территории зона занимала 62% ширины и 80% высоты — плоский прямоугольник
+   почти во весь кадр, а змейка выдавливалась к самому краю. Игрок видел не
+   «свой облик», а набор фигур. В меню жила третья, ещё одна композиция.
+
+   Стало: одна сцена на всё — кусок игрового поля. Слева своя территория
+   (фон), из неё вправо выезжает змейка нормального размера, над головой
+   плашка с ником. Это буквально то, что игрок видит в матче, и то, чему учит
+   меню: «выйди за свою зону, оставь след». Меняется ровно та деталь, которую
+   игрок сейчас смотрит, остальное берётся из экипированного.
+
+   Масштаб фиксирован относительно кадра, поэтому предмет выглядит одинаково
+   в магазине и в меню. */
+
+/* Пропорции сцены. Территория намеренно НЕ больше половины кадра: она фон,
+   а не главный объект. */
+const COS_SCENE = {
+  pad: 0.07,
+  zoneX: 0.05,
+  zoneY: 0.20,
+  zoneW: 0.46,
+  zoneH: 0.58,
+  cellK: 0.13,
+  cellMin: 14,
+  cellMax: 34
+};
+
+function drawCosmeticsScene(ctx2, rect, opts) {
+  const { x: fx, y: fy, w: fw, h: fh } = rect;
+  const {
+    cat = '',
+    label = '',
+    now = 0,
+    reduceMotion = false,
+    highlight = false,
+    ids = {}
+  } = opts || {};
+
+  const baseC = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
+  const scell = Math.max(
+    COS_SCENE.cellMin,
+    Math.min(COS_SCENE.cellMax, Math.round(Math.min(fw, fh) * COS_SCENE.cellK))
+  );
+
+  /* Зона считается ПЕРВОЙ и выравнивается по целому числу клеток: сетка фона
+     рисуется от её origin с тем же шагом, поэтому линии проходят ровно по
+     границам плиток, как на поле. Раньше шаг сетки считался отдельно и
+     не совпадал с клетками — кадр не читался как кусок игры. */
+  const zone = {
+    x: Math.round(fx + fw * COS_SCENE.zoneX),
+    y: Math.round(fy + fh * COS_SCENE.zoneY),
+    w: Math.max(scell * 2, Math.round((fw * COS_SCENE.zoneW) / scell) * scell),
+    h: Math.max(scell * 2, Math.round((fh * COS_SCENE.zoneH) / scell) * scell)
+  };
+
+  drawCosmeticsFieldBackdrop(ctx2, fx, fy, fw, fh, scell, zone.x, zone.y);
+
+  // Сцена не имеет права рисовать за пределами поля: хвост раньше вылезал на
+  // рамку и читался как мусор.
+  ctx2.save();
+  ctx2.beginPath();
+  ctx2.rect(fx, fy, fw, fh);
+  ctx2.clip();
+
+  const plateFont = Math.max(11, Math.round(scell * 0.62));
+  // Голова стоит сразу за кромкой зоны — змейка «только что вышла из дома»,
+  // а хвост ещё внутри. Ровно эта картинка и есть механика игры.
+  const headX = Math.round(zone.x + zone.w + scell * 1.2);
+  const headY = Math.round(zone.y + zone.h * 0.55);
+
+  const period = 2400;
+  const p = reduceMotion ? 0.55 : (now % period) / period;
+
+  // --- гибель: змейка едет, потом взрывается ---
+  if (cat === 'death') {
+    drawCosmeticsZone(ctx2, zone, you, 0.55, ids.terr, scell);
+    const dieStart = 0.45;
+    const dieP = p < dieStart ? -1 : Math.min(1, (p - dieStart) / (COS_DEATH_MS / period));
+    if (dieP < 0) {
+      drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, 6);
+      drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
+    } else {
+      drawDeathFx(ctx2, headX, headY, Math.max(16, Math.round(scell * 1.25)), baseC, ids.death, dieP);
+    }
+    ctx2.restore();
+    return { scell, zone, headX, headY };
+  }
+
+  drawCosmeticsZone(ctx2, zone, you, 0.55, ids.terr, scell);
+  drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, cat === 'seg' ? 8 : 6);
+  drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
+
+  /* Захват: вспышка над своей зоной в том же цикле, что и сцена.
+     Фаза считается от фазы сцены, а не от performance.now(): иначе к моменту
+     показа вспышка успевала догореть и покупатель видел пустое поле. */
+  const burstStart = 0.58;
+  const burstP = p < burstStart ? -1 : (p - burstStart) / (650 / period);
+  if (burstP >= 0 && burstP <= 1) {
+    drawCaptureFx(
+      ctx2,
+      zone.x + zone.w * 0.5,
+      zone.y + zone.h * 0.5,
+      Math.max(18, Math.round(scell * 1.35)),
+      baseC,
+      ids.capturefx,
+      burstP
+    );
+  }
+
+  // Пунктир вокруг того, что меняет выбранный предмет.
+  if (highlight) {
+    ctx2.save();
+    ctx2.strokeStyle = 'rgba(46, 230, 160, 0.60)';
+    ctx2.setLineDash([5, 4]);
+    ctx2.lineWidth = 2;
+    if (cat === 'head') {
+      ctx2.beginPath();
+      ctx2.arc(headX, headY, scell * 0.82, 0, Math.PI * 2);
+      ctx2.stroke();
+    } else if (cat === 'nameplate' || cat === 'title') {
+      const ph = Math.round(plateFont * 1.5);
+      ctx2.strokeRect(headX - scell * 2.4, headY - scell * 0.95 - ph - 4, scell * 4.8, ph + 8);
+    } else if (cat === 'seg') {
+      ctx2.strokeRect(headX - scell * 7.2, headY - scell * 0.72, scell * 6.4, scell * 1.44);
+    } else if (cat === 'terr') {
+      ctx2.strokeRect(zone.x + 1, zone.y + 1, zone.w - 2, zone.h - 2);
+    }
+    ctx2.restore();
+  }
+
+  ctx2.restore();
+  return { scell, zone, headX, headY };
+}
+
 function renderCosmeticsPreview() {
   if (!cosmeticsPreview) return;
   const cssW = Math.max(200, Math.round(cosmeticsPreview.clientWidth || 420));
   const cssH = Math.max(140, Math.round(cosmeticsPreview.clientHeight || 260));
   const ctx2 = cosPrepCanvas(cosmeticsPreview, cssW, cssH);
   if (!ctx2) return;
-  const w = cssW;
-  const h = cssH;
 
   const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
   const now = reduceMotion ? 0 : performance.now();
-
-  const baseC = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
   const selId = cosmeticsPreviewId();
 
   const setHint = () => {
-    // Снимаем клип сцены (см. save/clip после drawCosmeticsFieldBackdrop).
-    // Ветка 'frame' возвращается раньше клипа — там restore не нужен, но
-    // избыточный restore на чистом стеке безопасен только при парности,
-    // поэтому в 'frame' setHint вызывается до установки клипа.
-    if (cosmeticsCat !== 'frame') ctx2.restore();
     if (!cosmeticsHintEl) return;
-    // C11: раньше сюда дописывалось «где это видно» — слово в слово то же, что
-    // уже стоит в #cosmeticsWhere прямо над списком. Оставляем только предмет.
     cosmeticsHintEl.textContent = `${cosmeticsLabel(cosmeticsCat)}: ${cosmeticsVariantName(cosmeticsCat, selId)}`;
   };
 
+  // Рамка профиля — украшение строки таблицы, а не часть поля: у неё своя сцена.
   if (cosmeticsCat === 'frame') {
-    drawCosmeticsFramesScene(ctx2, w, h, selId);
+    drawCosmeticsFramesScene(ctx2, cssW, cssH, selId);
     setHint();
     return;
   }
 
-  const fieldPad = Math.round(Math.min(w, h) * 0.08);
-  const fx = fieldPad;
-  const fy = fieldPad;
-  const fw = w - fieldPad * 2;
-  const fh = h - fieldPad * 2;
-  drawCosmeticsFieldBackdrop(ctx2, fx, fy, fw, fh);
+  const pick = (cat, equipped) => (cosmeticsCat === cat ? selId : equipped);
+  const titleId = pick('title', youTitleId);
 
-  // Сцена не имеет права рисовать за пределами поля: хвост змейки раньше
-  // вылезал на рамку и читался как мусор. setHint() ниже снимает клип —
-  // он вызывается последним в каждой ветке.
-  ctx2.save();
-  ctx2.beginPath();
-  ctx2.rect(fx, fy, fw, fh);
-  ctx2.clip();
-
-  const cell = Math.min(fw, fh) * 0.12;
-  const scell = Math.max(14, Math.round(cell * 0.85));
-  const cx = fx + fw * 0.40;
-  const cy = fy + fh * 0.62;
-
-  const headId = cosmeticsCat === 'head' ? selId : youCosEqHead;
-  const segId = cosmeticsCat === 'seg' ? selId : youCosEqSeg;
-  const nameId = cosmeticsCat === 'nameplate' ? selId : youCosEqNameplate;
-  const capId = cosmeticsCat === 'capturefx' ? selId : youCosEqCaptureFx;
-  const terrId = cosmeticsCat === 'terr' ? selId : youCosEqTerr;
-  const deathId = cosmeticsCat === 'death' ? selId : youCosEqDeath;
-  const titleId = cosmeticsCat === 'title' ? selId : youTitleId;
-  const plateFont = Math.max(11, Math.round(scell * 0.62));
-  const plateLabel = `${cosTitlePrefix(titleId)}${t('cosmetics.balance_you')}`;
-
-  const zone = {
-    x: Math.round(fx + fw * 0.58),
-    y: Math.round(fy + fh * 0.42),
-    w: Math.round(cell * 3.2),
-    h: Math.round(cell * 3.2)
-  };
-
-  if (cosmeticsCat === 'terr') {
-    // Территория — самая большая вещь на экране, поэтому в превью она занимает
-    // почти всё поле: иначе разницу между узорами просто не видно.
-    const big = {
-      x: Math.round(fx + fw * 0.06),
-      y: Math.round(fy + fh * 0.10),
-      w: Math.round(fw * 0.62),
-      h: Math.round(fh * 0.80)
-    };
-    drawCosmeticsZone(ctx2, big, you, 0.62, terrId, scell);
-    const hx = big.x + big.w + scell * 1.6;
-    const hy = big.y + big.h * 0.55;
-    drawCosmeticsSnake(ctx2, hx, hy, scell, you, youCosEqSeg, youCosEqHead, baseC, 4);
-    drawNamePlate(ctx2, plateLabel, hx, hy - scell * 0.95, baseC, youCosEqNameplate, 0.95, plateFont, now);
-    setHint();
-    return;
-  }
-
-  if (cosmeticsCat === 'death') {
-    // Зацикленный сценарий гибели: змейка едет, потом взрывается.
-    const period = 2200;
-    const p = reduceMotion ? 0.35 : (now % period) / period;
-    const dieStart = 0.42;
-    const dieP = p < dieStart ? -1 : Math.min(1, (p - dieStart) / (COS_DEATH_MS / period));
-    drawCosmeticsZone(ctx2, zone, you, 0.58, youCosEqTerr, scell);
-    const hx = fx + fw * (0.18 + 0.22 * Math.min(1, p / dieStart));
-    const hy = cy;
-    if (dieP < 0) {
-      drawCosmeticsSnake(ctx2, hx, hy, scell, you, youCosEqSeg, youCosEqHead, baseC, 5);
-      drawNamePlate(ctx2, plateLabel, hx, hy - scell * 0.95, baseC, youCosEqNameplate, 0.95, plateFont, now);
-    } else if (dieP <= 1) {
-      drawDeathFx(ctx2, hx, hy, Math.max(16, Math.round(scell * 1.2)), baseC, deathId, dieP);
-    }
-    setHint();
-    return;
-  }
-
-  if (cosmeticsCat === 'title') {
-    drawCosmeticsZone(ctx2, zone, you, 0.58, youCosEqTerr, scell);
-    drawCosmeticsSnake(ctx2, cx, cy, scell, you, youCosEqSeg, youCosEqHead, baseC, 5);
-    drawNamePlate(ctx2, plateLabel, cx, cy - scell * 0.95, baseC, youCosEqNameplate, 0.95, plateFont, now);
-    ctx2.save();
-    ctx2.strokeStyle = 'rgba(96,165,250,0.55)';
-    ctx2.setLineDash([5, 4]);
-    ctx2.lineWidth = 2;
-    const ph = Math.round(plateFont * 1.5);
-    ctx2.strokeRect(cx - scell * 3.2, cy - scell * 0.95 - ph - 3.5, scell * 6.4, ph + 7);
-    ctx2.restore();
-    setHint();
-    return;
-  }
-
-  if (cosmeticsCat === 'capturefx') {
-    // Зацикленный сценарий захвата. Раньше здесь была рассинхронизация: фаза
-    // эффекта считалась от performance.now() независимо от фазы сцены, поэтому
-    // в момент показа вспышка чаще всего уже догорела (alpha ≈ 0) и покупатель
-    // видел пустое поле. Теперь фаза эффекта — часть одного цикла.
-    const period = 2400;
-    const p = reduceMotion ? 0.60 : (now % period) / period;
-
-    const approach = Math.max(0, Math.min(1, p / 0.30));
-    const loopP = p < 0.30 ? 0 : Math.max(0, Math.min(1, (p - 0.30) / 0.22));
-    // Вспышка занимает ровно 650 мс — столько же, сколько живёт бурст в игре.
-    const burstStart = 0.52;
-    const burstLen = 650 / period;
-    const burstP = p < burstStart ? -1 : (p - burstStart) / burstLen;
-    const showBurst = burstP >= 0 && burstP <= 1;
-    const filled = p >= burstStart;
-
-    const loopRect = {
-      x: zone.x - Math.round(zone.w * 0.44),
-      y: zone.y + Math.round(zone.h * 0.16),
-      w: Math.round(zone.w * 0.44),
-      h: Math.round(zone.h * 0.66)
-    };
-
-    drawCosmeticsZone(ctx2, zone, you, 0.58, terrId, scell);
-    if (filled) drawCosmeticsZone(ctx2, loopRect, you, 0.58, terrId, scell);
-
-    const headX = cx + (loopRect.x - cx) * (0.15 + 0.85 * approach);
-    const headY = cy + (reduceMotion ? 0 : Math.sin(now * 0.0032) * cell * 0.10);
-
-    if (!filled && loopP > 0) {
-      const per = Math.max(1, Math.round(((loopRect.w + loopRect.h) * 2) / scell));
-      const k = Math.floor(loopP * per);
-      const pts = [];
-      for (let x = loopRect.x; x <= loopRect.x + loopRect.w; x += scell) pts.push({ x, y: loopRect.y });
-      for (let y = loopRect.y + scell; y <= loopRect.y + loopRect.h; y += scell) pts.push({ x: loopRect.x + loopRect.w, y });
-      for (let x = loopRect.x + loopRect.w - scell; x >= loopRect.x; x -= scell) pts.push({ x, y: loopRect.y + loopRect.h });
-      for (let y = loopRect.y + loopRect.h - scell; y >= loopRect.y + scell; y -= scell) pts.push({ x: loopRect.x, y });
-      for (let i = 0; i < Math.min(pts.length, k); i++) {
-        drawSegTile(ctx2, pts[i].x, pts[i].y, scell, baseC, youCosEqSeg, i + 3, 0.85, now);
+  const pad = Math.round(Math.min(cssW, cssH) * COS_SCENE.pad);
+  drawCosmeticsScene(
+    ctx2,
+    { x: pad, y: pad, w: cssW - pad * 2, h: cssH - pad * 2 },
+    {
+      cat: cosmeticsCat,
+      label: `${cosTitlePrefix(titleId)}${t('cosmetics.balance_you')}`,
+      now,
+      reduceMotion,
+      highlight: true,
+      ids: {
+        head: pick('head', youCosEqHead),
+        seg: pick('seg', youCosEqSeg),
+        nameplate: pick('nameplate', youCosEqNameplate),
+        capturefx: pick('capturefx', youCosEqCaptureFx),
+        terr: pick('terr', youCosEqTerr),
+        death: pick('death', youCosEqDeath)
       }
     }
-
-    drawCosmeticsSnake(ctx2, headX, headY, scell, you, youCosEqSeg, youCosEqHead, baseC);
-    drawNamePlate(ctx2, plateLabel, headX, headY - scell * 0.85, baseC, youCosEqNameplate, 0.95, plateFont, now);
-
-    if (showBurst) {
-      const fxX = loopRect.x + loopRect.w / 2;
-      const fxY = loopRect.y + loopRect.h / 2;
-      // В магазине эффект обязан проигрываться всегда — независимо от того,
-      // выключил ли игрок эффекты в настройках (fxEnabled гасит только игру).
-      drawCaptureFx(ctx2, fxX, fxY, Math.max(18, Math.round(scell * 1.4)), baseC, capId, burstP);
-    }
-
-    setHint();
-    return;
-  }
-
-  // Территория игрока всегда рисуется его сплошным цветом: стиль следа в игре
-  // применяется ТОЛЬКО к временному следу вне территории, и превью обязано
-  // показывать ровно это, а не заливать стилем всю зону.
-  drawCosmeticsZone(ctx2, zone, you, 0.58, terrId, scell);
-
-  drawCosmeticsSnake(ctx2, cx, cy, scell, you, segId, headId, baseC, cosmeticsCat === 'seg' ? 9 : 6);
-  drawNamePlate(ctx2, plateLabel, cx, cy - scell * 0.95, baseC, nameId, 0.95, plateFont, now);
-
-  // Указатель на то место сцены, которое меняет выбранный предмет.
-  ctx2.save();
-  ctx2.strokeStyle = 'rgba(96,165,250,0.55)';
-  ctx2.setLineDash([5, 4]);
-  ctx2.lineWidth = 2;
-  if (cosmeticsCat === 'head') {
-    ctx2.beginPath();
-    ctx2.arc(cx, cy, scell * 0.78, 0, Math.PI * 2);
-    ctx2.stroke();
-  } else if (cosmeticsCat === 'nameplate') {
-    const ph = Math.round(plateFont * 1.5);
-    ctx2.strokeRect(cx - scell * 1.9, cy - scell * 0.95 - ph - 3.5, scell * 3.8, ph + 7);
-  } else if (cosmeticsCat === 'seg') {
-    ctx2.strokeRect(cx - scell * 6.4, cy - scell * 0.72, scell * 6.0, scell * 1.44);
-  }
-  ctx2.restore();
+  );
 
   setHint();
 }
@@ -7642,65 +7591,35 @@ function renderMenuSkinPreview() {
 
   const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
   const now = reduceMotion ? 0 : performance.now();
-  const baseC = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
 
-  const pad = Math.round(Math.min(cssW, cssH) * 0.07);
-  const fx = pad;
-  const fy = pad;
-  const fw = cssW - pad * 2;
-  const fh = cssH - pad * 2;
-  drawCosmeticsFieldBackdrop(c, fx, fy, fw, fh);
-
-  // Хвост змейки заезжает из-за левого края поля — клип не даёт ему
-  // вылезти на рамку и за пределы подложки.
-  c.save();
-  c.beginPath();
-  c.rect(fx, fy, fw, fh);
-  c.clip();
-
-  const scell = Math.max(12, Math.round(Math.min(fw, fh) * 0.13));
-
-  // Территория — справа, змейка идёт к ней слева.
-  const zone = {
-    x: Math.round(fx + fw * 0.52),
-    y: Math.round(fy + fh * 0.30),
-    w: Math.round(fw * 0.40),
-    h: Math.round(fh * 0.56)
-  };
-  drawCosmeticsZone(c, zone, you, 0.58, youCosEqTerr, scell);
-
-  const period = 2600;
-  const p = reduceMotion ? 0.45 : (now % period) / period;
-  // Змейка доезжает до кромки зоны к моменту вспышки захвата (0.52 fw),
-  // а не замирает в пустоте на 0.42, как раньше.
-  const hx = fx + fw * (0.18 + 0.33 * Math.min(1, p / 0.60));
-  const hy = Math.round(fy + fh * 0.62);
-
-  drawCosmeticsSnake(c, hx, hy, scell, you, youCosEqSeg, youCosEqHead, baseC, 6);
-
-  const plateFont = Math.max(11, Math.round(scell * 0.62));
   // Ник берём живой: storedName снимается один раз при загрузке модуля и
-  // отстаёт, если игрок только что поменял имя в меню.
+  // отстаёт, если игрок только что поменял имя в поле рядом.
   const liveName = (menuNameInput?.value || '').trim() || nameById.get(you) || storedName;
-  const label = `${cosTitlePrefix(youTitleId)}${liveName || t('cosmetics.balance_you')}`;
-  drawNamePlate(c, label, hx, hy - scell * 0.95, baseC, youCosEqNameplate, 0.95, plateFont, now);
 
-  // Короткая вспышка захвата в цикле — иначе купленный эффект в меню не виден.
-  const burstStart = 0.62;
-  const burstP = p < burstStart ? -1 : (p - burstStart) / (650 / period);
-  if (burstP >= 0 && burstP <= 1) {
-    drawCaptureFx(
-      c,
-      zone.x + zone.w / 2,
-      zone.y + zone.h / 2,
-      Math.max(16, Math.round(scell * 1.3)),
-      baseC,
-      youCosEqCaptureFx,
-      burstP
-    );
-  }
-
-  c.restore();
+  /* Та же сцена, что и в магазине. Раньше здесь была своя, третья композиция
+     со своим масштабом и своим положением зоны — меню и магазин показывали
+     один и тот же облик по-разному, и совпадение приходилось поддерживать
+     руками. Пунктира нет: в меню ничего не выбирают, показывать нечего. */
+  const pad = Math.round(Math.min(cssW, cssH) * COS_SCENE.pad);
+  drawCosmeticsScene(
+    c,
+    { x: pad, y: pad, w: cssW - pad * 2, h: cssH - pad * 2 },
+    {
+      cat: '',
+      label: `${cosTitlePrefix(youTitleId)}${liveName || t('cosmetics.balance_you')}`,
+      now,
+      reduceMotion,
+      highlight: false,
+      ids: {
+        head: youCosEqHead,
+        seg: youCosEqSeg,
+        nameplate: youCosEqNameplate,
+        capturefx: youCosEqCaptureFx,
+        terr: youCosEqTerr,
+        death: youCosEqDeath
+      }
+    }
+  );
 }
 
 function menuSkinPreviewTick(ts) {
@@ -7733,6 +7652,23 @@ function stopMenuSkinPreview() {
     cancelAnimationFrame(menuSkinAnimRaf);
   } catch {}
   menuSkinAnimRaf = 0;
+}
+
+/* Панель могла остаться пустой навсегда.
+   scheduleMenuSkinPreview() выходит, если канвас ещё нулевого размера, а
+   menuSkinPreviewTick() в этом случае гасит цикл — и никто не пробовал
+   заново. Достаточно было, чтобы первый показ меню случился до того, как
+   раскладка устоялась (или пока панель скрыта по ширине экрана), и облик
+   не рисовался до перезагрузки страницы.
+   Наблюдатель размера будит отрисовку ровно тогда, когда у панели появляется
+   ширина: ни таймеров, ни попыток «на всякий случай» каждый кадр. */
+if (menuSkinPreviewEl && typeof ResizeObserver === 'function') {
+  try {
+    new ResizeObserver(() => {
+      if (menuSkinAnimRaf) return;
+      scheduleMenuSkinPreview();
+    }).observe(menuSkinPreviewEl);
+  } catch {}
 }
 
 function cosmeticsFrameSampleName(i) {
@@ -7790,29 +7726,51 @@ function drawCosmeticsFramesScene(ctx2, w, h, frameId) {
   }
 }
 
-function drawCosmeticsFieldBackdrop(ctx2, x, y, w, h) {
+/* Подложка поля. step приходит снаружи и равен размеру клетки сцены: в игре
+   сетка — это и есть решётка клеток, а здесь шаг считался отдельно
+   (16..28px против клетки 14..34px), линии не совпадали с плитками
+   территории, и кадр переставал читаться как кусок поля.
+   Начало отсчёта тоже передаётся, чтобы линии проходили ПО границам клеток,
+   а не наискось через них. */
+function drawCosmeticsFieldBackdrop(ctx2, x, y, w, h, step, originX, originY) {
   ctx2.save();
   const bg = ctx2.createLinearGradient(x, y, x + w, y + h);
   bg.addColorStop(0, '#05100f');
+  bg.addColorStop(0.55, '#060a12');
   bg.addColorStop(1, '#0a0714');
   ctx2.fillStyle = bg;
   ctx2.fillRect(x, y, w, h);
 
-  ctx2.strokeStyle = 'rgba(120,220,190,0.06)';
+  const cell = Math.max(8, Math.round(Number(step) || 18));
+  const ox = Number.isFinite(originX) ? originX : x;
+  const oy = Number.isFinite(originY) ? originY : y;
+
+  ctx2.strokeStyle = 'rgba(120,220,190,0.055)';
   ctx2.lineWidth = 1;
-  const step = Math.max(16, Math.min(28, Math.round(Math.min(w, h) * 0.11)));
-  for (let px = x + step; px < x + w; px += step) {
+  for (let px = ox - Math.ceil((ox - x) / cell) * cell; px < x + w; px += cell) {
+    if (px <= x) continue;
     ctx2.beginPath();
-    ctx2.moveTo(px + 0.5, y);
-    ctx2.lineTo(px + 0.5, y + h);
+    ctx2.moveTo(Math.round(px) + 0.5, y);
+    ctx2.lineTo(Math.round(px) + 0.5, y + h);
     ctx2.stroke();
   }
-  for (let py = y + step; py < y + h; py += step) {
+  for (let py = oy - Math.ceil((oy - y) / cell) * cell; py < y + h; py += cell) {
+    if (py <= y) continue;
     ctx2.beginPath();
-    ctx2.moveTo(x, py + 0.5);
-    ctx2.lineTo(x + w, py + 0.5);
+    ctx2.moveTo(x, Math.round(py) + 0.5);
+    ctx2.lineTo(x + w, Math.round(py) + 0.5);
     ctx2.stroke();
   }
+
+  // Виньетка — как на поле: края кадра глуше центра.
+  const vg = ctx2.createRadialGradient(
+    x + w * 0.5, y + h * 0.5, Math.min(w, h) * 0.20,
+    x + w * 0.5, y + h * 0.5, Math.max(w, h) * 0.72
+  );
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.45)');
+  ctx2.fillStyle = vg;
+  ctx2.fillRect(x, y, w, h);
 
   ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
   ctx2.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
@@ -7838,21 +7796,35 @@ function drawCosmeticsZone(ctx2, rect, ownerId, alpha, terrId, cellHint) {
       drawTerrTile(ctx2, rect.x + gx * cell, rect.y + gy * cell, cell, base, id, gx, gy, a, now);
     }
   }
+  /* Блик внутри клетки — как в игре: поверх заливки идёт чуть более яркий
+     вложенный квадрат. Без него база (сплошная заливка) выглядела плоской
+     плитой, а не территорией. */
+  const rgbB = hslToRgb(base);
+  ctx2.globalAlpha = Math.min(0.5, a * 0.42);
+  ctx2.fillStyle = `rgb(${rgbB[0]},${rgbB[1]},${rgbB[2]})`;
+  const inset = Math.max(1, (cell * 0.18) | 0);
+  for (let gy = 0; gy < rows; gy++) {
+    for (let gx = 0; gx < cols; gx++) {
+      ctx2.fillRect(rect.x + gx * cell + inset, rect.y + gy * cell + inset, cell - inset * 2, cell - inset * 2);
+    }
+  }
+  ctx2.globalAlpha = 1;
   ctx2.restore();
-  ctx2.save();
+
+  /* Границы владения в игре не обводятся — территория просто заканчивается
+     там, где кончаются клетки. Прежняя чёрная рамка выдавала «картинку в
+     рамке» вместо куска поля. Исключение — витраж: у него светящийся шов
+     по границе есть и в игре. */
   if (id === 5) {
-    // Витраж: светящийся шов ровно по границе владения.
+    ctx2.save();
     const rgb = hslToRgb(base);
     ctx2.strokeStyle = 'rgba(255,255,255,0.85)';
     ctx2.shadowColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
     ctx2.shadowBlur = 14;
     ctx2.lineWidth = 3;
-  } else {
-    ctx2.strokeStyle = 'rgba(0,0,0,0.25)';
-    ctx2.lineWidth = 1;
+    ctx2.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+    ctx2.restore();
   }
-  ctx2.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
-  ctx2.restore();
 }
 
 const DIR_NAMES = ['up', 'down', 'left', 'right'];
