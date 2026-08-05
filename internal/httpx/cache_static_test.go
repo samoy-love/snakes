@@ -6,7 +6,8 @@ package httpx
 // Контракт (index.html ставит ?v=__BUILD__, scripts/deploy.sh подменяет литерал
 // на идентификатор релиза в уезжающей копии):
 //   - .js/.css с непустым v, отличным от литерала __BUILD__ -> immutable на год;
-//   - всё остальное .js/.css -> no-store;
+//   - всё остальное .js/.css -> no-cache (обязательная ревалидация, но 304
+//     вместо полной перекачки: соседние ES-модули приходят без ?v=);
 //   - HTML -> всегда no-store (в нём и записан текущий ?v=).
 
 import (
@@ -35,18 +36,18 @@ func TestCacheStaticMiddleware(t *testing.T) {
 		{"index.html с версией всё равно no-store", "/index.html?v=rel-1", "no-store"},
 		{"произвольный html — no-store", "/foo/bar.html", "no-store"},
 
-		{"js без query — no-store", "/client.js", "no-store"},
-		{"js с пустым v — no-store", "/client.js?v=", "no-store"},
-		{"js с неподменённым литералом — no-store", "/client.js?v=" + BuildPlaceholder, "no-store"},
+		{"js без query — ревалидация", "/client.js", revalidateCacheControl},
+		{"js с пустым v — ревалидация", "/client.js?v=", revalidateCacheControl},
+		{"js с неподменённым литералом — ревалидация", "/client.js?v=" + BuildPlaceholder, revalidateCacheControl},
 		{"js с релизом — immutable", "/client.js?v=20260802-010203-deadbee", immutableCacheControl},
 		{"вендоренный js с релизом — immutable", "/vendor/twemoji.min.js?v=rel-1", immutableCacheControl},
 
-		{"css без query — no-store", "/style.css", "no-store"},
-		{"css с релизом — immutable", "/style.css?v=rel-1", immutableCacheControl},
+		{"css без query — ревалидация", "/css/01-base.css", revalidateCacheControl},
+		{"css с релизом — immutable", "/css/01-base.css?v=rel-1", immutableCacheControl},
 
 		// Соседние ES-модули приходят без query (импорт из client.js query не
-		// наследует) и осознанно остаются на no-store — суммарно ~20 КБ.
-		{"соседний ES-модуль — no-store", "/client_net.js", "no-store"},
+		// наследует). no-cache: обязательная ревалидация, но 304 вместо ~20 КБ.
+		{"соседний ES-модуль — ревалидация", "/client_net.js", revalidateCacheControl},
 
 		{"эмодзи — immutable без всякого v", "/emoji-64/1f600.png", immutableCacheControl},
 	}
@@ -75,13 +76,37 @@ func TestBuildPlaceholderMatchesIndexHTML(t *testing.T) {
 		t.Fatalf("в public/index.html нет литерала %s — версионирование статики выключено; "+
 			"ссылки на собственную статику должны иметь ?v=%s", BuildPlaceholder, BuildPlaceholder)
 	}
-	// Ровно те ссылки, ради которых всё затевалось.
+	// Ровно те ссылки, ради которых всё затевалось. Стили разрезаны на части
+	// (public/css/NN-*.css), и версия обязана стоять у КАЖДОЙ: файл без ?v=
+	// уходит на ревалидацию вместо immutable, а забытый в одной строке
+	// плейсхолдер заметить глазами в шапке из шести <link> практически нельзя.
 	for _, want := range []string{
 		"/client.js?v=" + BuildPlaceholder,
-		"/style.css?v=" + BuildPlaceholder,
+		"/css/01-base.css?v=" + BuildPlaceholder,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("в public/index.html нет ссылки %s", want)
 		}
+	}
+
+	// Каждый .css из public/css подключён и подключён с версией.
+	cssDir := filepath.Join("..", "..", "public", "css")
+	entries, err := os.ReadDir(cssDir)
+	if err != nil {
+		t.Skipf("public/css недоступен: %v", err)
+	}
+	found := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".css") {
+			continue
+		}
+		found++
+		want := "/css/" + e.Name() + "?v=" + BuildPlaceholder
+		if !strings.Contains(src, want) {
+			t.Errorf("файл public/css/%s не подключён в index.html как %s", e.Name(), want)
+		}
+	}
+	if found == 0 {
+		t.Error("в public/css не нашлось ни одного .css — стили не поедут вовсе")
 	}
 }

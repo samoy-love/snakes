@@ -39,9 +39,11 @@ GO_IMAGE := golang:1.25
 # 22.x нужен и для `node --check` (сам определяет ES-модуль по синтаксису),
 # и для стабильного `node --test` со списком файлов.
 NODE       ?= node
-CLIENT_JS  := public/client.js public/client_audio.js public/client_errors.js \
-              public/client_fx.js public/client_net.js
-CLIENT_TESTS := tests/protocol_golden.test.mjs tests/client_contract.test.mjs
+# Списки собираются шаблоном, а не перечислением: перечисление уже разъезжалось
+# с каталогом — client_i18n/color/cos_draw/util не проверялись `node --check`
+# вовсе, а из тестов гонялись два файла из одиннадцати.
+CLIENT_JS    := $(wildcard public/client*.js)
+CLIENT_TESTS := $(wildcard tests/*.test.mjs)
 
 .PHONY: help run build test test-race test-race-docker test-client test-all vet fmt fmt-check \
         golden node-check clean
@@ -62,8 +64,15 @@ help:
 	@echo "  fmt-check    — падает, если есть неотформатированные файлы"
 	@echo "  clean        — удалить бинарь и dist/"
 
+# Сервер читает ТОЛЬКО окружение (см. docs/config.md), поэтому .env подхватываем
+# здесь: голый `go run .` уходит в прод-дефолт WS_ORIGINS, и локальный клиент
+# получает 403 на /ws — кнопка «Играть» молча не работает.
 run:
-	go run .
+	@if [ -f .env ]; then \
+		set -a; . ./.env; set +a; go run .; \
+	else \
+		go run .; \
+	fi
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) .

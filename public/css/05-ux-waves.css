@@ -1,0 +1,1035 @@
+/* Волны 6-8: правки по UX-ревью, мобильная раскладка.
+   Часть общего каскада, файл 05-ux-waves.css. ПОРЯДОК ФАЙЛОВ ЗНАЧИМ:
+   поздние правила перекрывают ранние порядком, а не !important,
+   поэтому index.html подключает их строго по номеру. */
+
+/* ==========================================================================
+   ВОЛНА 6. Правки по UX-ревью флоу нового игрока.
+   Блок идёт последним в файле: перекрывает ранние правила порядком, а не
+   !important. Всё, что относится к одному пункту отчёта, лежит рядом.
+   ========================================================================== */
+
+/* --- U1. Экран смерти: убран дубль, кнопки всегда в зоне видимости ---------
+   .deathYou (рисует client.js) дословно повторял три из пяти строк
+   .deathStatsGrid — Место, Очки, Киллы. Скрываем именно повторы; остаются
+   Зона и Контракт, которых в верхней сетке нет.
+   Порядок строк внутри .deathYou фиксирован разметкой client.js:
+   1 — заголовок, 2 Место, 3 Очки, 4 Зона, 5 Киллы, 6 Контракт (опц.).
+   Правильное решение — убрать дубли в самом client.js; до этого правило
+   ниже безопасно вырождается в no-op, если блока не будет вовсе. */
+.deathStats .deathYou > .deathYouRow:nth-child(2),
+.deathStats .deathYou > .deathYouRow:nth-child(3),
+.deathStats .deathYou > .deathYouRow:nth-child(5) {
+  display: none;
+}
+
+/* Ряд действий закреплён у нижней кромки карточки: карточка скроллится,
+   но «Играть снова» видна на любом экране без прокрутки. */
+.deathOverlay .toastBody {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.deathOverlay .toastRow {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: var(--pad-md) calc(var(--pad-lg) * -1) calc(var(--pad-lg) * -1);
+  padding: var(--pad-md) var(--pad-lg) var(--pad-lg);
+  border-top: 1px solid var(--border2);
+  background: rgba(9, 11, 15, 0.92);
+  backdrop-filter: blur(8px);
+}
+
+/* На низком экране топ-5 съедает высоту, ради которой всё и затевалось:
+   оставляем три строки — полный список есть в итогах матча. */
+@media (max-height: 720px) {
+  .deathStats .deathTop tbody tr:nth-child(n + 4) {
+    display: none;
+  }
+
+  .deathStats {
+    gap: var(--pad-sm);
+    margin: var(--pad-sm) 0;
+  }
+}
+
+/* --- U2. Правая панель: килфид не вываливается за экран и не лезет под чат -
+   Раньше #rightInfo получал max-height из «магической» константы 170px,
+   которая не совпадала с реальной высотой миникарты, а снизу вообще ничего
+   не резервировалось под #chat (z-index 14 — он всегда сверху).
+   Теперь сайдбар — флекс-колонка: миникарта занимает своё, #rightInfo
+   забирает ровно остаток и скроллится сам. */
+:root {
+  --right-top: calc(12px + var(--sa-top));
+  --right-bottom-reserve: 0px;
+}
+
+#rightSidebar > #minimapPanel {
+  flex: 0 0 auto;
+}
+
+#rightInfo > * {
+  flex: 0 0 auto;
+}
+
+@media (min-width: 721px) {
+  /* Свёрнутый чат — это только шапка (~56px) плюс отступ снизу. */
+  :root {
+    --right-bottom-reserve: 80px;
+  }
+
+  /* Один источник правды: чат не имеет права вырасти выше того, что под него
+     зарезервировано, иначе он снова накроет килфид (z-index 14 против 12). */
+  #chat {
+    max-height: min(
+      calc(100dvh - 24px - var(--sa-top) - var(--sa-bottom)),
+      calc(var(--right-bottom-reserve) - 12px)
+    );
+  }
+}
+
+/* --- U4. Миникарта на телефоне: тач-кнопка вместо единственной клавиши M ---
+   Обработчик (открыть #minimapOverlay) вешает client.js на #minimapMobileBtn. */
+.hudMinimapBtn {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .hudMinimapBtn {
+    display: inline-flex;
+  }
+}
+
+/* --- U5. Типографика оверлеев: пять ступеней вместо тринадцати -------------
+   Правила ограничены оверлеями (.overlay .card, экраны смерти и матча) —
+   игровой HUD живёт по своим плотностям и в аудит не входил. */
+.overlay .card .overlayTitle {
+  font-size: var(--fs-display);
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+/* Продающее предложение было самым мелким и лёгким текстом на экране. */
+.overlay .card .overlaySub {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--muted);
+  opacity: 1;
+  margin-bottom: 16px;
+}
+
+.overlay .card .overlayKicker {
+  font-size: var(--fs-meta);
+  font-weight: 700;
+}
+
+.overlay .card .menuPanelTitle {
+  font-size: var(--fs-title);
+  font-weight: 700;
+}
+
+/* Промежуточная ступень в провале между заголовком 52px и телом. */
+#menuOverlay .menuPanelPrimary > .menuPanelTitle {
+  font-size: var(--fs-lead);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.2px;
+  margin-bottom: 6px;
+}
+
+.overlay .card .menuOnline {
+  font-size: var(--fs-meta);
+}
+
+.overlay .card .menuOnlineCount {
+  font-size: var(--fs-title);
+  font-weight: 800;
+}
+
+.overlay .card .menuOnlineLabel {
+  font-weight: 600;
+}
+
+.overlay .card .menuHowToStep {
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.overlay .card .menuHowToStep::before {
+  font-size: var(--fs-meta);
+  font-weight: 700;
+}
+
+.overlay .card .menuHowToIcon {
+  font-size: var(--fs-title);
+}
+
+.overlay .card .fieldLabel,
+.overlay .card .roomRowTitle,
+.overlay .card .roomsEmptyTitle,
+.overlay .card .cosmeticsItemTitle,
+.overlay .card .menuOnboardingTitle {
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.overlay .card .overlayHint,
+.overlay .card .fieldHint,
+.overlay .card .fieldError,
+.overlay .card .roomsDetailsHint,
+.overlay .card .roomsStats,
+.overlay .card .roomRowMeta,
+.overlay .card .roomRowSub,
+.overlay .card .roomsEmptyDesc,
+.overlay .card .menuOnboardingDesc,
+.overlay .card .cosmeticsItemSub,
+.overlay .card .cosmeticsItemWhere,
+.overlay .card .cosmeticsPrice,
+.overlay .card .cosmeticsStatus,
+.overlay .card .tierBadge {
+  font-size: var(--fs-meta);
+  font-weight: 600;
+}
+
+/* Вес 800–900 на 11–13px по тёмному фону читается как замыленное пятно:
+   акцент оставляем только капителям-разделителям. */
+.overlay .card .settingsGroupTitle {
+  font-size: var(--fs-meta);
+  font-weight: 700;
+}
+
+.overlay .card .cosmeticsPrice .num {
+  font-weight: 700;
+}
+
+/* Кнопки и поля не наследовали шрифт: наружу протекал дефолт 13.3333px. */
+.overlay .card button,
+.overlay .card input,
+.overlay .card select,
+.overlay .card textarea,
+.deathOverlay button,
+.deathOverlay input,
+.matchOverlay button {
+  font-family: inherit;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.overlay .card .btnPlay {
+  font-size: var(--fs-title);
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.overlay .card .iconBtn {
+  font-size: var(--fs-title);
+}
+
+.overlay .card .cosmeticsStyleTitle .iconBtn {
+  font-size: var(--fs-meta);
+}
+
+/* iOS зумит форму при кегле меньше 16px — на телефоне поля крупнее шкалы. */
+@media (max-width: 720px) {
+  .overlay .card input,
+  .overlay .card select,
+  .overlay .card textarea {
+    font-size: 16px;
+  }
+}
+
+/* --- U6. Композиция меню: правая колонка перестала быть пустотой -----------
+   Было: левая панель 478×456, правая (аккордеон «Комнаты») 364×47 — около
+   409px пустоты, ~30% площади карточки. Схлопывание в одну колонку решало
+   перекос, но делало карточку выше вьюпорта 768px и включало прокрутку на
+   самом ноутбучном разрешении. Поэтому колонки остались две, а правая
+   заполнена превью экипированного облика — канвас рисует client.js. */
+.menuSideCol {
+  display: grid;
+  gap: var(--pad-lg);
+  align-content: start;
+  min-width: 0;
+}
+
+.menuSkinPreviewWrap {
+  margin-top: var(--pad-md);
+  border-radius: var(--r-tab);
+  border: 1px solid var(--border2);
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.06), rgba(0, 0, 0, 0.24));
+  overflow: hidden;
+}
+
+#menuSkinPreview {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 42 / 26;
+}
+
+@media (max-width: 720px) {
+  /* На телефоне колонка одна, а превью — лишние 200px до кнопки «Играть». */
+  .menuSkinPanel {
+    display: none;
+  }
+}
+
+/* --- U7. Тач-цели ---------------------------------------------------------
+   База поднята до 44px через --control-h. Здесь — то, что мимо неё. */
+.overlay .card .roomsSearchWrap input {
+  padding-right: 52px;
+}
+
+#emojiPanelTop {
+  width: var(--control-h);
+  height: var(--control-h);
+}
+
+/* --- U8. Магазин: тройное дублирование информации в карточке ---------------
+   Категорийное «где это видно» стояло в каждой из восьми карточек подряд.
+   Место такой строки — один раз в шапке категории (#cosmeticsWhere).
+   Во вкладке титулов тот же элемент несёт условие получения — предметное,
+   а не категорийное, — поэтому там он остаётся. */
+.cosmeticsItems:not(.isTitles) .cosmeticsItem .cosmeticsItemWhere {
+  display: none;
+}
+
+/* Редкость названа разделителем группы («ОБЫЧНЫЙ») — бейдж в заголовке лишний. */
+.cosmeticsItemTitle .tierBadge {
+  display: none;
+}
+
+/* «До покупки N стиль» дублирует и ценник, и подпись кнопки покупки. */
+.cosmeticsItemSub.isBlocked {
+  display: none;
+}
+
+.cosmeticsWhere {
+  margin-top: 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border2);
+  background: rgba(0, 0, 0, 0.20);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.cosmeticsWhere:empty {
+  display: none;
+}
+
+/* Одна колонка 434px давала около 970px прокрутки на категорию при свободном
+   правом крае. На широком экране лента идёт в две колонки. */
+#cosmeticsOverlay .card {
+  width: min(1120px, calc(100vw - 24px));
+}
+
+@media (min-width: 1180px) {
+  .cosmeticsItems {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
+    max-height: min(56dvh, 520px);
+  }
+
+  .cosmeticsItems > .roomsEmpty {
+    grid-column: 1 / -1;
+  }
+
+  /* В колонке ~273px строка «превью + название + цена + кнопка» ужимает
+     название до 58px и рвёт его по буквам: раскладываем в два ряда, как на
+     узком экране. */
+  .cosmeticsItems .cosmeticsItem {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .cosmeticsItems .cosmeticsItemLeft {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .cosmeticsItems .cosmeticsItemRight {
+    flex: 1 0 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Новых анимаций волна не добавляет; закрепляем, что липкий ряд действий
+     экрана смерти не получает плавных переходов. */
+  .deathOverlay .toastRow {
+    transition: none;
+  }
+}
+
+/* ==========================================================================
+   ВОЛНА 7. Приёмочное UX-ревью: закрытие регрессий прошлой волны.
+   Блок идёт последним в файле и перекрывает ранние правила порядком.
+   ========================================================================== */
+
+/* --- U7. Типографика: пять ступеней на весь продукт, включая игровой HUD ----
+   Раньше шкала (--fs-display/lead/title/body/meta) действовала только внутри
+   .overlay .card, а HUD жил на 47 хардкодах и восьми старых переменных
+   --fs-11…--fs-22 — суммарно ~17 различимых кеглей. Хардкоды заменены на
+   переменные по всему файлу, а старые переменные схлопнуты сюда, на пять
+   ступеней: meta 12 / body 15 / title 18 / lead / display.
+   Вес 900 снят везде (54 объявления → 800); 900 возвращён ниже только тем
+   элементам, чей кегль заведомо >= 18px. */
+:root,
+html[data-theme],
+html[data-theme="light"] {
+  --fs-meta: 12px;
+  --fs-body: 15px;
+  --fs-title: 18px;
+  --fs-11: var(--fs-meta);
+  --fs-12: var(--fs-meta);
+  --fs-13: var(--fs-meta);
+  --fs-14: var(--fs-body);
+  --fs-16: var(--fs-body);
+  --fs-18: var(--fs-title);
+  --fs-20: var(--fs-title);
+  --fs-22: var(--fs-lead);
+
+  /* U10. Контраст вторичного текста на blur-панелях над яркой территорией:
+     было ~1.9:1 (0.60 поверх rgba(0,0,0,0.376)). Поднимаем и текст, и подложку.
+     --hud-panel-alpha остаётся пользовательской настройкой (ползунок в
+     «Настройках» пишет её инлайном), поэтому усиливаем базовый --panel. */
+  /* Волна 8: замер показал, что 0.68 + 0.78 дают только 4.0:1 — порога AA
+     недобирали. 0.76 даёт фактическую непрозрачность 0.76 * 0.82 = 0.62
+     и 4.9:1 для --muted2 над жёлтым #f5c542. */
+  --muted2: rgba(229, 231, 235, 0.78);
+  --panel: rgba(0, 0, 0, 0.76);
+  --panel2: rgba(0, 0, 0, 0.56);
+}
+
+/* Тяжёлое начертание — только крупному кеглю. */
+.overlayTitle,
+.bigBannerTitle,
+.matchTitle,
+.deathOverlay .toastTitle,
+.overlay .card .btnPlay,
+.matchKpiValue,
+#title {
+  font-weight: 900;
+}
+
+/* --- U1. Килфид виден всегда ----------------------------------------------
+   Регрессия: живая таблица игроков наполнила #rightInfo на ~1050px при окне
+   500px, и килфид (последний ребёнок скролл-контейнера) уезжал за нижнюю
+   границу — видимая высота 0px на всех разрешениях.
+   Решение: #rightInfo больше не скроллится целиком. Это флекс-колонка, в
+   которой «Матч» и «Команда» ужимаются и скроллятся ВНУТРИ себя, а блок
+   событий (client.js оборачивает #killfeed в #rightEventsDetails) закреплён
+   последним и не ужимается никогда.
+   NB: killfeed в разметке лежит в #rightInfo, но client.js переносит его в
+   сгенерированный details#rightEventsDetails — стилизуем оба случая. */
+#rightInfo > #rightMatchDetails { order: 1; }
+#rightInfo > #rightTeamDetails { order: 2; }
+#rightInfo > #perf { order: 3; }
+#rightInfo > #rightEventsDetails,
+#rightInfo > #killfeed { order: 4; }
+
+/* Ужимаемые панели: сама details — колонка, её тело скроллится. */
+#rightInfo > #rightMatchDetails,
+#rightInfo > #rightTeamDetails {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  /* Ниже шапки + двух строк панель перестаёт что-либо сообщать. */
+  min-height: min(92px, 100%);
+}
+
+#rightInfo > .rightDetails > .rightDetailsSummary {
+  flex: 0 0 auto;
+}
+
+#rightInfo > #rightMatchDetails > #metaHud,
+#rightInfo > #rightTeamDetails > #teamHud {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  /* pointer-events у #metaHud был none — без этого внутренний скролл недоступен */
+  pointer-events: auto;
+}
+
+/* Потолок «Команды»: 12 строк на 448px и были причиной вытеснения килфида. */
+#rightInfo > #rightTeamDetails > #teamHud {
+  max-height: min(34dvh, 240px);
+}
+
+#rightInfo > #rightMatchDetails > #metaHud {
+  max-height: min(30dvh, 260px);
+}
+
+/* Блок событий закреплён: flex-shrink 0 — он не отдаёт высоту таблицам. */
+#rightInfo > #rightEventsDetails,
+#rightInfo > #killfeed {
+  flex: 0 0 auto;
+}
+
+/* Килфид рисует максимум 6 строк (client.js), новые — сверху. Ограничиваем
+   высоту четырьмя строками: переполнение срезает самые старые. */
+#rightInfo #killfeed {
+  max-height: var(--killfeed-max, 152px);
+  overflow: hidden;
+}
+
+/* При развёрнутом чате сайдбару оставалось ~260px — килфид ужимается до трёх
+   строк, но не исчезает, а таблицы дожимаются своим внутренним скроллом. */
+@media (min-width: 721px) {
+  body:has(#chat:not(.collapsed)) {
+    --killfeed-max: 110px;
+    /* 356px под развёрнутый чат не оставляли места ни таблице, ни килфиду */
+    --right-bottom-reserve: 264px;
+  }
+
+  body:has(#chat:not(.collapsed)) #rightInfo > #rightTeamDetails > #teamHud {
+    max-height: min(22dvh, 150px);
+  }
+
+  body:has(#chat:not(.collapsed)) #rightInfo > #rightMatchDetails > #metaHud {
+    max-height: min(22dvh, 150px);
+  }
+}
+
+/* Низкие экраны ноутбуков (768px): таблицы отдают высоту первыми. */
+@media (max-height: 800px) {
+  #rightInfo > #rightTeamDetails > #teamHud {
+    max-height: min(26dvh, 190px);
+  }
+
+  #rightInfo > #rightMatchDetails > #metaHud {
+    max-height: min(24dvh, 180px);
+  }
+}
+
+/* --- U5. Рейтинг перестал дублироваться трижды ----------------------------
+   Было: #topHudPlace + #stats (по 🏆) + #teamHud — одни и те же цифры.
+   Теперь 🏆 (.lbPinned) переключает: развёрнутый левый лидерборд ИЛИ правая
+   панель «Команда», но не оба сразу. Без 🏆 #stats скрыт на любом экране —
+   раньше медиазапрос в начале файла показывал его при высоте >= 821px. */
+#hud:not(.lbPinned) #stats {
+  display: none;
+}
+
+body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
+  display: none;
+}
+
+/* --- U6. Иерархия верхнего HUD --------------------------------------------
+   Место — первым и крупным. Раскладку строки задаёт 06-redesign.css (flex);
+   grid-template-columns, стоявший здесь, под flex не действует вовсе. */
+.topHudPlace {
+  font-size: var(--fs-title);
+  font-weight: 900;
+  line-height: var(--lh-tight);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  color: #fff;
+}
+
+.topHudPlace.isLeader {
+  color: var(--gold);
+}
+
+.topHudPlace:empty {
+  display: none;
+}
+
+.topHudZonePct {
+  font-size: var(--fs-body);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh-tight);
+}
+
+/* На телефоне строка узкая: место крупнее, ряды плотнее. Явная расстановка
+   по колонкам и рядам отсюда убрана — строка выкладывается flex-ом
+   (06-redesign.css), и grid-column/grid-row в ней не действуют. */
+@media (max-width: 720px) {
+  .topHudRow {
+    row-gap: 2px;
+  }
+
+  .topHudPlace {
+    font-size: var(--fs-body);
+  }
+}
+
+/* --- U2. Кнопки выхода и языка снова кликабельны на телефоне ---------------
+   #rightSidebar (z-index 12) перекрывал #hud (10): elementFromPoint в центре
+   🇷🇺 и ⟵ возвращал SUMMARY.rightDetailsSummary, и «выйти в меню» на телефоне
+   схлопывало панель «Матч» вместо выхода. Esc на телефоне нет. */
+/* --- U3. На телефоне поле важнее правой панели ----------------------------
+   Регрессия: правила `#rightInfo { display: none }` (<=720px) и
+   `#rightSidebar { display: none }` (<=520px) были перебиты более поздним
+   безусловным `display: flex` из волны 6. Возвращаем, уже после него. */
+@media (max-width: 720px) {
+  #rightInfo,
+  #rightInfo > #rightEventsDetails,
+  #rightSidebar #perf,
+  #rightSidebar #killfeed {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  #rightSidebar {
+    display: none;
+  }
+}
+
+/* --- U8. Мобильный HUD без надежды на hover -------------------------------
+   opacity 0.42 поднималась только по :hover/:focus-within — на тач-экране
+   это состояние не наступает никогда. */
+@media (hover: none) {
+  body.inGame #hud:not(.lbPinned) {
+    opacity: 1;
+  }
+
+  body.inGame #hud:not(.lbPinned) .hudActions .iconBtn {
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
+    backdrop-filter: blur(10px);
+    box-shadow: var(--shadow-float);
+  }
+}
+
+/* --- U9. Тач-цели под входной анимацией карточек --------------------------
+   .overlay .card / .toastCard анимируются из scale(0.985); измерение попадает
+   в кадр анимации и 44px превращаются в 43.34px. Компенсируем запасом. */
+.deathOverlay .toastRow > button,
+.matchActions > button,
+.matchNextActions > button,
+#restartBtn,
+#deathMenuBtn,
+#matchContinueBtn,
+#matchMenuBtn {
+  min-height: 48px;
+}
+
+/* --- U10. Мелочи ---------------------------------------------------------- */
+
+/* Заголовок «Топ-5» стоял над таблицей из 12 строк. */
+.deathStats .deathTop tbody tr:nth-child(n + 6) {
+  display: none;
+}
+
+/* menu.controls_desc и menu.hint дублируются дословно: пока показан
+   онбординг, второй экземпляр совета прячем. */
+#menuOverlay #menuOnboarding:not(.hidden) ~ .overlayHint {
+  display: none;
+}
+
+/* Подсказка по управлению обязана быть видна именно в матче. */
+body.inGame #hud:not(.lbPinned) #help {
+  display: block !important;
+  padding-top: 6px;
+  max-width: 320px;
+  font-size: var(--fs-meta);
+  color: var(--muted2);
+}
+
+/* Свайп нигде не был назван: на тач-устройстве показываем свою строку вместо
+   «WASD / Enter / Esc / M», которых на телефоне нет. */
+#helpTouch {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  #help {
+    display: none !important;
+  }
+
+  body.inGame #helpTouch {
+    display: block;
+    position: fixed;
+    left: calc(8px + var(--sa-left));
+    bottom: calc(8px + var(--sa-bottom));
+    z-index: var(--z-hud);
+    max-width: min(46vw, 260px);
+    padding: 6px 10px;
+    border: 1px solid var(--border2);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
+    backdrop-filter: blur(10px);
+    font-size: var(--fs-meta);
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--muted);
+    pointer-events: none;
+  }
+
+  /* Развёрнутый чат занимает низ экрана целиком. */
+  body:has(#chat:not(.collapsed)) #helpTouch,
+  body.overlayActive #helpTouch {
+    display: none;
+  }
+}
+
+/* --- U4. Пустой #menuSkinPreview не должен выглядеть дырой -----------------
+   Канвас наполняет client.js; пока он пуст, рамка получает подложку и
+   приглушённый силуэт, а не 342×212 пустоты. Силуэт лежит ПОД канвасом
+   (z-index 0 против 1), поэтому не мешает будущей отрисовке. */
+.menuSkinPreviewWrap {
+  position: relative;
+  min-height: 132px;
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.10), rgba(0, 0, 0, 0.34));
+}
+
+.menuSkinPreviewWrap::after {
+  content: '🐍';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 56px;
+  opacity: 0.16;
+  filter: grayscale(1);
+  pointer-events: none;
+}
+
+#menuSkinPreview {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Волна 7 новых анимаций не вводит; фиксируем, что заглушка превью и
+     подсказка управления статичны. */
+  .menuSkinPreviewWrap::after,
+  #helpTouch {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* --- C2. Индикатор фазы матча ---------------------------------------------
+   Слот #topHudPhase создаётся из client.js рядом с таймером и несёт классы
+   topHudPhase topHudChip. В финале (модификатор .isFinal) фаза подсвечивается
+   золотом — это единственный момент матча, когда очки за захват удваиваются,
+   и игрок должен его заметить. */
+.topHudPhase {
+  white-space: nowrap;
+}
+
+.topHudPhase.isFinal {
+  border-color: color-mix(in srgb, var(--gold) 62%, var(--border2));
+  background: color-mix(in srgb, var(--gold) 18%, rgba(0, 0, 0, 0.28));
+  color: var(--gold);
+  animation: topHudPhasePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes topHudPhasePulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.28);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topHudPhase.isFinal {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   ВОЛНА 8. Хвосты приёмочного ревью.
+   Блок идёт последним в файле: перекрывает ранние правила порядком, а не
+   !important.
+   ========================================================================== */
+
+/* --- V2. Значок архетипа бота ---------------------------------------------
+   Разметку ставит client.js рядом с ником в таблице лидеров, килфиде и в
+   плашке над головой:
+     <span class="botArch archFarmer tier1" title="Фермер · Тир 2">
+       <span class="botArchLabel">Фермер</span>
+     </span>
+   Глиф рисует CSS (::before) — он не переводится и не зависит от i18n.
+   Подпись .botArchLabel опциональна и скрывается на узких экранах.
+   Бейдж намеренно тусклее ника: 700 против 800–900 и цвет через
+   color-mix с --muted, чтобы не перетягивать взгляд с имени игрока. */
+.botArch {
+  --arch-color: var(--tier-base);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: baseline;
+  flex: 0 0 auto;
+  /* 14ch: замер — «Агрессор» (самая длинная короткая подпись RU) не влезал
+     ни в 9ch, ни в 12ch. Длиннее 14ch подписи не предусмотрены: см. отчёт,
+     ключи bot.arch_* должны быть однословными. */
+  max-width: 14ch;
+  margin-right: 5px;
+  padding: 0 5px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--arch-color) 34%, transparent);
+  background: color-mix(in srgb, var(--arch-color) 12%, rgba(0, 0, 0, 0.34));
+  color: color-mix(in srgb, var(--arch-color) 74%, var(--muted));
+  font-size: var(--fs-11);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  /* 1.3, а не 1.5: при 1.5 бейдж (19.6px) поднимал строку таблицы с 23.6 до
+     25px — колонки «съезжали» относительно строк без бейджа. */
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.botArch::before {
+  content: '🤖';
+  font-size: var(--fs-11);
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.botArchLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+/* Четыре архетипа. Цвета взяты вне лестницы редкости, чтобы бейдж бота не
+   читался как «редкий предмет». */
+.botArch.archFarmer {
+  --arch-color: #4ade80;
+}
+
+.botArch.archFarmer::before {
+  content: '🌾';
+}
+
+.botArch.archAggressor {
+  --arch-color: #fb7185;
+}
+
+.botArch.archAggressor::before {
+  content: '⚔';
+}
+
+.botArch.archCoward {
+  --arch-color: #7dd3fc;
+}
+
+.botArch.archCoward::before {
+  content: '🛡';
+}
+
+.botArch.archTerritorial {
+  --arch-color: #c084fc;
+}
+
+.botArch.archTerritorial::before {
+  content: '🧭';
+}
+
+/* Три тира — только насыщенность. Отдельного глифа у тира нет: два значка
+   подряд у каждого ника превращают список в рябь. */
+.botArch.tier0 {
+  opacity: 0.72;
+  border-style: dashed;
+}
+
+.botArch.tier1 {
+  opacity: 1;
+}
+
+.botArch.tier2 {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--arch-color) 62%, transparent);
+  background: color-mix(in srgb, var(--arch-color) 20%, rgba(0, 0, 0, 0.34));
+  color: color-mix(in srgb, var(--arch-color) 88%, #fff);
+}
+
+/* Тир 3 получает единственный маркер — точку, а не второй бейдж */
+.botArch.tier2::after {
+  content: '●';
+  font-size: 7px;
+  line-height: 1;
+  flex: 0 0 auto;
+  opacity: 0.9;
+}
+
+/* Только-глиф вариант бейджа: ужимаем ещё сильнее */
+.botArch.isGlyphOnly {
+  max-width: none;
+  padding: 0 3px;
+  margin-right: 3px;
+}
+
+.botArch.isGlyphOnly .botArchLabel {
+  display: none;
+}
+
+/* Правая колонка (≈245px) и килфид: только глиф на любой ширине окна.
+   Замер: подпись упиралась в max-width: 9ch и «Агрессор» превращался в
+   «Агре…». Обрезанное слово хуже отсутствующего — там, где места нет,
+   значение несёт глиф, а расшифровку даёт title (его ставит client.js).
+   Подпись остаётся в широких контекстах: итоги матча и развёрнутый
+   лидерборд. */
+#rightSidebar .botArch,
+#killfeed .botArch,
+#teamHud .botArch,
+#metaHud .botArch {
+  max-width: none;
+  padding: 0 3px;
+}
+
+#rightSidebar .botArch .botArchLabel,
+#killfeed .botArch .botArchLabel,
+#teamHud .botArch .botArchLabel,
+#metaHud .botArch .botArchLabel {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .botArch .botArchLabel {
+    display: none;
+  }
+
+  .botArch {
+    max-width: none;
+    padding: 0 3px;
+  }
+}
+
+/* --- V3. Числовой прогресс у заблокированного титула -----------------------
+   client.js кладёт рядом с полосой подпись
+     <span class="cosmeticsItemProgressLabel">37 / 100</span>
+   — либо отдельным элементом после .cosmeticsItemProgress, либо внутри
+   обёртки .cosmeticsProgressRow. Оба варианта поддержаны. */
+/* Grid, а не flex: в карточке титула на двухколоночной сетке магазина
+   .titleItemLeft получается ~110px, и flex-строка «полоса 40px + подпись
+   47px» вылезала за карточку. `1fr auto` отдаёт подписи её max-content, а
+   полосе — остаток, и переполнения нет ни при какой ширине. */
+.cosmeticsProgressRow {
+  display: grid;
+  grid-template-columns: minmax(24px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  min-width: 0;
+}
+
+.cosmeticsProgressRow .cosmeticsItemProgress {
+  margin-top: 0;
+  min-width: 0;
+}
+
+.cosmeticsItemProgressLabel {
+  flex: 0 0 auto;
+  font-size: var(--fs-11);
+  font-weight: 800;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted2);
+  white-space: nowrap;
+}
+
+/* Отдельной строкой (без обёртки) подпись прижимается к правому краю полосы */
+.cosmeticsItemProgress + .cosmeticsItemProgressLabel {
+  display: block;
+  margin-top: 3px;
+  text-align: right;
+}
+
+/* В карточке титула прогресс золотой — подпись держит ту же линию */
+.titleItem .cosmeticsItemProgressLabel {
+  color: color-mix(in srgb, var(--title-accent, var(--gold)) 62%, var(--muted));
+}
+
+.titleItem.isUnlocked .cosmeticsItemProgressLabel {
+  color: var(--gold);
+}
+
+/* Условие получения теперь содержит числа («Захватите 37/100 клеток»):
+   моноширинные цифры и перенос вместо обрезки. */
+.titleReq {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.titleReq::before {
+  flex: 0 0 auto;
+}
+
+/* Полоса при наличии числовой подписи чуть заметнее: 5px рядом с 11px
+   цифрами выглядели как случайная линия. */
+.titleItem .cosmeticsItemProgress {
+  height: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Волна 8 новых анимаций не вводит; фиксируем статичность новых элементов. */
+  .botArch,
+  .cosmeticsItemProgressLabel {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* --- V4. Правая колонка при развёрнутом чате -------------------------------
+   Замер на 1366×768 с развёрнутым чатом: #rightInfo = 320px, а панели
+   «Матч»/«Команда» ужимались до 74.2px при суммарной занятости 274.4px —
+   45.6px оставались никем не занятыми. Причина: килфид участвует в раздаче
+   flex-shrink своей полной высотой (253px), а потом обрезается max-height, и
+   освободившееся место никому не возвращается.
+   Лечим ростом: обе панели получают flex-grow и забирают остаток. */
+#rightInfo > #rightMatchDetails,
+#rightInfo > #rightTeamDetails {
+  flex-grow: 1;
+}
+
+/* Замер (1366×768, чат развёрнут): панель 74.2px, из них 44px — шапка
+   details (глобальное `summary { min-height: var(--control-h) }`), т.е.
+   содержимому оставалось 28px = одна строка. Только для мыши и только в
+   тесноте развёрнутого чата опускаем шапку до 32px: это освобождает по 12px
+   на каждую из трёх шапок. Тач-сценарий не затронут — там (pointer: coarse)
+   правая колонка вообще скрыта при ширине <= 720px. */
+@media (min-width: 721px) and (pointer: fine) {
+  body:has(#chat:not(.collapsed)) #rightInfo .rightDetailsSummary {
+    min-height: 32px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+}
+
+/* --- V4. На тач-устройстве видны обе подсказки сразу ------------------------
+   Найдено исполнением (эмуляция: объявления из @media (pointer: coarse)
+   инжектированы инлайновым <style>, вьюпорт 390×844): правило
+   `@media (pointer: coarse) { #help { display: none !important } }`
+   проигрывало по специфичности более раннему
+   `body.inGame #hud:not(.lbPinned) #help { display: block !important }`
+   (0,1,0 против 0,3,1) — на телефоне игрок видел и «WASD/Enter/Esc/M», и
+   «Свайп по экрану». Поднимаем специфичность до сопоставимой. */
+@media (pointer: coarse) {
+  body.inGame #hud:not(.lbPinned) #help,
+  #hud #help {
+    display: none !important;
+  }
+}
+
+/* V3 (продолжение). Замер: на двухколоночной сетке магазина карточка титула
+   ≈254px, из них .titleItemLeft получала 85.2px — полоса прогресса ужималась
+   до 30px. Даём тексту минимум: кнопка «Закрыт» переносится на свою строку
+   (.titleItem и так flex-wrap: wrap), а прогресс получает читаемую ширину. */
+.titleItemLeft {
+  min-width: 118px;
+}
+
