@@ -634,3 +634,27 @@ body.inGame #hud:not(.lbPinned) #langToggle {
     align-self: start;
   }
 }
+
+/* --- Экран смерти: парный к экрану итогов ----------------------------------
+   Красный здесь по правилу волны 9 (он остаётся только опасности и смерти),
+   но карточка не получила её обработки: осталась на литерале rgba(255,45,85)
+   вместо var(--accent) и на старой подложке rgba(0,0,0,0.45), тогда как
+   карточка итогов уже переехала на глубокую rgba(5,9,16,0.92). Рядом с
+   изумрудным интерфейсом это читалось как экран из другой версии игры.
+   Теперь это та же карточка, что и итоги, только в опасном цвете. */
+.deathOverlay .toastCard {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border2));
+  background: linear-gradient(150deg, color-mix(in srgb, var(--accent) 12%, transparent), rgba(5, 9, 16, 0.92));
+}
+
+.deathOverlay .toastIcon {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, rgba(0, 0, 0, 0.3));
+  color: color-mix(in srgb, var(--accent) 70%, #fff);
+}
+
+/* Липкий ряд действий стоял на своей тёмной подложке, не связанной с
+   карточкой, — на новом фоне он выглядел вставкой. */
+.deathOverlay .toastRow {
+  background: rgba(5, 9, 16, 0.94);
+}
