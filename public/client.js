@@ -10295,11 +10295,11 @@ function draw() {
 
   /* K1: туман за пределами ROI. Рисуется после сетки и до рамки карты, чтобы
      гасить и клетки, и линии, но не трогать игроков, эффекты и HUD. */
-  if (roi && (gMinX > minX || gMinY > minY || gMaxX < maxX || gMaxY < maxY)) {
-    const kx = offsetX + roi.rx * cell;
-    const ky = offsetY + roi.ry * cell;
-    const kw = roi.rw * cell;
-    const kh = roi.rh * cell;
+  if (lastRoi && (gMinX > minX || gMinY > minY || gMaxX < maxX || gMaxY < maxY)) {
+    const kx = offsetX + lastRoi.rx * cell;
+    const ky = offsetY + lastRoi.ry * cell;
+    const kw = lastRoi.rw * cell;
+    const kh = lastRoi.rh * cell;
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, cw, ch);
