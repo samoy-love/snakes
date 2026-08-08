@@ -113,7 +113,7 @@ test-client:
 # косметика меняют магазин от прогона к прогону.
 # Порт отдельный (8099), а не 3000/8080 из .env: визуальный прогон не должен
 # падать оттого, что рядом уже поднят сервер для ручной проверки.
-# MATCH_DURATION_TICKS короткий (900 тиков = 90 c) — тесты доводят матч до
+# MATCH_DURATION_TICKS короткий (1200 тиков = 120 c) — тесты доводят матч до
 # конца по-настоящему (см. tests/visual/screens.spec.mjs), а не подделывают
 # оверлей итогов мимо client.js; 5 минут дефолта сделали бы прогон нежизнеспособным.
 # Комната тикает от старта процесса, а не от первого join, поэтому игровой
@@ -129,7 +129,7 @@ run-visual:
 	PORT=$(VISUAL_PORT) \
 	BIND_ADDR=127.0.0.1 \
 	ROOM_LIMIT=16 \
-	MATCH_DURATION_TICKS=900 \
+	MATCH_DURATION_TICKS=1200 \
 	MATCH_INTERMISSION_TICKS=150 \
 	WS_ORIGINS=http://localhost:$(VISUAL_PORT),http://127.0.0.1:$(VISUAL_PORT) \
 	WS_ALLOW_LOCALHOST=0 \

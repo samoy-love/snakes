@@ -57,7 +57,7 @@ async function dismissOnboardingIfAny(page) {
 // на смерть и ожидание итогов, а не то, что останется после менюшных тестов.
 test.describe('игровая сессия', () => {
   test('настройки, игра, смерть, итоги матча', async ({ page }) => {
-    test.setTimeout(200_000);
+    test.setTimeout(280_000);
 
     await page.goto('/');
     await waitConnected(page);
@@ -113,11 +113,11 @@ test.describe('игровая сессия', () => {
     // под теорию. Клавишу жмём периодически, а не один раз: если нажатие
     // потерялось (фокус ещё не на канвасе сразу после закрытия оверлея
     // настроек), тест не должен виснуть до общего таймаута молча.
-    for (let i = 0; i < 20 && !(await page.locator('#deathOverlay').isVisible()); i++) {
+    for (let i = 0; i < 30 && !(await page.locator('#deathOverlay').isVisible()); i++) {
       await page.keyboard.press('ArrowUp');
       await page.waitForTimeout(2_000);
     }
-    await expect(page.locator('#deathOverlay')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('#deathOverlay')).toBeVisible({ timeout: 15_000 });
     await page.waitForTimeout(150); // дать дорисоваться статистике смерти
     await clearEventToasts(page);
     // #deathReason маскируется тоже: при повторном локальном прогоне сервер
@@ -134,7 +134,7 @@ test.describe('игровая сессия', () => {
     // intermission -> матч) с рождения процесса. Зайти в тест можно ровно в
     // момент старта нового матча, тогда ждать придётся почти полную его
     // длительность — отсюда запас в таймауте.
-    await expect(page.locator('#matchOverlay')).toBeVisible({ timeout: 90_000 });
+    await expect(page.locator('#matchOverlay')).toBeVisible({ timeout: 130_000 });
     await page.waitForTimeout(150);
     await clearEventToasts(page);
     await expect(page).toHaveScreenshot('match.png', {
