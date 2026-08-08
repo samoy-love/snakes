@@ -226,20 +226,8 @@ jobs:
             npx playwright install --with-deps chromium
           fi
 
-      # ВРЕМЕННО: снимаем эталоны на самом раннере — локальный Docker-образ
-      # Playwright дал другие шрифты, и обычный test-visual падал 11%
-      # пикселей. Убрать этот шаг и вернуть make test-visual после того, как
-      # эталоны из артефакта будут закоммичены.
-      - name: TEMP make test-visual-update
-        run: make test-visual-update
-
-      - name: TEMP забрать эталоны
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: visual-snapshots-linux-temp
-          path: tests/visual/screens.spec.mjs-snapshots
-          retention-days: 3
+      - name: make test-visual
+        run: make test-visual
 
       - name: Скриншоты упавших тестов
         if: failure()
