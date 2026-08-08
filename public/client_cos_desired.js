@@ -7,26 +7,20 @@
 
    Здесь только модель: чтение, запись и ПЛАН применения. Отправкой на сервер
    и показом ошибок занимается client.js — так план можно проверить тестом,
-   не поднимая ни WebSocket, ни DOM. */
+   не поднимая ни WebSocket, ни DOM.
+
+   Соответствие «категория -> поле» не живёт здесь: в хранилище лежат ровно те
+   имена, что и на проводе (eqHead, eqCaptureFx), и выводит их eqField из
+   client_cos_state.js. Своя копия этого списка здесь уже была — с теми же
+   значениями, но отдельным объектом; новая категория косметики требовала
+   правки в двух файлах, а забытая правка означала «выбор сохраняется, но не
+   применяется никогда». */
+
+import { COS_STATE_CATS, eqField } from './client_cos_state.js';
 
 /* Ключ обязан совпадать с прежним: под ним уже лежит выбор у живых игроков,
    и переименование молча стёрло бы его — «игра не сохранила экипировку». */
 export const COSMETICS_DESIRED_KEY = 'snakes_cosmetics_desired_v1';
-
-/* Единственный источник правды «категория -> поле в хранилище».
-   Раньше это соответствие было выписано дважды — в записи выбора и в его
-   применении — двумя разными цепочками if. Достаточно было добавить
-   категорию в одном месте и забыть в другом, чтобы выбор сохранялся, но
-   никогда не применялся. */
-export const DESIRED_FIELD_BY_CAT = {
-  capturefx: 'eqCaptureFx',
-  head: 'eqHead',
-  seg: 'eqSeg',
-  nameplate: 'eqNameplate',
-  frame: 'eqFrame',
-  terr: 'eqTerr',
-  death: 'eqDeath'
-};
 
 const MAX_ID = 7;
 const clampId = (v) => Math.max(0, Math.min(MAX_ID, Number(v) || 0));
@@ -59,7 +53,7 @@ export function saveDesired(storage, s) {
 
 /** Запомнить, что игрок хочет надеть предмет id в категории cat. */
 export function setDesired(storage, cat, id) {
-  const field = DESIRED_FIELD_BY_CAT[String(cat || '').trim().toLowerCase()];
+  const field = eqField(String(cat || '').trim().toLowerCase());
   if (!field) return false;
   const next = loadDesired(storage) || {};
   next[field] = clampId(id);
@@ -85,7 +79,8 @@ export function planDesiredApply({ desired, inventory, equipped }) {
   const missing = [];
   if (!desired) return { toSend, missing };
 
-  for (const [cat, field] of Object.entries(DESIRED_FIELD_BY_CAT)) {
+  for (const cat of COS_STATE_CATS) {
+    const field = eqField(cat);
     const raw = desired[field];
     if (raw === undefined || raw === null) continue;
 
