@@ -95,11 +95,14 @@ test.describe('игровая сессия', () => {
     await expect(page.locator('#settingsOverlay')).toBeVisible();
     await clearEventToasts(page);
     await expect(page).toHaveScreenshot('settings.png', { mask: LIVE_HUD.map((s) => page.locator(s)) });
-    // force: true — на мобильном вьюпорте тост события (килл, награда) может
-    // всплыть поверх настроек и перехватить клик на позиционную проверку;
-    // сама игра тосты поверх оверлеев держит намеренно (см. #eventToasts
-    // выше), закрытию настроек это мешать не должно.
-    await page.click('#closeSettingsBtn', { force: true });
+    // Тост события (килл, награда) может всплыть поверх настроек и физически
+    // перехватить клик — игра держит тосты НАД оверлеями намеренно (см.
+    // #eventToasts выше), а force:true здесь не спасает: клик у Playwright
+    // идёт синтетическим событием по координатам центра кнопки, и браузер
+    // маршрутизирует его на реальный верхний элемент в этой точке, то есть
+    // на тост, а не на кнопку. Чистим тосты, а не обходим проверку.
+    await clearEventToasts(page);
+    await page.click('#closeSettingsBtn');
     await expect(page.locator('#settingsOverlay')).toBeHidden();
 
     // Смерть — врезаться в границу поля. Направление фиксировано (вверх);
