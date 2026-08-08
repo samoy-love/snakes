@@ -1,0 +1,163 @@
+/* Игровой экран, часть 1/6: слои «сочности» (вспышки, боевой чип, баннер).
+   Раньше это был кусок одного файла 03-game.css (1719 строк) — распилен на
+   03..08 по доменам самого игрового экрана. ПОРЯДОК ФАЙЛОВ ЗНАЧИМ: поздние
+   правила перекрывают ранние порядком, а не !important, поэтому index.html
+   подключает их строго по номеру, и tests/style_split.test.mjs следит за
+   этим. Разрез сделан построчно, без переноса правил между блоками и без
+   слияний — набор объявлений и их порядок в каскаде не менялись. */
+
+/* ==========================================================================
+   Слои «сочности». Разметку создаёт index.html, содержимое и классы .isOn —
+   client.js. Все три слоя не перехватывают клики.
+   ========================================================================== */
+
+ /* Контракт п.1: полноэкранные вспышки. background задаёт JS инлайном. */
+ #fxFlash {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-fx);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  will-change: opacity;
+ }
+
+ #fxFlash.isOn {
+  opacity: 1;
+ }
+
+ /* Контракт п.2: боевой чип (киллы + комбо) слева-снизу, над очередью тостов. */
+ #hudCombo {
+  position: fixed;
+  left: calc(12px + var(--sa-left));
+  bottom: calc(12px + var(--sa-bottom));
+  z-index: var(--z-toasts);
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border2));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 26%, transparent), rgba(0, 0, 0, 0.52));
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(10px);
+  font-size: var(--fs-13);
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  filter: var(--hud-filter);
+ }
+
+ #hudCombo.isOn {
+  display: inline-flex;
+  animation: comboPop 220ms cubic-bezier(0.16, 1.6, 0.3, 1) both;
+ }
+
+ @keyframes comboPop {
+  0% {
+   opacity: 0;
+   transform: scale(0.82);
+  }
+  60% {
+   transform: scale(1.06);
+  }
+  100% {
+   opacity: 1;
+   transform: scale(1);
+  }
+ }
+
+ .hudComboValue {
+  font-size: var(--fs-16);
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.98);
+ }
+
+ /* Пока чип виден, очередь тостов уезжает выше, чтобы не накладываться */
+ body:has(#hudCombo.isOn) #eventToasts {
+  bottom: calc(12px + var(--sa-bottom) + 46px);
+ }
+
+ /* Контракт п.3: центральный слой крупных событий, отдельно от очереди тостов. */
+ #bigBanner {
+  position: fixed;
+  left: 50%;
+  top: 34%;
+  transform: translate(-50%, -50%);
+  z-index: var(--z-banner);
+  display: none;
+  /* Без width: max-content fixed-элемент с одним left:50% получает в распоряжение
+     только правую половину экрана: на 375px «ПЕРВЫЙ ЗАХВАТ!» ужимался до 79px и
+     рвался по одному слову в строку. max-width ниже по-прежнему держит потолок. */
+  width: max-content;
+  max-width: min(760px, calc(100vw - 32px));
+  text-align: center;
+  line-height: var(--lh-tight);
+  /* color и text-shadow наследуются вниз — на них работают модификаторы */
+  color: rgba(255, 255, 255, 0.98);
+  text-shadow: 0 0 22px rgba(255, 255, 255, 0.30), 0 6px 26px rgba(0, 0, 0, 0.70);
+  pointer-events: none;
+ }
+
+ /* Структура, которую собирает client.js: .bigBannerInner > иконка, заголовок, подпись */
+ .bigBannerInner {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+ }
+
+ .bigBannerIcon {
+  font-size: clamp(30px, 7vw, 56px);
+  line-height: 1;
+ }
+
+ .bigBannerIcon img.emoji {
+  width: clamp(30px, 7vw, 56px);
+  height: clamp(30px, 7vw, 56px);
+ }
+
+ .bigBannerTitle {
+  font-size: clamp(26px, 6vw, 52px);
+  font-weight: 800;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  line-height: var(--lh-tight);
+ }
+
+ #bigBanner.isOn {
+  display: block;
+  animation: bannerIn 420ms cubic-bezier(0.16, 1.5, 0.3, 1) both;
+ }
+
+ @keyframes bannerIn {
+  0% {
+   opacity: 0;
+   transform: translate(-50%, -50%) scale(1.6);
+  }
+  100% {
+   opacity: 1;
+   transform: translate(-50%, -50%) scale(1);
+  }
+ }
+
+ #bigBanner.bannerJackpot {
+  color: var(--gold);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--gold) 62%, transparent), 0 6px 26px rgba(0, 0, 0, 0.72);
+ }
+
+ #bigBanner.bannerDanger {
+  color: rgba(255, 138, 176, 0.98);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 62%, transparent), 0 6px 26px rgba(0, 0, 0, 0.72);
+ }
+
+ .bigBannerSub {
+  display: block;
+  margin-top: 6px;
+  font-size: var(--fs-14);
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: none;
+  color: var(--muted);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+ }
