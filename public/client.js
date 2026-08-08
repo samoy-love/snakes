@@ -6,6 +6,7 @@ import { BOT_NAMES_EN, BOT_NAMES_RU, EN, I18N, RU } from './client_i18n.js';
 import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
 import { filterAndSortRooms } from './client_rooms.js';
 import { PLAYER_RECORD_SIZES, pickPlayerRecordSize } from './client_protocol.js';
+import { trailVisualState } from './client_trail_style.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
 import {
   ROI_MARGIN_CELLS,
@@ -10062,15 +10063,16 @@ function draw() {
   // I2: собственный след — главный объект риска в игре. Раньше он отличался от
   // собственной территории всего на 0.07 альфы. Теперь: 0.85 + светлая обводка,
   // а на длинном следе (сигнал риска) добавляется пульсация яркости.
-  const trailRisk =
-    youTrailLen <= TRAIL_PULSE_FROM ? 0 : Math.min(1, (youTrailLen - TRAIL_PULSE_FROM) / 55);
-  const trailPulse =
-    trailRisk <= 0 || !fxEnabled || prefersReducedMotion()
-      ? 0
-      : trailRisk * (0.5 + 0.5 * Math.sin(nowFrame * 0.0115));
-  const ownTrailA = Math.min(0.98, 0.85 + 0.11 * trailPulse);
-  const otherTrailA = 0.74;
-  const ownTrailStroke = `rgba(255,255,255,${(0.45 + 0.40 * trailPulse).toFixed(3)})`;
+  const trailStyle = trailVisualState({
+    trailLen: youTrailLen,
+    pulseFrom: TRAIL_PULSE_FROM,
+    fxEnabled,
+    reducedMotion: prefersReducedMotion(),
+    nowFrame
+  });
+  const ownTrailA = trailStyle.ownAlpha;
+  const otherTrailA = trailStyle.otherAlpha;
+  const ownTrailStroke = trailStyle.ownStroke;
   const drawOwnOutline = cell >= 8;
 
   // F18/I4: ближайшая своя клетка ищется бесплатно, прямо в горячем цикле.
