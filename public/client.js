@@ -1014,6 +1014,15 @@ function rejoinBegin() {
     rejoinGiveUp(null);
   }, REJOIN_TIMEOUT_MS);
 }
+
+/* Клик «Играть»/«Войти» до того, как сокет успел открыться (обычно —
+   в первые доли секунды после загрузки страницы), раньше просто гасился
+   тостом «офлайн»: само намерение войти в игру нигде не запоминалось, и
+   игроку приходилось жать кнопку заново, пока клик не попадал в момент,
+   когда соединение уже установлено. Здесь то же решение, что и у
+   rejoinRoomId для обрыва связи посреди матча — намерение переживает
+   соединение и посылается один раз, как только оно откроется. */
+let pendingQuickJoin = null;
 let roomLimit = null;
 
 let matchSeq = 0;
@@ -3407,8 +3416,18 @@ net = createNetModule({
     // комнату, а не заставляем искать её руками.
     if (rejoinRoomId != null) {
       const rid = rejoinRoomId;
+      // Стоило и то, и другое сразу — приоритет у возврата в матч, где игрок
+      // уже был; отложенный вход из меню тогда не имеет смысла и не должен
+      // выстрелить позже, на каком-то не связанном с ним переподключении.
+      pendingQuickJoin = null;
       rejoinBegin();
       send('join', { roomId: rid, mode: 'id' });
+    } else if (pendingQuickJoin != null) {
+      const pj = pendingQuickJoin;
+      pendingQuickJoin = null;
+      userLeftRoom = false;
+      trackEvent(pj.event);
+      send('join', pj.params);
     }
   },
   onClose: () => {
@@ -4776,8 +4795,11 @@ playBtn?.addEventListener('click', () => {
     menuNameInput?.focus();
     return;
   }
-  // Без соединения join раньше молча проглатывался — кнопка «не работала».
+  // Без соединения join раньше молча проглатывался — кнопка «не работала»,
+  // и клик приходилось повторять, пока он не попадёт в момент, когда сокет
+  // уже открыт. Теперь намерение сохраняется и уходит само по onOpen.
   if (!wsIsConnected()) {
+    pendingQuickJoin = { event: 'quick_start', params: { mode: 'auto' } };
     addToast('📡', t('net.join_offline'), null, null, { key: 'join_offline' });
     connectWs();
     return;
@@ -4796,6 +4818,7 @@ joinRoomBtn?.addEventListener('click', () => {
     return;
   }
   if (!wsIsConnected()) {
+    pendingQuickJoin = { event: 'join_room', params: { roomId: selectedRoomId, mode: 'id' } };
     addToast('📡', t('net.join_offline'), null, null, { key: 'join_offline' });
     connectWs();
     return;
