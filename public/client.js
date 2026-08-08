@@ -37,14 +37,12 @@ import {
 import {
   COSMETICS_CATS,
   COSMETICS_MAX_ID,
-  bitHas,
   cheapestPrice,
   missingFor,
   tierClass,
-  ownedCountFromMask,
-  priceOf,
-  tierOf
+  ownedCountFromMask
 } from './client_cos_model.js';
+import { buyButtonState, equipButtonState, visibleItems } from './client_cos_ui.js';
 import {
   approxTickNow,
   formatClock,
@@ -6485,17 +6483,6 @@ function cosmeticsEqForCat(cat) {
   return eqOf(youCos, cat);
 }
 
-// Сервер шлёт массив цен по id: {"frame":[0,30,45,...], ...}.
-// Старый формат (одно число на категорию) поддерживаем как деградацию.
-function cosmeticsPrice(cat, id) {
-  return priceOf(cat, id, cosmeticsPrices);
-}
-
-// D11: тир считается из цены — единая лестница редкости для всех категорий.
-function cosmeticsTier(price) {
-  return tierOf(price);
-}
-
 function cosmeticsTierLabel(tier) {
   return t(`cosmetics.tier_${String(tier || 'base')}`) || String(tier || '');
 }
@@ -6877,6 +6864,87 @@ function cosmeticsEquipLocal(cat, id) {
   syncCosmeticsUi();
 }
 
+// Заглушка магазина на время локальной загрузки: три полосы в блоке
+// «как заработать», пять пустых вкладок, пять пустых карточек предмета.
+// Числа заглушек (5 вкладок, 5 карточек) декоративные и не обязаны совпадать
+// с реальным числом категорий/предметов — это скелетон, а не превью данных.
+function renderCosmeticsSkeleton() {
+  try {
+    if (cosmeticsEarnStyleEl) {
+      const wrap = document.createElement('div');
+      wrap.style.display = 'grid';
+      wrap.style.gap = '8px';
+      const l1 = document.createElement('div');
+      l1.className = 'skeletonLine';
+      l1.style.width = '62%';
+      const l2 = document.createElement('div');
+      l2.className = 'skeletonLine';
+      l2.style.width = '92%';
+      const l3 = document.createElement('div');
+      l3.className = 'skeletonLine';
+      l3.style.width = '86%';
+      wrap.appendChild(l1);
+      wrap.appendChild(l2);
+      wrap.appendChild(l3);
+      cosmeticsEarnStyleEl.replaceChildren(wrap);
+    }
+
+    if (cosmeticsTabsEl) {
+      const btns = Array.from({ length: 5 }).map(() => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'cosmeticsTabBtn';
+        b.disabled = true;
+        const sk = document.createElement('div');
+        sk.className = 'skeletonLine';
+        sk.style.width = '86px';
+        sk.style.height = '10px';
+        b.appendChild(sk);
+        return b;
+      });
+      cosmeticsTabsEl.replaceChildren(...btns);
+    }
+
+    if (cosmeticsItemsEl) {
+      const items = Array.from({ length: 5 }).map(() => {
+        const card = document.createElement('div');
+        card.className = 'cosmeticsItem';
+
+        const prev = document.createElement('div');
+        prev.className = 'cosmeticsItemPreview skeletonBlock';
+
+        const left = document.createElement('div');
+        left.className = 'cosmeticsItemLeft';
+        const t1 = document.createElement('div');
+        t1.className = 'skeletonLine';
+        t1.style.width = '220px';
+        const t2 = document.createElement('div');
+        t2.className = 'skeletonLine';
+        t2.style.width = '140px';
+        left.appendChild(t1);
+        left.appendChild(t2);
+
+        const right = document.createElement('div');
+        right.className = 'cosmeticsItemRight';
+        const b = document.createElement('div');
+        b.className = 'skeletonBlock';
+        b.style.width = '92px';
+        b.style.height = '34px';
+        b.style.borderRadius = '12px';
+        right.appendChild(b);
+
+        card.appendChild(left);
+        card.appendChild(right);
+        card.insertBefore(prev, left);
+        return card;
+      });
+      cosmeticsItemsEl.replaceChildren(...items);
+    }
+
+    if (cosmeticsHintEl) cosmeticsHintEl.textContent = '';
+  } catch {}
+}
+
 function syncCosmeticsUi() {
   if (!cosmeticsOverlay || cosmeticsOverlay.classList.contains('hidden')) return;
 
@@ -6886,81 +6954,7 @@ function syncCosmeticsUi() {
 
   if (!cosmeticsLoaded) {
     if (cosmeticsStyleEl) cosmeticsStyleEl.textContent = '—';
-
-    try {
-      if (cosmeticsEarnStyleEl) {
-        const wrap = document.createElement('div');
-        wrap.style.display = 'grid';
-        wrap.style.gap = '8px';
-        const l1 = document.createElement('div');
-        l1.className = 'skeletonLine';
-        l1.style.width = '62%';
-        const l2 = document.createElement('div');
-        l2.className = 'skeletonLine';
-        l2.style.width = '92%';
-        const l3 = document.createElement('div');
-        l3.className = 'skeletonLine';
-        l3.style.width = '86%';
-        wrap.appendChild(l1);
-        wrap.appendChild(l2);
-        wrap.appendChild(l3);
-        cosmeticsEarnStyleEl.replaceChildren(wrap);
-      }
-
-      if (cosmeticsTabsEl) {
-        const btns = Array.from({ length: 5 }).map(() => {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.className = 'cosmeticsTabBtn';
-          b.disabled = true;
-          const sk = document.createElement('div');
-          sk.className = 'skeletonLine';
-          sk.style.width = '86px';
-          sk.style.height = '10px';
-          b.appendChild(sk);
-          return b;
-        });
-        cosmeticsTabsEl.replaceChildren(...btns);
-      }
-
-      if (cosmeticsItemsEl) {
-        const items = Array.from({ length: 5 }).map(() => {
-          const card = document.createElement('div');
-          card.className = 'cosmeticsItem';
-
-          const prev = document.createElement('div');
-          prev.className = 'cosmeticsItemPreview skeletonBlock';
-
-          const left = document.createElement('div');
-          left.className = 'cosmeticsItemLeft';
-          const t1 = document.createElement('div');
-          t1.className = 'skeletonLine';
-          t1.style.width = '220px';
-          const t2 = document.createElement('div');
-          t2.className = 'skeletonLine';
-          t2.style.width = '140px';
-          left.appendChild(t1);
-          left.appendChild(t2);
-
-          const right = document.createElement('div');
-          right.className = 'cosmeticsItemRight';
-          const b = document.createElement('div');
-          b.className = 'skeletonBlock';
-          b.style.width = '92px';
-          b.style.height = '34px';
-          b.style.borderRadius = '12px';
-          right.appendChild(b);
-
-          card.appendChild(left);
-          card.appendChild(right);
-          card.insertBefore(prev, left);
-          return card;
-        });
-        cosmeticsItemsEl.replaceChildren(...items);
-      }
-
-      if (cosmeticsHintEl) cosmeticsHintEl.textContent = '';
-    } catch {}
+    renderCosmeticsSkeleton();
     return;
   }
 
@@ -7051,24 +7045,18 @@ function syncCosmeticsUi() {
 
     // D11: порядок по цене, а не по id — при поштучных ценах порядок по id
     // ломает восприятие лестницы редкости.
-    const order = [];
-    for (let id = 0; id <= COSMETICS_MAX_ID; id++) {
-      order.push({ id, price: cosmeticsPrice(cosmeticsCat, id) });
-    }
-    order.sort((x, y) => (x.price - y.price) || (x.id - y.id));
+    const order = visibleItems(cosmeticsCat, cosmeticsFilter, balance, mask, eq, cosmeticsPrices, COSMETICS_MAX_ID);
 
     let lastTier = '';
     for (const entry of order) {
       const id = entry.id;
       const price = entry.price;
-      const owned = bitHas(mask, id);
-      const equipped = Number(eq) === id;
-
-      if (cosmeticsFilter === 'owned' && !owned) continue;
-      if (cosmeticsFilter === 'available' && (owned || balance < price)) continue;
+      const owned = entry.owned;
+      const equipped = entry.equipped;
+      const missing = entry.missing;
 
       const variant = cosmeticsVariantName(cosmeticsCat, id);
-      const tier = cosmeticsTier(price);
+      const tier = entry.tier;
 
       // D11: разделители между группами тиров.
       if (tier !== lastTier) {
@@ -7125,7 +7113,6 @@ function syncCosmeticsUi() {
          .cosmeticsItemWhere (то же самое стоит один раз в шапке категории,
          #cosmeticsWhere) и .cosmeticsItemSub.isBlocked («до покупки N» дублирует
          ценник и подпись кнопки). Больше их не создаём вовсе. */
-      const missing = missingFor(price, balance);
       let sub = null;
       if (!owned && missing > 0) {
         // текста нет: он целиком в ценнике и на кнопке
@@ -7170,21 +7157,23 @@ function syncCosmeticsUi() {
         const pending = cosmeticsOpIsPending(cat, id);
         const poor = balance < price;
 
-        const buy = document.createElement('button');
-        buy.type = 'button';
         /* C2/C9: buying needs a live socket and server-confirmed state.
            C12: нехватка валюты БОЛЬШЕ не делает кнопку disabled — раньше клик
            не давал вообще ничего. Кнопка живая, клик объясняет, сколько не
            хватает, и раскрывает блок «Как заработать». */
-        buy.disabled = pending || !online || !confirmed || !!pendingCosmeticsOp;
-        buy.className = buy.disabled || poor ? 'btnSecondary' : 'btnPrimary';
-        if (poor) buy.classList.add('isPoor');
+        const state = buyButtonState({ pending, online, confirmed, pendingOtherOp: pendingCosmeticsOp, poor });
+
+        const buy = document.createElement('button');
+        buy.type = 'button';
+        buy.disabled = state.disabled;
+        buy.className = state.className;
+        if (state.poor) buy.classList.add('isPoor');
         // C14: show exactly how much is missing.
-        buy.textContent = poor ? `${t('cosmetics.not_enough_short')} ${fmtInt(missing)} ✨` : t('cosmetics.buy');
-        if (pending) buy.classList.add('isLoading');
-        if (!online) buy.title = t('cosmetics.no_connection');
-        else if (!confirmed) buy.title = t('cosmetics.unconfirmed_hint');
-        else if (poor) buy.title = `${t('cosmetics.need_more')} ${fmtInt(missing)} ✨`;
+        buy.textContent = state.poor ? `${t('cosmetics.not_enough_short')} ${fmtInt(missing)} ✨` : t('cosmetics.buy');
+        if (state.pending) buy.classList.add('isLoading');
+        if (state.titleKind === 'no_connection') buy.title = t('cosmetics.no_connection');
+        else if (state.titleKind === 'unconfirmed_hint') buy.title = t('cosmetics.unconfirmed_hint');
+        else if (state.titleKind === 'need_more') buy.title = `${t('cosmetics.need_more')} ${fmtInt(missing)} ✨`;
 
         buy.addEventListener('click', (e) => {
           e.preventDefault();
@@ -7240,8 +7229,10 @@ function syncCosmeticsUi() {
           }
         };
 
-        if (equipped && id !== 0) {
-          eqBtn.className = 'btnSecondary';
+        const eqState = equipButtonState({ equipped, id });
+        eqBtn.className = eqState.className;
+        eqBtn.disabled = eqState.disabled;
+        if (eqState.kind === 'remove') {
           eqBtn.textContent = t('cosmetics.remove');
           eqBtn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -7249,9 +7240,7 @@ function syncCosmeticsUi() {
             doEquip(0);
           });
         } else {
-          eqBtn.className = equipped ? 'btnGhost' : 'btnPrimary';
-          eqBtn.textContent = equipped ? t('cosmetics.item_equipped') : t('cosmetics.wear');
-          eqBtn.disabled = equipped;
+          eqBtn.textContent = eqState.kind === 'equipped' ? t('cosmetics.item_equipped') : t('cosmetics.wear');
           eqBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();

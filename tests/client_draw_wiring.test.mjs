@@ -69,3 +69,36 @@ test('draw() не читает идентификаторы, которых не
       '(баг такого рода на 98d7a2b: `roi` вместо `lastRoi`)'
   );
 });
+
+// syncCosmeticsUi() — тот же класс риска, что и draw() (§7 отчёта разведки от
+// 2026-08-05): распил на первые чистые куски (buyButtonState, equipButtonState,
+// visibleItems, renderCosmeticsSkeleton) должен оставить проводку вокруг них
+// целой — вынесенная переменная, использование которой забыли поправить дальше
+// по функции, ломает магазин так же тихо, как #33 сломал draw().
+test('syncCosmeticsUi() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client.js', () => {
+  const masked = maskNonCode(CLIENT_JS);
+  const body = extractFunctionBody(masked, 'syncCosmeticsUi');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `syncCosmeticsUi() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
+test('renderCosmeticsSkeleton() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client.js', () => {
+  const masked = maskNonCode(CLIENT_JS);
+  const body = extractFunctionBody(masked, 'renderCosmeticsSkeleton');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `renderCosmeticsSkeleton() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
