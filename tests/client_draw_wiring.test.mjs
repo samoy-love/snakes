@@ -13,10 +13,12 @@
  * при этом console.error реально печатался (installErrorLogging его ловит),
  * просто на это никто не смотрел на живом матче.
  *
- * Проверка находит границы function draw() { ... } в исходнике и грепает
- * тело на голый идентификатор `roi` — единственная легитимная форма после
- * #33 это `lastRoi`, `roiGrant`, `roiCaps`, `roiW`, `roiH` (соседние слова,
- * не отдельный токен) или `.roi` (доступ к полю чужого объекта).
+ * Проверка общая, а не про конкретное имя `roi`: tests/helpers/js_scope.mjs
+ * статически (без исполнения кода и без парсера — см. его шапку про
+ * компромиссы) находит любой идентификатор, который draw() читает, но
+ * который не объявлен ни внутри draw(), ни на верхнем уровне client.js, ни
+ * является известным глобалом браузера/JS. Значит эта проверка поймает
+ * любой будущий рефакторинг того же класса — не только повторную порчу roi.
  */
 
 import test from 'node:test';
@@ -24,6 +26,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { maskNonCode, extractDeclared, unknownIdentifiers } from './helpers/js_scope.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_JS = readFileSync(path.join(__dirname, '../public/client.js'), 'utf8');
@@ -46,19 +49,23 @@ function extractFunctionBody(source, name) {
   throw new Error(`не нашли конец function ${name}()`);
 }
 
-test('draw() не ссылается на голую переменную roi — только на lastRoi', () => {
-  const body = extractFunctionBody(CLIENT_JS, 'draw');
+test('draw() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client.js', () => {
+  const masked = maskNonCode(CLIENT_JS);
+  const drawBody = extractFunctionBody(masked, 'draw');
 
-  // Голый токен roi: не .roi (доступ к полю), не часть более длинного слова
-  // (lastRoi, roiGrant, roiCaps, roiW, roiH) и не ключ объекта (`roi: lastRoi`
-  // в вызове cellSizeFor — легитимное переименование при передаче, не чтение
-  // переменной roi).
-  const bareRoi = body.match(/(?<![.\w])roi\b(?!\w)(?!\s*:)/g) || [];
+  // Верхний уровень client.js — то, что draw() видит через замыкание:
+  // импорты, module-scope const/let/var/function. draw() объявлена на
+  // верхнем уровне (не вложена), поэтому её доступная внешняя область — ровно
+  // это множество плюс имена, объявленные внутри самой draw().
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(drawBody, [...topLevel]);
 
   assert.deepEqual(
-    bareRoi,
+    unknown,
     [],
-    `draw() ссылается на необъявленную переменную roi ${bareRoi.length} раз(а) — ` +
-      'после #33 локальной "const roi = lastRoi" в функции больше нет, используйте lastRoi'
+    `draw() читает необъявленные идентификаторы: ${unknown.join(', ')} — ` +
+      'скорее всего рефакторинг переименовал/вынес переменную и забыл поправить дальнее использование ' +
+      '(баг такого рода на 98d7a2b: `roi` вместо `lastRoi`)'
   );
 });
