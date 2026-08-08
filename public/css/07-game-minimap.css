@@ -1,0 +1,81 @@
+/* Игровой экран, часть 5/6: миникарта (#minimap, #minimapPanel, оверлей).
+   См. 03-game-fx.css — общее примечание про разрез бывшего 03-game.css. */
+
+#minimap {
+  width: auto;
+  max-width: 100%;
+  height: 150px;
+  display: block;
+  margin: 0 auto;
+  border-radius: var(--r-tab);
+  background: transparent;
+  pointer-events: none;
+}
+
+#minimapPanel {
+  position: relative;
+  width: 100%;
+}
+
+.minimapLegend {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  backdrop-filter: blur(10px);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.minimapLegend[aria-hidden="true"] {
+  display: none;
+}
+
+#minimapOverlay {
+  z-index: var(--z-modal);
+}
+
+.minimapOverlayCard {
+  width: min(960px, calc(100vw - 24px));
+  padding: var(--pad-lg);
+}
+
+.minimapOverlayHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.minimapOverlayTitle {
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+#minimapOverlayCanvas {
+  width: 100%;
+  height: auto;
+  max-height: calc(100dvh - 24px - var(--sa-top) - var(--sa-bottom) - 92px);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border2);
+  background: rgba(0, 0, 0, 0.12);
+  image-rendering: pixelated;
+}
+
+/* Правая колонка. Раскладка задаётся здесь ОДИН раз; ниже её меняют только
+   медиазапросы. Раньше она собиралась из семи объявлений в трёх файлах:
+   display переключался grid -> flex, max-height переписывался трижды, и
+   какое значение победило, можно было узнать только в devtools.
+
+   Флекс-колонка, а не сетка: при display:grid строки с auto-размером
+   ужимались под высоту контейнера, поэтому панели обрезались по контенту и
+   прокрутка не появлялась вовсе (scrollHeight === clientHeight).
+   Высоту ограничивает --right-bottom-reserve — место, занятое чатом. */
