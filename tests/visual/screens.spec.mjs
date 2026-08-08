@@ -95,7 +95,11 @@ test.describe('игровая сессия', () => {
     await expect(page.locator('#settingsOverlay')).toBeVisible();
     await clearEventToasts(page);
     await expect(page).toHaveScreenshot('settings.png', { mask: LIVE_HUD.map((s) => page.locator(s)) });
-    await page.click('#closeSettingsBtn');
+    // force: true — на мобильном вьюпорте тост события (килл, награда) может
+    // всплыть поверх настроек и перехватить клик на позиционную проверку;
+    // сама игра тосты поверх оверлеев держит намеренно (см. #eventToasts
+    // выше), закрытию настроек это мешать не должно.
+    await page.click('#closeSettingsBtn', { force: true });
     await expect(page.locator('#settingsOverlay')).toBeHidden();
 
     // Смерть — врезаться в границу поля. Направление фиксировано (вверх);
