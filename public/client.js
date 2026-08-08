@@ -10203,12 +10203,21 @@ function draw() {
 
         const pat = tid ? terrStyleByOwner.get(o) : null;
         if (pat) {
-          if (cosTerrIsAdditive(tid)) ctx.globalCompositeOperation = 'lighter';
-          ctx.globalAlpha = a;
-          ctx.fillStyle = pat;
-          ctx.fillRect(px, py, cell, cell);
-          ctx.globalAlpha = 1;
-          if (cosTerrIsAdditive(tid)) ctx.globalCompositeOperation = 'source-over';
+          // try/finally, а не просто парные присваивания до/после: без него
+          // исключение внутри fillRect (например, битый CanvasPattern) оставит
+          // globalCompositeOperation залипшим на 'lighter' до конца сессии —
+          // ничего не сбрасывает его в начале кадра, и вся дальнейшая
+          // отрисовка тем же ctx (территория, HUD) начнёт светлеть.
+          const additive = cosTerrIsAdditive(tid);
+          if (additive) ctx.globalCompositeOperation = 'lighter';
+          try {
+            ctx.globalAlpha = a;
+            ctx.fillStyle = pat;
+            ctx.fillRect(px, py, cell, cell);
+          } finally {
+            ctx.globalAlpha = 1;
+            if (additive) ctx.globalCompositeOperation = 'source-over';
+          }
         } else {
           ctx.fillStyle = getOwnerFillStyle(o, a);
           ctx.fillRect(px, py, cell, cell);
