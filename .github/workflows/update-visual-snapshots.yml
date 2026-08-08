@@ -1,0 +1,67 @@
+name: Обновить эталоны визуальных тестов
+
+# Ручной запуск: эталоны Playwright платформозависимы (шрифты, сглаживание),
+# и точно повторить окружение раннера ubuntu-latest локально (даже в Docker
+# с тем же образом Playwright) не получилось — системные шрифты у раннера
+# GitHub свои. Единственный надёжный способ снять эталон "как для CI" — снять
+# его СРЕДСТВАМИ CI. См. docs/testing.md, раздел «Эталоны платформозависимы».
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: make test-visual-update
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tests/visual/package-lock.json
+
+      - name: npm ci
+        working-directory: tests/visual
+        run: npm ci --no-audit --no-fund
+
+      - name: Кэш браузеров Playwright
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/visual/package-lock.json') }}
+
+      - name: Установить браузеры Playwright
+        working-directory: tests/visual
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
+
+      - name: make test-visual-update
+        run: make test-visual-update
+
+      # Эталоны — не результат прогона, а СЛЕДУЮЩИЙ коммит: заливать их прямо
+      # отсюда в ветку означало бы автокоммит от бота, а diff обязателен к
+      # просмотру глазами (см. Makefile) — иначе сюда же въедет регрессия.
+      - name: Забрать эталоны артефактом
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-snapshots-linux
+          path: tests/visual/screens.spec.mjs-snapshots
+          retention-days: 14
