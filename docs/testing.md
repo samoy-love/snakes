@@ -137,4 +137,27 @@ CI-джоб **visual** кэширует бинарники браузера Play
 `tests/visual/package-lock.json` (`actions/cache`) — иначе каждый прогон тянул
 бы Chromium заново.
 
+**Эталоны платформозависимы.** Playwright кладёт ОС в имя файла
+(`menu-desktop-1280x720-win32.png` / `...-linux.png`) — рендер шрифтов и
+сглаживания отличается между Windows и Linux, и одно и то же изображение под
+разными системами пиксельно не совпадает. CI гоняет на `ubuntu-latest`,
+поэтому эталоны должны быть **линуксовые**: `make test-visual-update` на
+Windows-машине разработчика создаст `win32`-файлы, CI их не найдёт и упадёт
+с «snapshot doesn't exist». Обновлять эталоны — либо в CI (закоммитить
+`--update-snapshots` в отдельном прогоне через `workflow_dispatch` и забрать
+артефакт), либо локально в Linux-контейнере, повторяющем окружение CI:
+
+```sh
+docker run --rm -v "$(pwd):/src" -w /src mcr.microsoft.com/playwright:v1.62.1-noble bash -c '
+  apt-get update -qq && apt-get install -y -qq make curl
+  curl -fsSL https://go.dev/dl/go1.25.12.linux-amd64.tar.gz | tar -C /usr/local -xz
+  export PATH=$PATH:/usr/local/go/bin
+  cd tests/visual && npm ci && npx playwright install chromium && npx playwright test --update-snapshots
+'
+```
+
+Версия образа (`v1.62.1-noble`) должна совпадать с `@playwright/test` из
+`tests/visual/package.json` — иначе браузер в контейнере и раннер теста
+разойдутся по версии рендерера.
+
 ---
