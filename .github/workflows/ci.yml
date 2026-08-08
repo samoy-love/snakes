@@ -58,6 +58,7 @@ jobs:
   go:
     name: Go (vet / build / test -race)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -186,7 +187,7 @@ jobs:
     # не уложились в собственный таймаут теста от нехватки CPU. Локально
     # (полная тройная параллельность) — ~1.5 минуты; здесь запас на меньшую
     # параллельность, холодный кэш и общую загрузку раннера.
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7

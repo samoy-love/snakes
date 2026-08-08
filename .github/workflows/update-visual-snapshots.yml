@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: update-visual-snapshots-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   update:
     name: make test-visual-update
