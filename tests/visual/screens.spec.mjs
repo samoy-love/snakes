@@ -46,10 +46,10 @@ async function dismissOnboardingIfAny(page) {
   }
 }
 
-// Экраны настроек/игры/смерти/итогов матча делят один реальный матч на общем
-// сервере (workers: 1 в конфиге) — иначе понадобилось бы либо гонять
-// независимые комнаты параллельно (сервер конкурентно), либо подделывать
-// состояние мимо client.js, а второе как раз то, что должны ловить эти тесты.
+// Экраны настроек/игры/смерти/итогов матча идут через один реальный матч на
+// СВОЁМ сервере вьюпорта (у каждого проекта — собственный порт и процесс, см.
+// playwright.config.mjs), а не через подделанное состояние мимо client.js —
+// именно эту подделку эти тесты и должны ловить.
 //
 // Матч на сервере тикает от старта процесса, а не от первого join (`make
 // run-visual` ставит MATCH_DURATION_TICKS с большим запасом — см. Makefile),
@@ -57,7 +57,7 @@ async function dismissOnboardingIfAny(page) {
 // на смерть и ожидание итогов, а не то, что останется после менюшных тестов.
 test.describe('игровая сессия', () => {
   test('настройки, игра, смерть, итоги матча', async ({ page }) => {
-    test.setTimeout(200_000);
+    test.setTimeout(280_000);
 
     await page.goto('/');
     await waitConnected(page);
@@ -113,29 +113,28 @@ test.describe('игровая сессия', () => {
     // под теорию. Клавишу жмём периодически, а не один раз: если нажатие
     // потерялось (фокус ещё не на канвасе сразу после закрытия оверлея
     // настроек), тест не должен виснуть до общего таймаута молча.
-    for (let i = 0; i < 20 && !(await page.locator('#deathOverlay').isVisible()); i++) {
+    for (let i = 0; i < 30 && !(await page.locator('#deathOverlay').isVisible()); i++) {
       await page.keyboard.press('ArrowUp');
       await page.waitForTimeout(2_000);
     }
-    await expect(page.locator('#deathOverlay')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('#deathOverlay')).toBeVisible({ timeout: 15_000 });
     await page.waitForTimeout(150); // дать дорисоваться статистике смерти
     await clearEventToasts(page);
-    // #deathReason маскируется тоже: комната общая для всех трёх вьюпортов
-    // (один webServer, см. playwright.config.mjs), и след, оставленный
-    // предыдущим прогоном, может убить змейку раньше, чем она дойдёт до
-    // границы карты — причина смерти тогда не «в стену», а «в чужой след».
-    // Разметку карточки смерти это не меняет, только текст причины.
+    // #deathReason маскируется тоже: при повторном локальном прогоне сервер
+    // может переиспользоваться (reuseExistingServer в playwright.config.mjs),
+    // и след от предыдущего раза способен убить змейку раньше, чем она
+    // дойдёт до границы карты — причина смерти тогда не «в стену», а «в
+    // чужой след». Разметку карточки смерти это не меняет, только текст.
     await expect(page).toHaveScreenshot('death.png', {
       mask: [...LIVE_HUD, '#deathStats', '#deathReason'].map((s) => page.locator(s))
     });
 
-    // Итоги матча приходят по истечении MATCH_DURATION_TICKS — общий счётчик
-    // сервера, который тикает НЕПРЕРЫВНО циклами (матч -> intermission ->
-    // матч) с рождения процесса и общий для всех проектов вьюпортов (один
-    // webServer на порт 8099 — см. playwright.config.mjs). Не заходя в этот
-    // тест ровно в момент старта нового матча, можно ждать до полной
-    // длительности матча — отсюда запас в таймауте.
-    await expect(page.locator('#matchOverlay')).toBeVisible({ timeout: 90_000 });
+    // Итоги матча приходят по истечении MATCH_DURATION_TICKS — счётчик
+    // сервера этого вьюпорта, который тикает НЕПРЕРЫВНО циклами (матч ->
+    // intermission -> матч) с рождения процесса. Зайти в тест можно ровно в
+    // момент старта нового матча, тогда ждать придётся почти полную его
+    // длительность — отсюда запас в таймауте.
+    await expect(page.locator('#matchOverlay')).toBeVisible({ timeout: 130_000 });
     await page.waitForTimeout(150);
     await clearEventToasts(page);
     await expect(page).toHaveScreenshot('match.png', {
