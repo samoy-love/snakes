@@ -27,7 +27,6 @@ import {
 } from '../public/client_cos_state.js';
 
 import { COSMETICS_CATS } from '../public/client_cos_model.js';
-import { DESIRED_FIELD_BY_CAT } from '../public/client_cos_desired.js';
 
 // --- главная регрессия -------------------------------------------------------
 
@@ -46,12 +45,6 @@ test('неизвестная категория даёт 0, а НЕ данные
 
 test('категории состояния совпадают с покупаемыми категориями магазина', () => {
   assert.deepEqual([...COS_STATE_CATS].sort(), [...COSMETICS_CATS].sort());
-});
-
-test('имена полей совпадают с теми, что использует «желаемая» экипировка', () => {
-  for (const cat of COS_STATE_CATS) {
-    assert.equal(eqField(cat), DESIRED_FIELD_BY_CAT[cat], `поле eq для ${cat}`);
-  }
 });
 
 test('имена полей выводятся из одного соответствия', () => {

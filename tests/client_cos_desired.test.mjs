@@ -7,10 +7,11 @@
  * как «игра не сохранила покупку».
  *
  * Две вещи здесь легко сломать незаметно:
- *   1) соответствие «категория -> поле хранилища». Раньше оно было выписано
- *      двумя разными цепочками if — в записи выбора и в его применении.
- *      Добавить категорию в одном месте и забыть в другом означало «выбор
- *      сохраняется, но не применяется никогда»;
+ *   1) соответствие «категория -> поле хранилища». Оно выводится из eqField
+ *      (client_cos_state.js) и больше нигде не выписано руками — но категории
+ *      магазина живут в третьем файле, и разъехаться списки всё ещё могут.
+ *      Категория без поля означает «выбор сохраняется, но не применяется
+ *      никогда», поэтому первые тесты сверяют списки между собой;
  *   2) что оставить в хранилище после отправки. Оставить лишнее — копить
  *      вечно неприменимый выбор; стереть лишнее — потерять его при обрыве.
  */
@@ -20,7 +21,6 @@ import assert from 'node:assert/strict';
 
 import {
   COSMETICS_DESIRED_KEY,
-  DESIRED_FIELD_BY_CAT,
   keepUnsent,
   loadDesired,
   planDesiredApply,
@@ -29,6 +29,7 @@ import {
 } from '../public/client_cos_desired.js';
 
 import { COSMETICS_CATS } from '../public/client_cos_model.js';
+import { COS_STATE_CATS, eqField } from '../public/client_cos_state.js';
 
 function memStorage(initial = {}) {
   const map = new Map(Object.entries(initial));
@@ -58,18 +59,18 @@ test('ключ хранилища не менялся: под ним лежит 
 
 test('у каждой покупаемой категории есть поле в хранилище', () => {
   for (const cat of COSMETICS_CATS) {
-    assert.ok(DESIRED_FIELD_BY_CAT[cat], `нет поля для категории ${cat} — её выбор не применится`);
+    assert.ok(eqField(cat), `нет поля для категории ${cat} — её выбор не применится`);
   }
 });
 
 test('и наоборот: лишних полей нет', () => {
-  for (const cat of Object.keys(DESIRED_FIELD_BY_CAT)) {
+  for (const cat of COS_STATE_CATS) {
     assert.ok(COSMETICS_CATS.includes(cat), `поле для несуществующей категории ${cat}`);
   }
 });
 
 test('поля не повторяются: два разных предмета не пишутся в одно место', () => {
-  const fields = Object.values(DESIRED_FIELD_BY_CAT);
+  const fields = COS_STATE_CATS.map(eqField);
   assert.equal(fields.length, new Set(fields).size);
 });
 
