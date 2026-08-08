@@ -102,3 +102,21 @@ test('renderCosmeticsSkeleton() не читает идентификаторы, 
     `renderCosmeticsSkeleton() читает необъявленные идентификаторы: ${unknown.join(', ')}`
   );
 });
+
+// handleStateBinary() — тот же класс риска: единый курсор чтения буфера `o`
+// двигается вручную по всей функции (§6.4 отчёта разведки от 2026-08-05),
+// и вынос куска вроде pickPlayerRecordSize должен оставить обвязку вокруг
+// него (o, bl, pc, DIR_NAMES и т.д.) нетронутой.
+test('handleStateBinary() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client.js', () => {
+  const masked = maskNonCode(CLIENT_JS);
+  const body = extractFunctionBody(masked, 'handleStateBinary');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `handleStateBinary() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});

@@ -5,6 +5,7 @@ import { createNetModule } from './client_net.js';
 import { BOT_NAMES_EN, BOT_NAMES_RU, EN, I18N, RU } from './client_i18n.js';
 import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
 import { filterAndSortRooms } from './client_rooms.js';
+import { PLAYER_RECORD_SIZES, pickPlayerRecordSize } from './client_protocol.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
 import {
   ROI_MARGIN_CELLS,
@@ -8589,20 +8590,9 @@ function handleStateBinary(buf) {
     const pc = dv.getUint16(o, true);
     o += 2;
 
-    const perPlayerV4 = 21;
-    const perPlayerV3 = 20;
-    const perPlayerV2 = 15;
-    const perPlayerV1 = 14;
-    let perPlayer = perPlayerV4;
-    // players + rx/ry/rw/rh (8) + lenDG/lenDT (8)
-    if (o + pc * perPlayerV4 + 8 + 8 > bl) perPlayer = perPlayerV3;
-    if (o + pc * perPlayer + 8 + 8 > bl) {
-      perPlayer = perPlayerV2;
-      if (o + pc * perPlayerV2 + 8 + 8 > bl) {
-        perPlayer = perPlayerV1;
-        if (o + pc * perPlayerV1 + 8 + 8 > bl) return;
-      }
-    }
+    const [perPlayerV4, perPlayerV3, perPlayerV2] = PLAYER_RECORD_SIZES;
+    const perPlayer = pickPlayerRecordSize(bl - o, pc);
+    if (perPlayer === null) return;
     const players = [];
     for (let k = 0; k < pc; k++) {
       const n = dv.getUint16(o, true);

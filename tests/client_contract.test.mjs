@@ -220,13 +220,15 @@ test('client.js: заголовок пакета событий и запись 
 // ---------------------------------------------------------------------------
 
 test('client.js: размер записи игрока в ROI совпадает с сервером', () => {
-  const decls = [...src.matchAll(/const perPlayerV4 = (\d+);/g)].map((m) => Number(m[1]));
-  assert.ok(decls.length > 0, 'в client.js не найдено объявление perPlayerV4');
+  // Раскладка размеров живёт в client_protocol.js (pickPlayerRecordSize),
+  // самый новый формат — первый элемент PLAYER_RECORD_SIZES.
+  const decls = [...src.matchAll(/PLAYER_RECORD_SIZES = \[(\d+)/g)].map((m) => Number(m[1]));
+  assert.ok(decls.length > 0, 'не найдено объявление PLAYER_RECORD_SIZES');
   for (const v of decls) {
     assert.equal(
       v,
       golden.consts.roiPlayerRecordLen,
-      'perPlayerV4 разошёлся с roiPlayerRecordLen — записи игроков поедут, ' +
+      'PLAYER_RECORD_SIZES[0] разошёлся с roiPlayerRecordLen — записи игроков поедут, ' +
         'а за ними rx/ry/rw/rh и дельты сетки'
     );
   }
