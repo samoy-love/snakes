@@ -175,3 +175,75 @@ jobs:
       - name: Client protocol tests (node --test)
         run: node --test tests/protocol_golden.test.mjs tests/client_contract.test.mjs
 
+  visual:
+    name: Визуальные тесты экранов (Playwright)
+    runs-on: ubuntu-latest
+    # Тест игровой сессии сам доводит матч до конца (MATCH_DURATION_TICKS в
+    # make run-visual) — прогон честно занимает несколько минут на все три
+    # вьюпорта, это не зависший джоб. Локально (без установки браузера)
+    # три вьюпорта укладываются в ~5 минут — запас на холодный кэш CI.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tests/visual/package-lock.json
+
+      - name: npm ci
+        working-directory: tests/visual
+        run: npm ci --no-audit --no-fund
+
+      # Кэш браузеров Playwright по хэшу package-lock.json: без него каждый
+      # прогон заново тянет ~150 МБ Chromium, хотя версия годами не меняется
+      # между соседними коммитами.
+      - name: Кэш браузеров Playwright
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/visual/package-lock.json') }}
+
+      - name: Установить браузеры Playwright
+        working-directory: tests/visual
+        # --with-deps только при промахе кэша: сами бинарники браузеров кэш
+        # уже восстановил, но системные .so-зависимости (libnss3 и т.п.)
+        # кэш не покрывает и ставятся отдельно на раннере каждый раз.
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
+
+      # ВРЕМЕННО: снимаем эталоны на самом раннере — локальный Docker-образ
+      # Playwright дал другие шрифты, и обычный test-visual падал 11%
+      # пикселей. Убрать этот шаг и вернуть make test-visual после того, как
+      # эталоны из артефакта будут закоммичены.
+      - name: TEMP make test-visual-update
+        run: make test-visual-update
+
+      - name: TEMP забрать эталоны
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-snapshots-linux-temp
+          path: tests/visual/screens.spec.mjs-snapshots
+          retention-days: 3
+
+      - name: Скриншоты упавших тестов
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-test-failures
+          path: tests/visual/test-results
+          retention-days: 7

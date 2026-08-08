@@ -45,8 +45,8 @@ NODE       ?= node
 CLIENT_JS    := $(wildcard public/client*.js)
 CLIENT_TESTS := $(wildcard tests/*.test.mjs)
 
-.PHONY: help run build test test-race test-race-docker test-client test-all vet fmt fmt-check \
-        golden node-check clean
+.PHONY: help run run-visual build test test-race test-race-docker test-client test-all vet fmt fmt-check \
+        golden node-check test-visual test-visual-update clean
 
 help:
 	@echo "Доступные цели:"
@@ -59,6 +59,8 @@ help:
 	@echo "  test-client  — клиентские тесты протокола (node --test, без зависимостей)"
 	@echo "  test-all     — go test + node-check + test-client"
 	@echo "  golden       — перегенерировать tests/golden/protocol_golden.json"
+	@echo "  test-visual  — визуальные тесты экранов (Playwright, tests/visual)"
+	@echo "  test-visual-update — перезаписать эталонные скриншоты"
 	@echo "  vet          — go vet ./..."
 	@echo "  fmt          — gofmt -w ."
 	@echo "  fmt-check    — падает, если есть неотформатированные файлы"
@@ -103,6 +105,40 @@ test-race-docker:
 # фактический public/client.js с эталоном. Внешних зависимостей нет.
 test-client:
 	$(NODE) --test $(CLIENT_TESTS)
+
+# Сервер для визуальных тестов. .env здесь НЕ читается сознательно: скриншот,
+# зависящий от локальных настроек разработчика, эталоном быть не может — у
+# одного ROOM_LIMIT=16, у другого 4, и «регрессия» окажется чужим .env.
+# Профили пишутся в одноразовый каталог: иначе накопленные монеты и купленная
+# косметика меняют магазин от прогона к прогону.
+# Порт отдельный (8099), а не 3000/8080 из .env: визуальный прогон не должен
+# падать оттого, что рядом уже поднят сервер для ручной проверки.
+# MATCH_DURATION_TICKS короткий (900 тиков = 90 c) — тесты доводят матч до
+# конца по-настоящему (см. tests/visual/screens.spec.mjs), а не подделывают
+# оверлей итогов мимо client.js; 5 минут дефолта сделали бы прогон нежизнеспособным.
+# Комната тикает от старта процесса, а не от первого join, поэтому игровой
+# тест в спеке идёт первым — ему нужен весь этот бюджет на смерть и итоги.
+run-visual:
+	PORT=8099 \
+	BIND_ADDR=127.0.0.1 \
+	ROOM_LIMIT=16 \
+	MATCH_DURATION_TICKS=900 \
+	MATCH_INTERMISSION_TICKS=150 \
+	WS_ORIGINS=http://localhost:8099,http://127.0.0.1:8099 \
+	WS_ALLOW_LOCALHOST=0 \
+	PROFILE_SECRET=visual-tests-fixed-key \
+	PROFILES_PATH=tests/visual/.tmp/profiles.json \
+	go run .
+
+# Скриншоты экранов сверяются с эталонами из tests/visual/*.spec.mjs-snapshots.
+# Сервер поднимает сам Playwright (см. webServer в playwright.config.mjs).
+test-visual:
+	cd tests/visual && npm install --no-audit --no-fund && npx playwright test
+
+# Только после ОСОЗНАННОЙ правки дизайна: перезаписывает эталоны.
+# Diff обязателен к просмотру глазами — иначе регрессия въезжает в эталон.
+test-visual-update:
+	cd tests/visual && npm install --no-audit --no-fund && npx playwright test --update-snapshots
 
 node-check:
 	@status=0; \

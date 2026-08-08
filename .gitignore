@@ -6,6 +6,18 @@ package.json
 # Исключение: манифест офлайн-оснастки. Без него из свежего клона нельзя
 # запустить npm i в tools/, то есть визуальный стенд и замеры недоступны.
 !tools/package.json
+# Исключение: единственная JS-зависимость проекта — Playwright для
+# tests/visual (см. docs/testing.md). package-lock.json нужен закоммиченным,
+# иначе npm ci в CI ставит версии заново на каждый прогон и кэш браузеров
+# (ключ — хэш лока) никогда не попадает.
+!tests/visual/package.json
+!tests/visual/package-lock.json
+
+# Playwright: результаты прогонов и одноразовые профили визуального сервера
+# (PROFILES_PATH из make run-visual) — рантайм-мусор, не артефакт.
+tests/visual/test-results/
+tests/visual/.tmp/
+tests/visual/playwright-report/
 .DS_Store
 Thumbs.db
 *.log

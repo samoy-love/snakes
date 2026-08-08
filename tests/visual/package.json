@@ -1,0 +1,8 @@
+{
+  "name": "snakes-visual-tests",
+  "private": true,
+  "description": "Единственная JS-зависимость проекта. Только devDependency и только здесь: клиент игры (public/*.js) и его тесты (tests/*.test.mjs) остаются без внешних зависимостей.",
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}
