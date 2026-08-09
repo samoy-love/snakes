@@ -7,6 +7,7 @@ import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
 import { filterAndSortRooms } from './client_rooms.js';
 import { PLAYER_RECORD_SIZES, pickPlayerRecordSize } from './client_protocol.js';
 import { trailVisualState } from './client_trail_style.js';
+import { DEATH_REASON, deathReasonSuffix } from './client_death.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
 import {
   ROI_MARGIN_CELLS,
@@ -2728,20 +2729,15 @@ function fmtPct1(n) {
   return formatPct1(n, lang);
 }
 
+function deathReasonLabel(reason) {
+  const suffix = deathReasonSuffix(reason);
+  return suffix ? t(`death.reason.${suffix}`) : '';
+}
+
 function deathReasonText(info) {
   const killer = Number(info?.killer) || 0;
   const killerName = String(info?.killerName || '').trim();
-  const reason = Number(info?.reason) || 0;
-  const rs =
-    reason === 1
-      ? t('death.reason.cut')
-      : reason === 2
-        ? t('death.reason.headon')
-        : reason === 3
-          ? t('death.reason.selftrail')
-          : reason === 4
-            ? t('death.reason.wall')
-            : '';
+  const rs = deathReasonLabel(info?.reason);
   if (killer && killer === you) return rs ? `${t('death.reason_prefix')}: ${rs}` : '';
   if (killer && killerName) return rs ? `${t('death.killed_by')}: ${killerName} (${rs})` : `${t('death.killed_by')}: ${killerName}`;
   return rs ? `${t('death.reason_prefix')}: ${rs}` : '';
@@ -2751,18 +2747,13 @@ function deathReasonText(info) {
 function deathReasonHint(info) {
   const reason = Number(info?.reason) || 0;
   const killerName = String(info?.killerName || '').trim();
-  if (reason === 1) {
-    if (killerName) {
-      return lang === 'en'
-        ? `${killerName} crossed your trail. Until the loop is closed you are vulnerable.`
-        : `${killerName} пересёк твой след. Пока след не замкнут — ты уязвим.`;
-    }
-    return t('death.hint.cut');
+  if (reason === DEATH_REASON.CUT && killerName) {
+    return lang === 'en'
+      ? `${killerName} crossed your trail. Until the loop is closed you are vulnerable.`
+      : `${killerName} пересёк твой след. Пока след не замкнут — ты уязвим.`;
   }
-  if (reason === 2) return t('death.hint.headon');
-  if (reason === 3) return t('death.hint.selftrail');
-  if (reason === 4) return t('death.hint.wall');
-  return t('death.hint.generic');
+  const suffix = deathReasonSuffix(reason);
+  return suffix ? t(`death.hint.${suffix}`) : t('death.hint.generic');
 }
 
 const storedName = localStorage.getItem('name') || '';
@@ -8806,16 +8797,7 @@ function handleStateBinary(buf) {
           lastDeathInfo = { killer, killerName: kn, reason };
         }
 
-        const rs =
-          reason === 1
-            ? t('death.reason.cut')
-            : reason === 2
-              ? t('death.reason.headon')
-              : reason === 3
-                ? t('death.reason.selftrail')
-                : reason === 4
-                  ? t('death.reason.wall')
-                  : '';
+        const rs = deathReasonLabel(reason);
         // Эффект гибели жертвы — его видят все, а не только убийца.
         // Стиль берём из cosExtra; без сообщения это базовая вспышка (0).
         addFxBurst(ex, ey, `die${cosClampId(cosDeathByPlayer.get(victim) || 0)}`, {
