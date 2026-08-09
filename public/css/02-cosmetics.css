@@ -979,7 +979,7 @@
 
  .matchSummary {
   border-radius: var(--r-lg);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.18);
   padding: var(--pad-lg);
  }
@@ -1020,7 +1020,7 @@
  .matchKpi {
   padding: 10px;
   border-radius: var(--r-md);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.16);
   min-width: 0;
  }
@@ -1057,7 +1057,7 @@
  .matchMini {
   padding: 8px 10px;
   border-radius: var(--r-md);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.14);
   min-width: 0;
  }
@@ -1107,7 +1107,7 @@
   min-height: 0;
   overflow: auto;
   border-radius: var(--r-lg);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.14);
  }
 
