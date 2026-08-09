@@ -920,8 +920,10 @@
    display: none;
  }
 
- .deathOverlay,
- .matchOverlay {
+ /* Общая подложка для обоих режимов экрана «конец жизни» (смерть/итоги
+    матча) — раньше это были два отдельных position:fixed-оверлея с разным
+    z-index, теперь один #endOverlay, режимы внутри него взаимоисключающие. */
+ .endOverlay {
   position: fixed;
   inset: 0;
   display: flex;
@@ -930,13 +932,6 @@
   padding: calc(12px + var(--sa-top)) calc(12px + var(--sa-right)) calc(12px + var(--sa-bottom)) calc(12px + var(--sa-left));
   background: radial-gradient(1200px 600px at 50% 40%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%), rgba(0, 0, 0, 0.62);
   backdrop-filter: blur(8px);
- }
-
- .deathOverlay {
-  z-index: var(--z-modal);
- }
-
- .matchOverlay {
   z-index: var(--z-modal2);
  }
 
@@ -1397,7 +1392,7 @@
  }
 
  @media (prefers-reduced-motion: reduce) {
-   .deathOverlay .toastCard {
+   .deathOverlay.toastCard {
      animation: none;
    }
    .btnPrimary.isLoading::before,
