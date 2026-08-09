@@ -4026,7 +4026,7 @@ function renderMatchResults(results) {
       const d = resultDeaths(r);
       const isMe = n === you;
       const fr = Number(r?.fr) || 0;
-      const frClass = `frame${Math.max(0, Math.min(7, fr))}`;
+      const frClass = `frame${cosClampId(fr)}`;
       return `
         <tr class="${isMe ? 'matchRowMe' : ''} ${frClass}">
           <td class="num">${i + 1}</td>
@@ -5009,7 +5009,7 @@ function renderDeathStats() {
       const isMe = p.n === you;
       const isTop1 = i === 0;
       return `
-        <tr class="${isMe ? 'me' : ''} ${isTop1 ? 'top1' : ''} frame${Math.max(0, Math.min(7, Number(p.cosFrame) || 0))}" data-pid="${pid}">
+        <tr class="${isMe ? 'me' : ''} ${isTop1 ? 'top1' : ''} frame${cosClampId(p.cosFrame)}" data-pid="${pid}">
           <td class="num">${i + 1}</td>
           <td class="name">${playerTitleHtml(cosTitleByPlayer.get(p.n) || 0)}${escapeHtml(nm)}</td>
           <td class="num">${Number(p.p) || 0}</td>
@@ -6882,7 +6882,7 @@ function cosmeticsBuyLocal(cat, id) {
 
 function cosmeticsEquipLocal(cat, id) {
   const c = String(cat || '').trim().toLowerCase();
-  const itemId = Math.max(0, Math.min(7, Number(id) || 0));
+  const itemId = cosClampId(id);
   const bit = 1 << itemId;
   const mask = cosmeticsMaskForCat(c);
   if ((mask & bit) === 0) return;
@@ -8540,7 +8540,7 @@ function renderTeamHud() {
       const isMe = p.n === you;
       const pp = mapCells ? ((Number(p.s) || 0) / mapCells) * 100 : 0;
       const fr = Number(p.cosFrame) || 0;
-      const frClass = `frame${Math.max(0, Math.min(7, fr))}`;
+      const frClass = `frame${cosClampId(fr)}`;
       return `
         <tr class="${isMe ? 'me' : ''} ${frClass}" data-pid="${pid}">
           <td class="num">${i + 1}</td>
@@ -8875,7 +8875,7 @@ function handleStateBinary(buf) {
             pid
           );
         }
-        addFxBurst(ex, ey, `cap${Math.max(0, Math.min(7, Number(fxId) || 0))}`, { pid });
+        addFxBurst(ex, ey, `cap${cosClampId(fxId)}`, { pid });
         if (pid === you) {
           // J5: самое частое приятное действие теперь показывает число.
           addScorePopup(ex, ey, delta);
@@ -10020,7 +10020,7 @@ function draw() {
   const terrByOwner = new Map();
   const terrStyleByOwner = new Map();
   for (const p of lastState.players) {
-    segByOwner.set(p.n, Math.max(0, Math.min(7, Number(p.cosSeg) || 0)));
+    segByOwner.set(p.n, cosClampId(p.cosSeg));
     const hsl = boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)');
     hslByOwner.set(p.n, hsl);
     const tid = cosClampId(cosTerrByPlayer.get(p.n) || 0);
@@ -10923,7 +10923,7 @@ function draw() {
       // Захват: тот же drawCaptureFx, что и в превью магазина. Цвет берётся
       // от игрока, совершившего захват (варианты 5..7 — со своей палитрой).
       if (isCap) {
-        const capId = Math.max(0, Math.min(7, Number(knd.slice(3)) || 0));
+        const capId = cosClampId(knd.slice(3));
         const owner = Number(fx.pid);
         const ownerHsl = boostHsl(colors.get(owner) || colors.get(you) || 'hsl(210 20% 60%)');
         const capCell = cell * (0.35 + fxIntensity * 0.95);
