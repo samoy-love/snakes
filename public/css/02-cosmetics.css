@@ -495,7 +495,7 @@
  .btnPrimary:focus-visible {
    outline: none;
    border-color: var(--focus);
-   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
+   box-shadow: var(--btn-focus-shadow);
  }
 
  .btnPrimary:disabled {
@@ -539,7 +539,7 @@
  .btnSecondary:focus-visible {
   outline: none;
   border-color: var(--focus);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
+  box-shadow: var(--btn-focus-shadow);
  }
 
  .btnSecondary:disabled {
@@ -579,7 +579,7 @@
  .btnGhost:focus-visible {
    outline: none;
    border-color: var(--focus);
-   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
+   box-shadow: var(--btn-focus-shadow);
  }
 
  .iconBtn {
@@ -611,7 +611,7 @@
  .iconBtn:focus-visible {
   outline: none;
   border-color: var(--focus);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
+  box-shadow: var(--btn-focus-shadow);
  }
 
  .iconBtn:disabled {

@@ -39,6 +39,9 @@
   --btn-play-radius: 16px;
   --btn-play-shadow: 0 12px 36px color-mix(in srgb, var(--brand) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.35);
   --btn-play-shadow-hover: 0 16px 44px color-mix(in srgb, var(--brand) 40%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  /* .btnPrimary/.btnSecondary/.btnGhost/.iconBtn делят один и тот же фокус-ring
+     (см. 02-cosmetics.css) — было 4 буквальных копии одного значения. */
+  --btn-focus-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
 }
 
 /* --- Мобильные свайпы: без touch-action браузер сам съедает pointermove ----
