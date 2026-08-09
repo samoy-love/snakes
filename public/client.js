@@ -6534,6 +6534,21 @@ const COSMETICS_LABEL_KEY_BY_CAT = {
   title: 'cosmetics.cat_title'
 };
 
+// Восемь текстовых вкладок не помещались в одну строку — лента скроллилась
+// горизонтально, и часть категорий была не видна без прокрутки. Иконка
+// компактнее подписи в любом языке, поэтому лента снова помещается целиком.
+// Полная подпись никуда не делась — она в aria-label/title кнопки.
+const COSMETICS_TAB_ICON_BY_CAT = {
+  terr: '🟩',
+  seg: '〰️',
+  head: '⚪',
+  death: '💀',
+  capturefx: '✨',
+  nameplate: '🏷️',
+  frame: '🖼️',
+  title: '🏅'
+};
+
 function cosmeticsLabel(cat) {
   return t(COSMETICS_LABEL_KEY_BY_CAT[cat] || 'cosmetics.cat_frame');
 }
@@ -7024,7 +7039,20 @@ function syncCosmeticsUi() {
       // D11: счётчик владения прямо в табе — «Рамки 2/8».
       const total = cid === 'title' ? COS_TITLE_MAX : COSMETICS_MAX_ID + 1;
       const have = cid === 'title' ? cosTitlesUnlockedCount() : cosmeticsOwnedCount(cid);
-      b.textContent = `${cosmeticsLabel(cid)} ${have}/${total}`;
+      const fullLabel = `${cosmeticsLabel(cid)} ${have}/${total}`;
+      // Полная подпись видна ассистивным технологиям и как тултип — на
+      // экране только иконка категории и счётчик, восемь вкладок в ряд.
+      const icon = document.createElement('span');
+      icon.className = 'cosmeticsTabIcon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = COSMETICS_TAB_ICON_BY_CAT[cid] || '❔';
+      const count = document.createElement('span');
+      count.className = 'cosmeticsTabCount';
+      count.setAttribute('aria-hidden', 'true');
+      count.textContent = `${have}/${total}`;
+      b.append(icon, count);
+      b.title = fullLabel;
+      b.setAttribute('aria-label', fullLabel);
       b.setAttribute('role', 'tab');
       b.setAttribute('aria-selected', cid === cosmeticsCat ? 'true' : 'false');
       b.addEventListener('click', () => {

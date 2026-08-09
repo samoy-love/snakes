@@ -640,9 +640,10 @@
    ========================================================================== */
 .cosmeticsItems.isTitles .cosmeticsItem {
   border-color: color-mix(in srgb, var(--gold) 22%, var(--border2));
-  border-left: 4px solid color-mix(in srgb, var(--gold) 45%, transparent);
+  /* Карточка теперь вертикальная плитка — акцент сверху, не слева. */
+  border-top: 3px solid color-mix(in srgb, var(--gold) 45%, transparent);
   background: radial-gradient(
-      120% 140% at 0% 50%,
+      140% 90% at 50% 0%,
       color-mix(in srgb, var(--gold) 10%, transparent),
       transparent 60%
     ),
@@ -655,7 +656,7 @@
 }
 
 .cosmeticsItems.isTitles .cosmeticsItem.isLocked {
-  border-left-color: var(--border);
+  border-top-color: var(--border);
   background: rgba(0, 0, 0, 0.26);
 }
 
