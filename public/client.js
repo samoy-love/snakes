@@ -6296,6 +6296,10 @@ function onCosmetics(msg) {
     } else if (pending) {
       setCosmeticsStatus('', '');
     }
+  } else if (cosmeticsOpen) {
+    // Магазин был открыт ещё без серверного подтверждения (см. showCosmeticsOverlay)
+    // и статус-строка застыла на «не подтверждено» — теперь оно пришло, гасим подсказку.
+    setCosmeticsStatus('', '');
   }
 
   cosmeticsApplyDesiredServer();
