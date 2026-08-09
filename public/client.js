@@ -3042,9 +3042,13 @@ const RIGHT_MATCH_OPEN_KEY = 'rightMatchOpen';
 const RIGHT_TEAM_OPEN_KEY = 'rightTeamOpen';
 
 function initRightDetailsState() {
-  const initOne = (el, key) => {
+  // Раньше обе панели по умолчанию открывались одновременно (open = true у
+  // обеих) и постоянно съедали место у миникарты — переключателя между ними
+  // (data-tab) не было, а он и не работал. Оставляем открытой по умолчанию
+  // только «Матч»: «Команда» — по явному клику, как и предполагает <details>.
+  const initOne = (el, key, defaultOpen) => {
     if (!el) return;
-    let open = true;
+    let open = defaultOpen;
     try {
       const raw = localStorage.getItem(key);
       if (raw === '0') open = false;
@@ -3062,8 +3066,8 @@ function initRightDetailsState() {
     });
   };
 
-  initOne(rightMatchDetailsEl, RIGHT_MATCH_OPEN_KEY);
-  initOne(rightTeamDetailsEl, RIGHT_TEAM_OPEN_KEY);
+  initOne(rightMatchDetailsEl, RIGHT_MATCH_OPEN_KEY, true);
+  initOne(rightTeamDetailsEl, RIGHT_TEAM_OPEN_KEY, false);
 }
 
 initRightDetailsState();
@@ -6030,6 +6034,44 @@ let swipeY0 = 0;
 let swipePointerId = null;
 const SWIPE_PX = 22;
 
+// Визуальный индикатор свайпа (только тач): показывает точку отсчёта жеста,
+// deadzone-порог SWIPE_PX и текущее накопленное смещение пальца. Раньше
+// точка отсчёта переустанавливалась молча — игрок не видел, где проходит
+// граница срабатывания, и терял змейку на "случайных" срабатываниях.
+let swipeIndicatorEl = null;
+function getSwipeIndicator() {
+  if (swipeIndicatorEl) return swipeIndicatorEl;
+  const el = document.createElement('div');
+  el.id = 'swipeIndicator';
+  el.setAttribute('aria-hidden', 'true');
+  const dead = document.createElement('div');
+  dead.className = 'swipeIndicator-deadzone';
+  const dot = document.createElement('div');
+  dot.className = 'swipeIndicator-dot';
+  el.appendChild(dead);
+  el.appendChild(dot);
+  document.body.appendChild(el);
+  swipeIndicatorEl = el;
+  return el;
+}
+function showSwipeIndicator(x0, y0) {
+  const el = getSwipeIndicator();
+  el.style.left = `${x0}px`;
+  el.style.top = `${y0}px`;
+  el.classList.add('isOn');
+}
+function moveSwipeIndicator(dx, dy) {
+  if (!swipeIndicatorEl) return;
+  const dot = swipeIndicatorEl.querySelector('.swipeIndicator-dot');
+  if (dot) dot.style.transform = `translate(${dx}px, ${dy}px)`;
+}
+function hideSwipeIndicator() {
+  if (!swipeIndicatorEl) return;
+  swipeIndicatorEl.classList.remove('isOn');
+  const dot = swipeIndicatorEl.querySelector('.swipeIndicator-dot');
+  if (dot) dot.style.transform = 'translate(0, 0)';
+}
+
 function swipeDir(dx, dy) {
   if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'right' : 'left';
   return dy > 0 ? 'down' : 'up';
@@ -6044,6 +6086,7 @@ canvas.addEventListener(
     swipePointerId = e.pointerId;
     swipeX0 = e.clientX;
     swipeY0 = e.clientY;
+    showSwipeIndicator(swipeX0, swipeY0);
     try {
       canvas.setPointerCapture?.(e.pointerId);
     } catch {
@@ -6062,10 +6105,12 @@ canvas.addEventListener(
     if (swipePointerId != null && e.pointerId !== swipePointerId) return;
     const dx = e.clientX - swipeX0;
     const dy = e.clientY - swipeY0;
+    moveSwipeIndicator(dx, dy);
     if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return;
     setDir(swipeDir(dx, dy));
     swipeX0 = e.clientX;
     swipeY0 = e.clientY;
+    showSwipeIndicator(swipeX0, swipeY0);
     e.preventDefault();
   },
   { passive: false }
@@ -6075,6 +6120,7 @@ function endSwipe(e) {
   if (swipePointerId != null && e.pointerId !== swipePointerId) return;
   swipeActive = false;
   swipePointerId = null;
+  hideSwipeIndicator();
 }
 
 canvas.addEventListener('pointerup', endSwipe);

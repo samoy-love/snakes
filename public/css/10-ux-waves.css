@@ -500,6 +500,16 @@ body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
   display: none;
 }
 
+/* Оставшийся дубль: #topHudPct и #topHudPlace всегда на глазах (это их
+   смысл — компактный статус без открытия панели), а колонка «Доля» в
+   таблице #stats повторяет ту же цифру для строки игрока, когда таблица
+   и так открыта по 🏆. Оставляем #topHudPlace (единственная цифра ранга,
+   видна даже без пина) и прячем именно проценты — они уже есть в
+   развёрнутой таблице напротив своей строки. */
+#hud.lbPinned ~ #topHud .topHudZone {
+  display: none;
+}
+
 /* --- U6. Иерархия верхнего HUD --------------------------------------------
    Место — первым и крупным. Раскладку строки задаёт 06-redesign.css (flex);
    grid-template-columns, стоявший здесь, под flex не действует вовсе. */
@@ -622,6 +632,14 @@ body.inGame #hud:not(.lbPinned) #help {
   display: none;
 }
 
+/* То же на главном экране: menu.hint зовёт нажимать WASD/стрелки, которых
+   на тач-устройстве нет — там управление свайпом (menu.hint_touch). Пара
+   .overlayHint/.menuHintTouch переключается по (pointer: coarse) так же,
+   как #help/#helpTouch в игровом HUD. */
+.menuHintTouch {
+  display: none;
+}
+
 @media (pointer: coarse) {
   #help {
     display: none !important;
@@ -650,6 +668,14 @@ body.inGame #hud:not(.lbPinned) #help {
   body:has(#chat:not(.collapsed)) #helpTouch,
   body.overlayActive #helpTouch {
     display: none;
+  }
+
+  .overlayHint:not(.menuHintTouch) {
+    display: none;
+  }
+
+  .menuHintTouch {
+    display: block;
   }
 }
 

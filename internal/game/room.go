@@ -142,18 +142,24 @@ func (h *Hub) pickRoomForJoin() *Room {
 	}
 	h.mu.RUnlock()
 
-	// Fill rooms in creation order (by id): room 1, then room 2, etc.
+	// Prefer the room with the most human players (so auto-join lands players
+	// where people are actually playing, matching the "сейчас играют N"
+	// banner), skipping full rooms. Ties break by ascending id, same as
+	// before, for deterministic behaviour.
 	var best *Room
+	bestHumans := -1
 	bestID := math.MaxInt
 	for _, r := range rooms {
 		r.mu.Lock()
 		full := r.humanCount >= r.limit
+		humans := r.humanCount
 		id := r.id
 		r.mu.Unlock()
 		if full {
 			continue
 		}
-		if id < bestID {
+		if humans > bestHumans || (humans == bestHumans && id < bestID) {
+			bestHumans = humans
 			bestID = id
 			best = r
 		}
@@ -165,15 +171,19 @@ func (h *Hub) pickRoomForJoin() *Room {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	// Re-check under lock to avoid creating unnecessary rooms under contention.
+	bestHumans = -1
+	bestID = math.MaxInt
 	for _, r := range h.rooms {
 		r.mu.Lock()
 		full := r.humanCount >= r.limit
+		humans := r.humanCount
 		id := r.id
 		r.mu.Unlock()
 		if full {
 			continue
 		}
-		if id < bestID {
+		if humans > bestHumans || (humans == bestHumans && id < bestID) {
+			bestHumans = humans
 			bestID = id
 			best = r
 		}

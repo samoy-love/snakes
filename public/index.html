@@ -38,6 +38,7 @@
           </div>
           <div id="menuOverlayTitle" class="overlayTitle" data-i18n="game.title">Змейки</div>
           <div class="overlaySub" data-i18n="menu.subtitle">Захватывайте территорию, избегайте следов и побеждайте</div>
+          <div class="overlaySub overlaySubGoal" data-i18n="menu.goal">Побеждает тот, у кого больше территории к концу матча</div>
         </div>
 
         <div class="menuGrid">
@@ -68,6 +69,10 @@
                   <span class="menuHowToIcon" aria-hidden="true">🟥</span>
                   <span class="menuHowToText" data-i18n="menu.how_step3">Замкни петлю — территория твоя</span>
                 </li>
+                <li class="menuHowToStep">
+                  <span class="menuHowToIcon" aria-hidden="true">💀</span>
+                  <span class="menuHowToText" data-i18n="menu.how_step4">Врезался в след — своей или чужой — умер</span>
+                </li>
               </ol>
               <!-- Мета-крючок возврата: дейлики и прогресс до первого скина.
                    Раньше жили только в правой панели матча — то есть были не
@@ -78,7 +83,13 @@
                 <div class="menuOnboardingTitle" data-i18n="menu.controls_title"></div>
                 <div class="menuOnboardingDesc" data-i18n="menu.controls_desc"></div>
               </div>
+              <!-- На тач-устройстве управление не WASD/стрелками, а свайпом —
+                   см. образец #help/#helpTouch в игровом HUD (переключение
+                   по pointer: coarse, см. CSS). Чат остаётся Enter в обоих
+                   вариантах: отдельной кнопки чата на телефоне нет, ввод —
+                   тот же текстовый #chat. -->
               <div class="overlayHint" data-i18n="menu.hint">Совет: чат — Enter • управление — WASD/стрелки</div>
+              <div class="overlayHint menuHintTouch" data-i18n="menu.hint_touch">Совет: чат — Enter • управление — свайп по экрану</div>
             </div>
           </div>
 
@@ -489,20 +500,23 @@
     </div>
 
     <!-- data-tab убран: он был жёстко «match» и никогда не менялся, из-за чего
-         живая таблица игроков не рисовалась ни разу. Обе панели (Матч и
-         Команда) видны одновременно, переключать нечего. -->
+         живая таблица игроков не рисовалась ни разу. Вместо переключателя —
+         обычные независимые <details>: атрибут open здесь не важен, реальное
+         начальное состояние выставляет initRightDetailsState() в client.js
+         (по умолчанию открыт только «Матч», «Команда» — по клику; выбор
+         игрока запоминается в localStorage). -->
     <div id="rightSidebar">
       <div id="minimapPanel" class="minimapPanel">
         <canvas id="minimap"></canvas>
         <div id="minimapLegend" class="minimapLegend" aria-hidden="true"></div>
       </div>
       <div id="rightInfo">
-        <details id="rightMatchDetails" class="rightDetails" open>
+        <details id="rightMatchDetails" class="rightDetails">
           <summary class="rightDetailsSummary" data-i18n="right.match">Матч</summary>
           <div id="metaHud"></div>
         </details>
 
-        <details id="rightTeamDetails" class="rightDetails" open>
+        <details id="rightTeamDetails" class="rightDetails">
           <summary class="rightDetailsSummary" data-i18n="right.team">Команда</summary>
           <div id="teamHud"></div>
         </details>
