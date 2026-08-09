@@ -842,6 +842,11 @@ const roomsCreateError = document.getElementById('roomsCreateError');
 const createRoomBtn = document.getElementById('createRoomBtn');
 const leaveBtn = document.getElementById('leaveBtn');
 const langToggleGlobal = document.getElementById('langToggleGlobal');
+/* Общая обёртка-подложка для #deathOverlay/#matchOverlay: смерть с респауном
+   и итоги матча — теперь два режима одного экрана (см. комментарий в
+   index.html). Видимость самой обёртки выводится из видимости режимов в
+   syncOverlayUiState(), отдельного show/hide для неё нет. */
+const endOverlay = document.getElementById('endOverlay');
 const deathOverlay = document.getElementById('deathOverlay');
 const restartBtn = document.getElementById('restartBtn');
 const deathMenuBtn = document.getElementById('deathMenuBtn');
@@ -3675,6 +3680,17 @@ function syncOverlayUiState() {
   const anyOverlayOpen = menuOpen || settingsOpen || matchOpen || cosmeticsIsOpen || deathOpen || minimapOpen;
   document.body.classList.toggle('overlayActive', anyOverlayOpen);
   if (langToggleGlobal) langToggleGlobal.classList.toggle('hidden', !anyOverlayOpen);
+
+  // Общая подложка #endOverlay видна, если открыт хоть один из двух режимов
+  // (death/match); режимы взаимоисключающие по игровой логике (matchEnd
+  // всегда гасит смерть через hideOverlays() перед показом итогов), но здесь
+  // это не предполагается, а выводится из фактического DOM-состояния — на
+  // случай гонки оба класса просто ORятся.
+  if (endOverlay) {
+    endOverlay.classList.toggle('hidden', !(matchOpen || deathOpen));
+    if (deathOpen) endOverlay.setAttribute('aria-labelledby', 'deathTitle');
+    else if (matchOpen) endOverlay.setAttribute('aria-labelledby', 'matchTitle');
+  }
 }
 
 function syncMatchOverlayActions() {

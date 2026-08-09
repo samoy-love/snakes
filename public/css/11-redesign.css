@@ -102,8 +102,7 @@
 
 /* --- Оверлеи: глубина вместо красной засветки ------------------------------ */
 .overlay,
-.deathOverlay,
-.matchOverlay {
+.endOverlay {
   background:
     radial-gradient(1000px 620px at 18% 12%, rgba(46, 230, 160, 0.10), transparent 55%),
     radial-gradient(900px 560px at 84% 88%, rgba(124, 92, 255, 0.10), transparent 55%),
@@ -703,7 +702,7 @@ body.inGame #hud:not(.lbPinned) #langToggle {
    карточка итогов уже переехала на глубокую rgba(5,9,16,0.92). Рядом с
    изумрудным интерфейсом это читалось как экран из другой версии игры.
    Теперь это та же карточка, что и итоги, только в опасном цвете. */
-.deathOverlay .toastCard {
+.deathOverlay.toastCard {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border2));
   background: linear-gradient(150deg, color-mix(in srgb, var(--accent) 12%, transparent), rgba(5, 9, 16, 0.92));
 }

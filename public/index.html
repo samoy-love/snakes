@@ -248,15 +248,23 @@
       </div>
     </div>
 
-    <div
-      id="deathOverlay"
-      class="deathOverlay hidden"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="deathTitle"
-      aria-describedby="deathHint"
-    >
-      <div class="toastCard" role="document">
+    <!-- Единый экран «конец жизни» — смерть с доступным респауном и итоги
+         всего матча теперь два РЕЖИМА одного оверлея (#endOverlay), а не два
+         разных диалога подряд: #deathOverlay и #matchOverlay остались теми же
+         id (их ищут тесты и client.js), но физически это уже не отдельные
+         position:fixed-обёртки, а сама визуальная карточка внутри общей
+         обёртки-подложки. Видимость каждого режима по-прежнему регулируется
+         классом hidden на самом #deathOverlay/#matchOverlay — это не менялось;
+         добавилась только видимость общей обёртки, которую сводит
+         syncOverlayUiState(). -->
+    <div id="endOverlay" class="endOverlay hidden" role="dialog" aria-modal="true">
+      <div
+        id="deathOverlay"
+        class="deathOverlay toastCard hidden"
+        role="document"
+        aria-labelledby="deathTitle"
+        aria-describedby="deathHint"
+      >
         <div class="toastIcon" aria-hidden="true">✖</div>
         <div class="toastBody">
           <div id="deathTitle" class="toastTitle" data-i18n="death.title">Вы проиграли</div>
@@ -269,17 +277,14 @@
           </div>
         </div>
       </div>
-    </div>
 
-    <div
-      id="matchOverlay"
-      class="matchOverlay hidden"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="matchTitle"
-      aria-describedby="matchHint"
-    >
-      <div class="matchCard" role="document">
+      <div
+        id="matchOverlay"
+        class="matchOverlay matchCard hidden"
+        role="document"
+        aria-labelledby="matchTitle"
+        aria-describedby="matchHint"
+      >
         <div class="matchHeader">
           <div id="matchTitle" class="matchTitle" data-i18n="match.title">Матч завершён</div>
           <div id="matchHint" class="matchSub"><span data-i18n="match.hint_prefix">Новый матч начнётся через</span> <span id="matchCountdown">—</span></div>

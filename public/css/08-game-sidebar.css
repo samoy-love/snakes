@@ -508,11 +508,11 @@ img.emoji {
      display: none;
    }
 
-   .deathOverlay {
+   .endOverlay {
      padding: calc(12px + var(--sa-top)) calc(12px + var(--sa-right)) calc(12px + var(--sa-bottom)) calc(12px + var(--sa-left));
    }
 
-   .deathOverlay .toastCard {
+   .deathOverlay.toastCard {
      width: min(560px, 100%);
    }
  }
@@ -610,11 +610,11 @@ img.emoji {
      padding-right: 52px;
    }
 
-   .deathOverlay {
+   .endOverlay {
      padding: calc(var(--pad-lg) + var(--sa-top)) calc(var(--pad-lg) + var(--sa-right)) calc(var(--pad-lg) + var(--sa-bottom)) calc(var(--pad-lg) + var(--sa-left));
    }
 
-   .deathOverlay .toastCard {
+   .deathOverlay.toastCard {
      width: min(520px, 100%);
      flex-direction: column;
      align-items: stretch;
