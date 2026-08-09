@@ -2652,6 +2652,12 @@ let lastDeathInfo = null;
 
 let lastYouStats = null;
 
+// Запас в клетках при отсечении «объект вне экрана, пропустить отрисовку» —
+// один допуск на пауэрапы, частицы и бурсты эффектов. Раньше был продублирован
+// с разными значениями (±1 у пауэрапов, ±2 у частиц и бурстов) — объект у
+// самого края экрана пропадал/появлялся на клетку раньше, чем остальные.
+const OFFSCREEN_MARGIN_CELLS = 2;
+
 /* I2/F18: геометрия «своего» — длина следа и ближайшая своя клетка. */
 const TRAIL_PULSE_FROM = 22;
 let youTrailLen = 0;
@@ -10367,7 +10373,14 @@ function draw() {
     for (const pu of powerUps.values()) {
       const x = Number(pu.x) || 0;
       const y = Number(pu.y) || 0;
-      if (x < minX - 1 || x > maxX + 1 || y < minY - 1 || y > maxY + 1) continue;
+      if (
+        x < minX - OFFSCREEN_MARGIN_CELLS ||
+        x > maxX + OFFSCREEN_MARGIN_CELLS ||
+        y < minY - OFFSCREEN_MARGIN_CELLS ||
+        y > maxY + OFFSCREEN_MARGIN_CELLS
+      ) {
+        continue;
+      }
 
       const cx = offsetX + (x + 0.5) * cell;
       const cy = offsetY + (y + 0.5) * cell;
@@ -10499,7 +10512,14 @@ function draw() {
       p0.y += p0.vy * dt;
       p0.lastAt = nowFrame;
 
-      if (p0.x < minX - 2 || p0.x > maxX + 2 || p0.y < minY - 2 || p0.y > maxY + 2) continue;
+      if (
+        p0.x < minX - OFFSCREEN_MARGIN_CELLS ||
+        p0.x > maxX + OFFSCREEN_MARGIN_CELLS ||
+        p0.y < minY - OFFSCREEN_MARGIN_CELLS ||
+        p0.y > maxY + OFFSCREEN_MARGIN_CELLS
+      ) {
+        continue;
+      }
       const a = (1 - age / 520) * (0.50 + 0.40 * fxIntensity);
       const cx = offsetX + p0.x * cell;
       const cy = offsetY + p0.y * cell;
@@ -10844,7 +10864,14 @@ function draw() {
       if (!isScore && !fxEnabled) continue;
       const x = fx.x;
       const y = fx.y;
-      if (x < minX - 2 || x > maxX + 2 || y < minY - 2 || y > maxY + 2) continue;
+      if (
+        x < minX - OFFSCREEN_MARGIN_CELLS ||
+        x > maxX + OFFSCREEN_MARGIN_CELLS ||
+        y < minY - OFFSCREEN_MARGIN_CELLS ||
+        y > maxY + OFFSCREEN_MARGIN_CELLS
+      ) {
+        continue;
+      }
 
       // J5: всплывающее число «+247» над точкой захвата.
       if (isScore) {
