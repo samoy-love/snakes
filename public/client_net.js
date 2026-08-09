@@ -111,7 +111,13 @@ export function createNetModule(opts) {
   }
 
   function connect() {
-    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+    // Гвард только на незавершённый хендшейк: повторный клик «Играть» до
+    // открытия сокета не должен плодить второй CONNECTING поверх первого.
+    // Явный connect() поверх уже ОТКРЫТОГО сокета — намеренный форс-реконнект
+    // (используется и проверяется отдельно, см. тесты «явный connect()
+    // снимает таймер отстоя предыдущего сокета» и «обрывы двух сокетов
+    // подряд») — его этот гвард трогать не должен.
+    if (ws && ws.readyState === WebSocket.CONNECTING) {
       return;
     }
     if (wsReconnectTimer) {
