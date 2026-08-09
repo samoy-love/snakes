@@ -500,20 +500,23 @@
     </div>
 
     <!-- data-tab убран: он был жёстко «match» и никогда не менялся, из-за чего
-         живая таблица игроков не рисовалась ни разу. Обе панели (Матч и
-         Команда) видны одновременно, переключать нечего. -->
+         живая таблица игроков не рисовалась ни разу. Вместо переключателя —
+         обычные независимые <details>: атрибут open здесь не важен, реальное
+         начальное состояние выставляет initRightDetailsState() в client.js
+         (по умолчанию открыт только «Матч», «Команда» — по клику; выбор
+         игрока запоминается в localStorage). -->
     <div id="rightSidebar">
       <div id="minimapPanel" class="minimapPanel">
         <canvas id="minimap"></canvas>
         <div id="minimapLegend" class="minimapLegend" aria-hidden="true"></div>
       </div>
       <div id="rightInfo">
-        <details id="rightMatchDetails" class="rightDetails" open>
+        <details id="rightMatchDetails" class="rightDetails">
           <summary class="rightDetailsSummary" data-i18n="right.match">Матч</summary>
           <div id="metaHud"></div>
         </details>
 
-        <details id="rightTeamDetails" class="rightDetails" open>
+        <details id="rightTeamDetails" class="rightDetails">
           <summary class="rightDetailsSummary" data-i18n="right.team">Команда</summary>
           <div id="teamHud"></div>
         </details>
