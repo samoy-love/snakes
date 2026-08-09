@@ -249,7 +249,7 @@
  #emojiRecent button {
    width: 100%;
    aspect-ratio: 1;
-   border-radius: 10px;
+   border-radius: var(--r-sm);
    border: 1px solid var(--border2);
    background: color-mix(in srgb, var(--btn) 70%, transparent);
    color: var(--text);
