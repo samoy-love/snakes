@@ -7394,7 +7394,13 @@ const COS_SCENE = {
   zoneH: 0.58,
   cellK: 0.13,
   cellMin: 14,
-  cellMax: 34
+  cellMax: 34,
+  // Панель меню и предпросмотр магазина имеют одинаковую пропорцию, но
+  // разную абсолютную ширину — если считать scell от их собственных fw/fh,
+  // клетки в них получаются разного размера, и одна и та же сцена выглядит
+  // по-разному. Размер клетки — от общего эталона, а не от конкретной
+  // панели, чтобы «меню» и «магазин» рисовали облик в одном масштабе.
+  cellRefMin: 186
 };
 
 function drawCosmeticsScene(ctx2, rect, opts) {
@@ -7411,7 +7417,7 @@ function drawCosmeticsScene(ctx2, rect, opts) {
   const baseC = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
   const scell = Math.max(
     COS_SCENE.cellMin,
-    Math.min(COS_SCENE.cellMax, Math.round(Math.min(fw, fh) * COS_SCENE.cellK))
+    Math.min(COS_SCENE.cellMax, Math.round(COS_SCENE.cellRefMin * COS_SCENE.cellK))
   );
 
   /* Зона считается ПЕРВОЙ и выравнивается по целому числу клеток: сетка фона
@@ -7436,9 +7442,13 @@ function drawCosmeticsScene(ctx2, rect, opts) {
 
   const plateFont = Math.max(11, Math.round(scell * 0.62));
   // Голова стоит сразу за кромкой зоны — змейка «только что вышла из дома»,
-  // а хвост ещё внутри. Ровно эта картинка и есть механика игры.
-  const headX = Math.round(zone.x + zone.w + scell * 1.2);
-  const headY = Math.round(zone.y + zone.h * 0.55);
+  // а хвост ещё внутри. Ровно эта картинка и есть механика игры. Отступ и
+  // ряд — целое число клеток от zone.x/zone.y: это та же сетка, по которой
+  // рисуются фон (drawCosmeticsFieldBackdrop) и территория (drawCosmeticsZone),
+  // дробный отступ раньше уводил голову с растра, и она «плавала» отдельно.
+  const headRow = Math.max(0, Math.floor(zone.h / scell / 2));
+  const headX = Math.round(zone.x + zone.w + scell * 2.5);
+  const headY = Math.round(zone.y + headRow * scell + scell / 2);
 
   const period = 2400;
   const p = reduceMotion ? 0.55 : (now % period) / period;
@@ -7449,7 +7459,7 @@ function drawCosmeticsScene(ctx2, rect, opts) {
     const dieStart = 0.45;
     const dieP = p < dieStart ? -1 : Math.min(1, (p - dieStart) / (COS_DEATH_MS / period));
     if (dieP < 0) {
-      drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, 6);
+      drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, 6, zone);
       drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
     } else {
       drawDeathFx(ctx2, headX, headY, Math.max(16, Math.round(scell * 1.25)), baseC, ids.death, dieP);
@@ -7459,7 +7469,7 @@ function drawCosmeticsScene(ctx2, rect, opts) {
   }
 
   drawCosmeticsZone(ctx2, zone, you, 0.55, ids.terr, scell);
-  drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, cat === 'seg' ? 8 : 6);
+  drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, cat === 'seg' ? 8 : 6, zone);
   drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
 
   /* Захват: вспышка над своей зоной в том же цикле, что и сцена.
@@ -7493,7 +7503,13 @@ function drawCosmeticsScene(ctx2, rect, opts) {
       const ph = Math.round(plateFont * 1.5);
       ctx2.strokeRect(headX - scell * 2.4, headY - scell * 0.95 - ph - 4, scell * 4.8, ph + 8);
     } else if (cat === 'seg') {
-      ctx2.strokeRect(headX - scell * 7.2, headY - scell * 0.72, scell * 6.4, scell * 1.44);
+      // Раньше бокс был зашит под старую геометрию хвоста (8 тайлов подряд от
+      // headX). Теперь тайлы, ушедшие под территорию, не рисуются вовсе
+      // (см. drawCosmeticsSnake) — обводка обязана останавливаться там же,
+      // где на самом деле кончается видимый хвост, а не залезать на зону.
+      const segRight = headX - scell / 2;
+      const segLeft = Math.max(zone.x + zone.w, segRight - scell * 8);
+      ctx2.strokeRect(segLeft, headY - scell * 0.62, segRight - segLeft, scell * 1.24);
     } else if (cat === 'terr') {
       ctx2.strokeRect(zone.x + 1, zone.y + 1, zone.w - 2, zone.h - 2);
     }
@@ -7554,15 +7570,24 @@ function renderCosmeticsPreview() {
   setHint();
 }
 
-function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, headColor, tileCount) {
+function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, headColor, tileCount, zone) {
   const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
   const c = headColor || base;
   const scell = Math.max(14, Math.round(cell));
   const now = performance.now();
   const tiles = Math.max(3, Math.min(12, Number(tileCount) || 6));
-  const startX = headX - scell * 0.85;
+  // Хвост кладём строго по той же сетке (шаг scell от headX), что и фон/
+  // территория — раньше стартовая точка была сдвинута на 0.85 клетки, и
+  // тайлы следа не совпадали с растром, из-за чего змейка «плавала».
+  const headLeft = headX - scell / 2;
+  const zoneRight = zone ? zone.x + zone.w : headLeft;
   for (let i = 0; i < tiles; i++) {
-    drawSegTile(ctx2, startX - i * scell - scell / 2, headY - scell / 2, scell, base, segId, i + 17, 0.88, now);
+    const tileLeft = headLeft - (i + 1) * scell;
+    // Тайл целиком лёг на уже занятую территорию — цветом следа его не
+    // красим: след существует только на ещё не захваченной земле, дальше
+    // хвост просто «уходит» под уже нарисованную зону.
+    if (tileLeft + scell <= zoneRight) continue;
+    drawSegTile(ctx2, tileLeft, headY - scell / 2, scell, base, segId, i + 17, 0.88, now);
   }
   drawHead(ctx2, headX, headY, scell, c, headId, 1, 0, now);
 }
