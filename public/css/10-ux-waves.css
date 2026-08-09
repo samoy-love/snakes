@@ -622,6 +622,14 @@ body.inGame #hud:not(.lbPinned) #help {
   display: none;
 }
 
+/* То же на главном экране: menu.hint зовёт нажимать WASD/стрелки, которых
+   на тач-устройстве нет — там управление свайпом (menu.hint_touch). Пара
+   .overlayHint/.menuHintTouch переключается по (pointer: coarse) так же,
+   как #help/#helpTouch в игровом HUD. */
+.menuHintTouch {
+  display: none;
+}
+
 @media (pointer: coarse) {
   #help {
     display: none !important;
@@ -650,6 +658,14 @@ body.inGame #hud:not(.lbPinned) #help {
   body:has(#chat:not(.collapsed)) #helpTouch,
   body.overlayActive #helpTouch {
     display: none;
+  }
+
+  .overlayHint:not(.menuHintTouch) {
+    display: none;
+  }
+
+  .menuHintTouch {
+    display: block;
   }
 }
 
