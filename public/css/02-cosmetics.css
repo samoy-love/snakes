@@ -128,15 +128,15 @@
  }
 
  .cosmeticsItem.isOwned {
-   background-color: rgba(52, 211, 153, 0.07);
-   border-top-color: rgba(52, 211, 153, 0.22);
-   border-right-color: rgba(52, 211, 153, 0.22);
-   border-bottom-color: rgba(52, 211, 153, 0.22);
+   background-color: color-mix(in srgb, var(--brand) 7%, transparent);
+   border-top-color: color-mix(in srgb, var(--brand) 22%, transparent);
+   border-right-color: color-mix(in srgb, var(--brand) 22%, transparent);
+   border-bottom-color: color-mix(in srgb, var(--brand) 22%, transparent);
  }
 
  .cosmeticsItem.isOwned .cosmeticsItemTitle::before {
    content: '✓ ';
-   color: #34d399;
+   color: var(--brand);
    font-weight: 800;
  }
 
@@ -481,7 +481,7 @@
   padding: var(--pad-md) 14px;
   border-radius: var(--r-md);
   border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent);
-  background: linear-gradient(135deg, #2bd694, #3fb9dd);
+  background: var(--btn-primary-grad);
   color: rgba(255, 255, 255, 0.96);
   cursor: pointer;
   min-height: var(--control-h);

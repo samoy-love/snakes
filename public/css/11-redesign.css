@@ -42,6 +42,10 @@
   /* .btnPrimary/.btnSecondary/.btnGhost/.iconBtn делят один и тот же фокус-ring
      (см. 02-cosmetics.css) — было 4 буквальных копии одного значения. */
   --btn-focus-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
+  /* Тот же градиент .btnPrimary был буквально продублирован в 02-cosmetics.css
+     (мёртвое правило, перекрытое этим же файлом порядком каскада) — один
+     источник вместо двух копий одного хардкода. Значение не менялось. */
+  --btn-primary-grad: linear-gradient(135deg, #2bd694, #3fb9dd);
 }
 
 /* --- Мобильные свайпы: без touch-action браузер сам съедает pointermove ----
@@ -124,7 +128,7 @@
 /* --- Кнопки ---------------------------------------------------------------- */
 .btnPrimary {
   border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent);
-  background: linear-gradient(135deg, #2bd694, #3fb9dd);
+  background: var(--btn-primary-grad);
   color: #04170f;
   text-shadow: none;
 }
