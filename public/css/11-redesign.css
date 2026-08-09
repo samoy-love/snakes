@@ -34,6 +34,11 @@
   --btn2: rgba(148, 163, 184, 0.17);
   --grid: rgba(255, 255, 255, 0.045);
   --r-lg: 18px;
+  /* .btnPlay крупнее и ярче остальных кнопок нарочно — свой радиус и своя,
+     акцентная тень поверх base-токенов --r-* / --shadow-float. */
+  --btn-play-radius: 16px;
+  --btn-play-shadow: 0 12px 36px color-mix(in srgb, var(--brand) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  --btn-play-shadow-hover: 0 16px 44px color-mix(in srgb, var(--brand) 40%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
 /* --- Мобильные свайпы: без touch-action браузер сам съедает pointermove ----
@@ -134,17 +139,17 @@
 .menuActions .btnPlay,
 .overlay .card .btnPlay {
   min-height: 58px;
-  border-radius: 16px;
+  border-radius: var(--btn-play-radius);
   border: 1px solid color-mix(in srgb, var(--brand) 65%, transparent);
   background: linear-gradient(135deg, var(--brand), var(--brand2));
   color: #03130c;
   font-weight: 900;
   letter-spacing: 0.4px;
-  box-shadow: 0 12px 36px rgba(46, 230, 160, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: var(--btn-play-shadow);
 }
 
 .btnPlay:hover {
-  box-shadow: 0 16px 44px rgba(46, 230, 160, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  box-shadow: var(--btn-play-shadow-hover);
 }
 
 /* Спиннер isLoading на ярком фоне — тёмный, а не белый */
