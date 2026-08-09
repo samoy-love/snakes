@@ -143,6 +143,11 @@ html, body {
    --tier-legendary: #f5a524;
    --tier-mythic: #ff3d71;
    --gold: #f5c542;
+   /* Внутренние блики рамок профиля (09-hud-details.css, .frame2/.frame4) —
+      были литералами rgba прямо в правиле, вынесены сюда, чтобы не плодить
+      неучтённые цвета вне токенов. */
+   --frame-chrome-inset: rgba(255, 255, 255, 0.18);
+   --frame-obsidian-inset: rgba(170, 120, 255, 0.28);
    --sa-top: env(safe-area-inset-top, 0px);
    --sa-right: env(safe-area-inset-right, 0px);
    --sa-bottom: env(safe-area-inset-bottom, 0px);
