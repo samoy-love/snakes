@@ -33,15 +33,12 @@ channel is ROI: a client receives only the window of the map around its own head
 the tick it already acknowledged. The minimap ships as 10×10 chunks and
 afterwards only the changed ones.
 
-**Protocol drift is caught from both sides, because it used to break the game
+**Protocol drift is caught by tests, because it used to break the game
 silently.** The byte layout drifted between server and client three times over
 the life of the project: the page still opened, the killfeed and the balance
-just went quiet. Now the golden buffers are captured from the production Go
-serialisers and committed as data, an independent JS decoder replays them field
-by field, and `public/client.js` is additionally checked against the golden
-statically — every event kind has a handler, read widths and offset sums add up.
-A Go test fails if the golden lags behind the serialisers; the node tests fail if
-the client lags behind the golden.
+just went quiet. Now golden buffers are captured from the production Go
+serialisers, and both ends — Go tests and node tests — are checked against
+that golden in CI.
 
 **A client with no build step, because the deploy is one artifact.** Vanilla JS
 (ES modules) and Canvas 2D: the browser loads the files as they are — no npm
@@ -57,12 +54,10 @@ achievements — survives a reload and cannot be forged into someone else's
 profile; see [docs/security.md](docs/security.md).
 
 **Bots that read as opponents, because an empty room is a dead product.** Free
-seats are filled with bots — 14 in an empty room, fewer as humans arrive, down
-to four — and they run three difficulty tiers and four behaviour archetypes
-(Farmer, Aggressor, Coward, Territorial), each with its own appetite for risk and
-loop length. Hunting is bounded on purpose: at most three hunters per victim, and
-a bot drives straight at its target for a few ticks before the strike, which is a
-visible wind-up a human can still react to.
+seats are filled with bots — 14 in an empty room, fewer as humans arrive — and
+they run three difficulty tiers and four behaviour archetypes (Farmer,
+Aggressor, Coward, Territorial). A bot drives straight at its target for a few
+ticks before the strike, a visible wind-up a human can still react to.
 
 ## Stack
 
