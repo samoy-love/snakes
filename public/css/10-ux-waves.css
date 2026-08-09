@@ -324,38 +324,21 @@
 }
 
 /* Одна колонка 434px давала около 970px прокрутки на категорию при свободном
-   правом крае. На широком экране лента идёт в две колонки. */
+   правом крае. На широком экране карточка шире, а сетка (см. 01-base.css,
+   .cosmeticsItems — auto-fill) сама укладывает больше плиток в ряд, без
+   отдельного брейкпоинта под фиксированное число колонок. */
 #cosmeticsOverlay .card {
   width: min(1120px, calc(100vw - 24px));
 }
 
 @media (min-width: 1180px) {
   .cosmeticsItems {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     align-content: start;
     max-height: min(56dvh, 520px);
   }
 
   .cosmeticsItems > .roomsEmpty {
     grid-column: 1 / -1;
-  }
-
-  /* В колонке ~273px строка «превью + название + цена + кнопка» ужимает
-     название до 58px и рвёт его по буквам: раскладываем в два ряда, как на
-     узком экране. */
-  .cosmeticsItems .cosmeticsItem {
-    flex-wrap: wrap;
-    row-gap: 8px;
-  }
-
-  .cosmeticsItems .cosmeticsItemLeft {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-
-  .cosmeticsItems .cosmeticsItemRight {
-    flex: 1 0 100%;
-    justify-content: space-between;
   }
 }
 
