@@ -481,7 +481,7 @@
   padding: var(--pad-md) 14px;
   border-radius: var(--r-md);
   border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent);
-  background: linear-gradient(135deg, #2bd694, #3fb9dd);
+  background: var(--btn-primary-grad);
   color: rgba(255, 255, 255, 0.96);
   cursor: pointer;
   min-height: var(--control-h);
