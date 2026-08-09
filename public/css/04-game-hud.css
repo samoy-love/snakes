@@ -102,6 +102,13 @@
   gap: 8px;
  }
 
+ /* В бою поле смены ника не нужно и просто занимает место в верху экрана.
+    body.inGame — тот же флаг, которым уже отмечено активное состояние
+    матча по всему HUD (см. body.inGame #hud:not(.lbPinned) выше). */
+ body.inGame #nameRow {
+  display: none;
+ }
+
  #nameRow input {
   flex: 1;
   min-width: 0;
