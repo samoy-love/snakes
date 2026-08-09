@@ -654,60 +654,40 @@ function setNameCellWithTitle(td, titleId, name, playerNum) {
   else td.replaceChildren(sp, document.createTextNode(nm));
 }
 
-function drawMiniCosmeticPreview(canvasEl, cat, id) {
-  if (!canvasEl) return;
-  const W = 44;
-  const H = 44;
-  const c = cosPrepCanvas(canvasEl, W, H);
-  if (!c) return;
-  c.fillStyle = 'rgba(0,0,0,0.26)';
-  c.fillRect(0, 0, W, H);
-
-  const base = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
-  const cx = W / 2;
-  const cy = H / 2;
-  const now = performance.now();
-
-  if (cat === 'frame') {
+// Одна функция на категорию, вместо цепочки if (cat === ...). Ключи —
+// COSMETICS_TABS (проверено tests/client_cosmetics_cats_usage.test.mjs):
+// забытая категория провалит тест, а не молча останется пустой иконкой.
+const MINI_COSMETIC_PREVIEW_BY_CAT = {
+  frame(c, { W, id }) {
     drawFrameRow(c, 2, 8, W - 4, 13, id, 1, '', '', false);
     drawFrameRow(c, 2, 22, W - 4, 14, id, 2, '', '', true);
-    return;
-  }
-
-  if (cat === 'capturefx') {
-    // Иконка проигрывает тот же цикл, что и игра, только короче.
+  },
+  // Иконка проигрывает тот же цикл, что и игра, только короче.
+  capturefx(c, { cx, cy, base, id, now }) {
     const p = ((now % 1400) / 1400);
     c.save();
     c.translate(0, 0);
     drawCaptureFx(c, cx, cy, 13, base, id, p);
     c.restore();
-    return;
-  }
-
-  if (cat === 'seg') {
-    // Квадратные плитки — ровно как след в игре (раньше рисовалась цепочка кружков).
-    // cell 10, а не 13: с 13 голова оказывалась в x≈47 при ширине канваса 44
-    // и обрезалась правым краем.
+  },
+  // Квадратные плитки — ровно как след в игре (раньше рисовалась цепочка кружков).
+  // cell 10, а не 13: с 13 голова оказывалась в x≈47 при ширине канваса 44
+  // и обрезалась правым краем.
+  seg(c, { cy, base, id, now }) {
     const cell = 10;
     for (let i = 0; i < 3; i++) {
       drawSegTile(c, 2 + i * cell, cy - cell / 2, cell, base, id, i, 0.95, now);
     }
     drawHead(c, 2 + 3 * cell + cell * 0.55, cy, cell, base, 0, 1, 0, now);
-    return;
-  }
-
-  if (cat === 'nameplate') {
+  },
+  nameplate(c, { cx, cy, base, id, now }) {
     drawNamePlate(c, 'YOU', cx, cy + 9, base, id, 0.98, 10, now);
-    return;
-  }
-
-  if (cat === 'head') {
+  },
+  head(c, { cx, cy, base, id, now }) {
     drawHead(c, cx - 3, cy, 34, base, id, 1, 0, now);
-    return;
-  }
-
-  if (cat === 'terr') {
-    // 2×2 клетки территории — тот же узор, что и на поле.
+  },
+  // 2×2 клетки территории — тот же узор, что и на поле.
+  terr(c, { W, H, base, id, now }) {
     const cell = 20;
     const ox = (W - cell * 2) / 2;
     const oy = (H - cell * 2) / 2;
@@ -719,17 +699,13 @@ function drawMiniCosmeticPreview(canvasEl, cat, id) {
     if (cosClampId(id) === 5) {
       drawTerrSeam(c, ox, oy, cell * 2, base, 15, 0.9, true);
     }
-    return;
-  }
-
-  if (cat === 'death') {
-    // Иконка статична (перерисовывается только при пересборке списка), поэтому
-    // берём фазу середины эффекта — на случайной фазе он был бы уже погасшим.
+  },
+  // Иконка статична (перерисовывается только при пересборке списка), поэтому
+  // берём фазу середины эффекта — на случайной фазе он был бы уже погасшим.
+  death(c, { cx, cy, base, id }) {
     drawDeathFx(c, cx, cy, 11, base, id, 0.42);
-    return;
-  }
-
-  if (cat === 'title') {
+  },
+  title(c, { cx, cy, id }) {
     c.save();
     c.font = `700 11px ${COS_FONT}`;
     c.textAlign = 'center';
@@ -737,8 +713,29 @@ function drawMiniCosmeticPreview(canvasEl, cat, id) {
     c.fillStyle = 'rgba(255,255,255,0.9)';
     c.fillText(id === 0 ? '—' : '«»', cx, cy);
     c.restore();
-    return;
   }
+};
+
+function drawMiniCosmeticPreview(canvasEl, cat, id) {
+  if (!canvasEl) return;
+  const W = 44;
+  const H = 44;
+  const c = cosPrepCanvas(canvasEl, W, H);
+  if (!c) return;
+  c.fillStyle = 'rgba(0,0,0,0.26)';
+  c.fillRect(0, 0, W, H);
+
+  const draw = MINI_COSMETIC_PREVIEW_BY_CAT[cat];
+  if (!draw) return;
+  draw(c, {
+    W,
+    H,
+    cx: W / 2,
+    cy: H / 2,
+    base: boostHsl(colors.get(you) || 'hsl(210 20% 60%)'),
+    now: performance.now(),
+    id
+  });
 }
 
 function wsSend(type, data) {
@@ -6519,62 +6516,68 @@ function cosmeticsOwnedCount(cat) {
   return ownedCountFromMask(cosmeticsMaskForCat(cat));
 }
 
+// Ключ i18n на категорию. Таблица индексируется COSMETICS_TABS (проверено
+// тестом tests/client_cosmetics_cats_usage.test.mjs) — забытая категория
+// упадёт на тесте, а не молча покажет ярлык соседней категории.
+const COSMETICS_LABEL_KEY_BY_CAT = {
+  terr: 'cosmetics.cat_terr',
+  seg: 'cosmetics.cat_seg',
+  head: 'cosmetics.cat_head',
+  death: 'cosmetics.cat_death',
+  capturefx: 'cosmetics.cat_capturefx',
+  nameplate: 'cosmetics.cat_nameplate',
+  frame: 'cosmetics.cat_frame',
+  title: 'cosmetics.cat_title'
+};
+
 function cosmeticsLabel(cat) {
-  if (cat === 'capturefx') return t('cosmetics.cat_capturefx');
-  if (cat === 'head') return t('cosmetics.cat_head');
-  if (cat === 'seg') return t('cosmetics.cat_seg');
-  if (cat === 'nameplate') return t('cosmetics.cat_nameplate');
-  if (cat === 'terr') return t('cosmetics.cat_terr');
-  if (cat === 'death') return t('cosmetics.cat_death');
-  if (cat === 'title') return t('cosmetics.cat_title');
-  return t('cosmetics.cat_frame');
+  return t(COSMETICS_LABEL_KEY_BY_CAT[cat] || 'cosmetics.cat_frame');
 }
+
+// Названия вариантов не повторяются между категориями: раньше «Лазурь/Алая/
+// Золото/Аметист» стояли и в рамках, и в плашках, отчего покупка ощущалась
+// как «купил цвет». Семьи названий (см. комментарий у каждой категории)
+// подобраны так, чтобы различие было в форме/структуре, а не в цвете.
+const COSMETICS_VARIANT_NAMES_BY_CAT = {
+  capturefx: {
+    en: ['Rings', 'Rays', 'Crystal', 'Spiral', 'Confetti', 'Magma', 'Vortex', 'Shards'],
+    ru: ['Кольца', 'Лучи', 'Кристалл', 'Спираль', 'Конфетти', 'Магма', 'Вихрь', 'Осколки']
+  },
+  seg: {
+    en: ['Classic', 'Neon', 'Stripes', 'Plasma', 'Sparks', 'Circuit', 'Mosaic', 'Void'],
+    ru: ['Классика', 'Неон', 'Полосы', 'Плазма', 'Искры', 'Схема', 'Мозаика', 'Бездна']
+  },
+  // Семейство «металлы и материалы» — совпадает с классами .frame0..7 в CSS.
+  frame: {
+    en: ['Steel', 'Copper', 'Chrome', 'Emerald', 'Obsidian', 'Aurora', 'Golden Age', 'Prism'],
+    ru: ['Сталь', 'Медь', 'Хром', 'Изумруд', 'Обсидиан', 'Северное сияние', 'Золотой век', 'Призма']
+  },
+  // Семейство «формы плашки» — различие в геометрии, не в цвете.
+  nameplate: {
+    en: ['Capsule', 'Bar', 'Bevel', 'Scroll', 'Terminal', 'Engrave', 'Gleam', 'Chevron'],
+    ru: ['Капсула', 'Планка', 'Скос', 'Свиток', 'Терминал', 'Гравюра', 'Блик', 'Шеврон']
+  },
+  head: {
+    en: ['Orb', 'Rhombus', 'Cube', 'Ring', 'Shield', 'Arrow', 'Eclipse', 'Star'],
+    ru: ['Орб', 'Ромб', 'Куб', 'Кольцо', 'Щит', 'Стрела', 'Затмение', 'Звезда']
+  },
+  // Семейство «поверхности»: различие в структуре узора, цвет всегда ваш.
+  terr: {
+    en: ['Solid', 'Hatch', 'Honeycomb', 'Tide', 'Circuit', 'Stained glass', 'Rift', 'Weave'],
+    ru: ['Заливка', 'Штриховка', 'Соты', 'Прилив', 'Схема', 'Витраж', 'Разлом', 'Ткань']
+  },
+  death: {
+    en: ['Flash', 'Pixels', 'Black hole', 'Glass', 'Supernova', 'Glitch', 'Ash', 'Discharge'],
+    ru: ['Вспышка', 'Пиксели', 'Чёрная дыра', 'Стекло', 'Сверхновая', 'Глитч', 'Пепел', 'Разряд']
+  }
+};
 
 function cosmeticsVariantName(cat, id) {
   const i = Math.max(0, Math.min(COSMETICS_MAX_ID, Number(id) || 0));
-  const en = lang === 'en';
-  // Названия не повторяются между категориями: раньше «Лазурь/Алая/Золото/Аметист»
-  // стояли и в рамках, и в плашках, отчего покупка ощущалась как «купил цвет».
-  if (cat === 'capturefx') {
-    return (en
-      ? ['Rings', 'Rays', 'Crystal', 'Spiral', 'Confetti', 'Magma', 'Vortex', 'Shards']
-      : ['Кольца', 'Лучи', 'Кристалл', 'Спираль', 'Конфетти', 'Магма', 'Вихрь', 'Осколки'])[i];
-  }
-  if (cat === 'seg') {
-    return (en
-      ? ['Classic', 'Neon', 'Stripes', 'Plasma', 'Sparks', 'Circuit', 'Mosaic', 'Void']
-      : ['Классика', 'Неон', 'Полосы', 'Плазма', 'Искры', 'Схема', 'Мозаика', 'Бездна'])[i];
-  }
-  if (cat === 'frame') {
-    // Семейство «металлы и материалы» — совпадает с классами .frame0..7 в CSS.
-    return (en
-      ? ['Steel', 'Copper', 'Chrome', 'Emerald', 'Obsidian', 'Aurora', 'Golden Age', 'Prism']
-      : ['Сталь', 'Медь', 'Хром', 'Изумруд', 'Обсидиан', 'Северное сияние', 'Золотой век', 'Призма'])[i];
-  }
-  if (cat === 'nameplate') {
-    // Семейство «формы плашки» — различие в геометрии, не в цвете.
-    return (en
-      ? ['Capsule', 'Bar', 'Bevel', 'Scroll', 'Terminal', 'Engrave', 'Gleam', 'Chevron']
-      : ['Капсула', 'Планка', 'Скос', 'Свиток', 'Терминал', 'Гравюра', 'Блик', 'Шеврон'])[i];
-  }
-  if (cat === 'head') {
-    return (en
-      ? ['Orb', 'Rhombus', 'Cube', 'Ring', 'Shield', 'Arrow', 'Eclipse', 'Star']
-      : ['Орб', 'Ромб', 'Куб', 'Кольцо', 'Щит', 'Стрела', 'Затмение', 'Звезда'])[i];
-  }
-  if (cat === 'terr') {
-    // Семейство «поверхности»: различие в структуре узора, цвет всегда ваш.
-    return (en
-      ? ['Solid', 'Hatch', 'Honeycomb', 'Tide', 'Circuit', 'Stained glass', 'Rift', 'Weave']
-      : ['Заливка', 'Штриховка', 'Соты', 'Прилив', 'Схема', 'Витраж', 'Разлом', 'Ткань'])[i];
-  }
-  if (cat === 'death') {
-    return (en
-      ? ['Flash', 'Pixels', 'Black hole', 'Glass', 'Supernova', 'Glitch', 'Ash', 'Discharge']
-      : ['Вспышка', 'Пиксели', 'Чёрная дыра', 'Стекло', 'Сверхновая', 'Глитч', 'Пепел', 'Разряд'])[i];
-  }
   if (cat === 'title') return cosTitleName(id) || t('cosmetics.title_none');
-  return String(i + 1);
+  const names = COSMETICS_VARIANT_NAMES_BY_CAT[cat];
+  if (!names) return String(i + 1);
+  return names[lang === 'en' ? 'en' : 'ru'][i];
 }
 
 /* --- Титулы в магазине -----------------------------------------------------
