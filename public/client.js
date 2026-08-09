@@ -6644,7 +6644,7 @@ function renderCosmeticsTitles() {
   const items = [];
 
   const hint = document.createElement('div');
-  hint.className = 'cosmeticsTierSep tierBase';
+  hint.className = `cosmeticsTierSep ${tierClass()}`;
   hint.textContent = t('cosmetics.title_free_hint');
   items.push(hint);
 
