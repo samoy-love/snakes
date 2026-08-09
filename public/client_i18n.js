@@ -9,6 +9,7 @@ export const I18N = {
     'game.title': 'Змейки',
     'menu.kicker': 'Онлайн • быстрый матч',
     'menu.subtitle': 'Захватывайте территорию, избегайте следов и побеждайте',
+    'menu.goal': 'Побеждает тот, у кого больше территории к концу матча',
     'menu.quick_start': 'Быстрый старт',
     'menu.nick': 'Ник',
     'menu.nick_placeholder': 'Введите ник',
@@ -25,6 +26,7 @@ export const I18N = {
     'menu.how_step1': 'Выйди за свою зону',
     'menu.how_step2': 'Оставь след',
     'menu.how_step3': 'Замкни петлю — территория твоя',
+    'menu.how_step4': 'Врезался в след — своей или чужой — умер',
     'menu.rooms_hint': 'выбрать вручную',
 
     'menu.controls_title': 'Управление',
@@ -411,6 +413,7 @@ export const I18N = {
     'game.title': 'Snakes',
     'menu.kicker': 'Online • quick match',
     'menu.subtitle': 'Capture territory, avoid trails, and win',
+    'menu.goal': 'Whoever holds the most territory at the end wins',
     'menu.quick_start': 'Quick start',
     'menu.nick': 'Nickname',
     'menu.nick_placeholder': 'Enter nickname',
@@ -427,6 +430,7 @@ export const I18N = {
     'menu.how_step1': 'Leave your zone',
     'menu.how_step2': 'Draw a trail',
     'menu.how_step3': 'Close the loop — the land is yours',
+    'menu.how_step4': 'Hit any trail — yours or theirs — and you die',
     'menu.rooms_hint': 'pick manually',
 
     'menu.controls_title': 'Controls',
