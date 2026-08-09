@@ -129,7 +129,7 @@ test.describe('игровая сессия', () => {
     // дойдёт до границы карты — причина смерти тогда не «в стену», а «в
     // чужой след». Разметку карточки смерти это не меняет, только текст.
     await expect(page).toHaveScreenshot('death.png', {
-      mask: [...LIVE_HUD, '#deathStats', '#deathReason'].map((s) => page.locator(s))
+      mask: [...LIVE_HUD, '#deathStats', '#deathReason', '#killfeed'].map((s) => page.locator(s))
     });
 
     // Итоги матча приходят по истечении MATCH_DURATION_TICKS — счётчик
@@ -141,7 +141,7 @@ test.describe('игровая сессия', () => {
     await page.waitForTimeout(150);
     await clearEventToasts(page);
     await expect(page).toHaveScreenshot('match.png', {
-      mask: [...LIVE_HUD, '#matchResults'].map((s) => page.locator(s))
+      mask: [...LIVE_HUD, '#matchResults', '#killfeed'].map((s) => page.locator(s))
     });
   });
 });
