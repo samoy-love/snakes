@@ -1721,6 +1721,57 @@ func TestHubRoomLimit(t *testing.T) {
 	}
 }
 
+// TestPickRoomForJoinPrefersMoreHumans проверяет, что автоподбор ведёт игрока
+// в комнату с наибольшим числом живых людей (не заполненную), а не просто в
+// первую по id — иначе баннер "сейчас играют N" обманывает игрока.
+func TestPickRoomForJoinPrefersMoreHumans(t *testing.T) {
+	h := &Hub{rooms: make(map[int]*Room), nextRoomID: 1, roomLimit: RoomHumanLimitDefault}
+	t.Cleanup(func() {
+		h.mu.Lock()
+		for _, rm := range h.rooms {
+			rm.close()
+		}
+		h.mu.Unlock()
+	})
+
+	r1 := h.createRoom("a")
+	r2 := h.createRoom("b")
+	r3 := h.createRoom("c")
+	if r1 == nil || r2 == nil || r3 == nil {
+		t.Fatal("не удалось создать тестовые комнаты")
+	}
+
+	r1.mu.Lock()
+	r1.humanCount = 1
+	r1.mu.Unlock()
+	r2.mu.Lock()
+	r2.humanCount = 3
+	r2.mu.Unlock()
+	r3.mu.Lock()
+	r3.humanCount = 2
+	r3.mu.Unlock()
+
+	rm := h.pickRoomForJoin()
+	if rm == nil {
+		t.Fatal("pickRoomForJoin вернул nil")
+	}
+	if rm.id != r2.id {
+		t.Fatalf("выбрана комната %d, ожидалась %d (больше всего людей)", rm.id, r2.id)
+	}
+
+	// При равном числе людей тай-брейк — по возрастанию id (детерминированно).
+	r2.mu.Lock()
+	r2.humanCount = 2
+	r2.mu.Unlock()
+	rm = h.pickRoomForJoin()
+	if rm == nil {
+		t.Fatal("pickRoomForJoin вернул nil")
+	}
+	if rm.id != r2.id {
+		t.Fatalf("тай-брейк: выбрана комната %d, ожидалась %d (меньший id)", rm.id, r2.id)
+	}
+}
+
 func TestLoadMaxRoomsEnv(t *testing.T) {
 	t.Setenv("MAX_ROOMS", "7")
 	if got := loadMaxRooms(); got != 7 {
