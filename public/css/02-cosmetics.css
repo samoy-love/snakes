@@ -1153,7 +1153,7 @@
 
  .deathReason {
    font-size: var(--fs-meta);
-   color: rgba(255, 255, 255, 0.86);
+   color: var(--muted);
    margin-bottom: 6px;
    font-weight: 700;
  }
@@ -1182,8 +1182,8 @@
  .deathStat {
    padding: 8px 10px;
    border-radius: var(--r-md);
-   border: 1px solid rgba(255, 255, 255, 0.10);
-   background: rgba(0, 0, 0, 0.18);
+   border: 1px solid var(--border);
+   background: var(--panel2);
  }
 
  .deathStatLabel {
@@ -1213,8 +1213,8 @@
  .deathYou {
    padding: var(--pad-md);
    border-radius: var(--r-md);
-   border: 1px solid rgba(255, 255, 255, 0.10);
-   background: rgba(0, 0, 0, 0.20);
+   border: 1px solid var(--border);
+   background: var(--panel2);
  }
 
  .deathYouTitle {
@@ -1240,8 +1240,8 @@
 
  .deathTop {
    border-radius: var(--r-md);
-   border: 1px solid rgba(255, 255, 255, 0.10);
-   background: rgba(0, 0, 0, 0.18);
+   border: 1px solid var(--border);
+   background: var(--panel2);
    overflow: hidden;
  }
 
