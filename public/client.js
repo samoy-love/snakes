@@ -3042,9 +3042,13 @@ const RIGHT_MATCH_OPEN_KEY = 'rightMatchOpen';
 const RIGHT_TEAM_OPEN_KEY = 'rightTeamOpen';
 
 function initRightDetailsState() {
-  const initOne = (el, key) => {
+  // Раньше обе панели по умолчанию открывались одновременно (open = true у
+  // обеих) и постоянно съедали место у миникарты — переключателя между ними
+  // (data-tab) не было, а он и не работал. Оставляем открытой по умолчанию
+  // только «Матч»: «Команда» — по явному клику, как и предполагает <details>.
+  const initOne = (el, key, defaultOpen) => {
     if (!el) return;
-    let open = true;
+    let open = defaultOpen;
     try {
       const raw = localStorage.getItem(key);
       if (raw === '0') open = false;
@@ -3062,8 +3066,8 @@ function initRightDetailsState() {
     });
   };
 
-  initOne(rightMatchDetailsEl, RIGHT_MATCH_OPEN_KEY);
-  initOne(rightTeamDetailsEl, RIGHT_TEAM_OPEN_KEY);
+  initOne(rightMatchDetailsEl, RIGHT_MATCH_OPEN_KEY, true);
+  initOne(rightTeamDetailsEl, RIGHT_TEAM_OPEN_KEY, false);
 }
 
 initRightDetailsState();
