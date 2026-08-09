@@ -102,7 +102,8 @@ html, body {
    --r-sm: 10px;
    --r-md: 12px;
    --r-tab: 14px;
-   --r-lg: 16px;
+   /* --r-lg: единственная точка правды — 11-redesign.css (18px), чтобы не
+      расходиться значениями по каскаду. */
    --pad-sm: 8px;
    --pad-md: 10px;
    --pad-lg: 12px;
@@ -142,65 +143,24 @@ html, body {
    --tier-legendary: #f5a524;
    --tier-mythic: #ff3d71;
    --gold: #f5c542;
+   /* Внутренние блики рамок профиля (09-hud-details.css, .frame2/.frame4) —
+      были литералами rgba прямо в правиле, вынесены сюда, чтобы не плодить
+      неучтённые цвета вне токенов. */
+   --frame-chrome-inset: rgba(255, 255, 255, 0.18);
+   --frame-obsidian-inset: rgba(170, 120, 255, 0.28);
    --sa-top: env(safe-area-inset-top, 0px);
    --sa-right: env(safe-area-inset-right, 0px);
    --sa-bottom: env(safe-area-inset-bottom, 0px);
    --sa-left: env(safe-area-inset-left, 0px);
  }
 
- html[data-theme],
- html[data-theme="light"] {
-   --bg: #0b0f14;
-   --text: #e5e7eb;
-   --muted: rgba(229, 231, 235, 0.84);
-   --muted2: rgba(229, 231, 235, 0.78);
-   --hud-brightness: 1;
-   --hud-contrast: 1;
-   --hud-panel-alpha: 0.82;
-   /* V4: подложка HUD. Панель умножается на --hud-panel-alpha (0.82), т.е.
-      фактическая непрозрачность по умолчанию 0.62. При 0.46 над захваченной
-      территорией (#f5c542) вторичный текст давал 2.1:1 — ниже порога AA. */
-   --panel: rgba(0, 0, 0, 0.76);
-   --panel2: rgba(0, 0, 0, 0.36);
-   --border: rgba(255, 255, 255, 0.12);
-   --border2: rgba(255, 255, 255, 0.10);
-   --btn: rgba(255, 255, 255, 0.07);
-   --btn2: rgba(255, 255, 255, 0.11);
-   --focus: rgba(76, 201, 240, 0.92);
-   --fs-11: 11px;
-   --fs-12: 12px;
-   --fs-13: 13px;
-   --fs-14: 14px;
-   --fs-16: 16px;
-   --fs-18: 18px;
-   --fs-20: 20px;
-   --fs-22: 22px;
-   --lh-tight: 1.15;
-   --lh-body: 1.35;
-   --r-sm: 10px;
-   --r-md: 12px;
-   --r-tab: 14px;
-   --r-lg: 16px;
-   --pad-sm: 8px;
-   --pad-md: 10px;
-   --pad-lg: 12px;
-   --shadow-float: 0 12px 28px rgba(0,0,0,0.35);
-   --shadow-float-strong: 0 18px 60px rgba(0, 0, 0, 0.55);
-   --control-h: 44px;
-   --z-game: 0;
-   --z-hud: 10;
-   --z-minimap: 10;
-   --z-killfeed: 11;
-   --z-right: 12;
-   --z-top: 13;
-   --z-chat: 14;
-   --z-toasts: 20;
-   --z-overlay: 50;
-   --z-modal: 60;
-   --z-modal2: 65;
-   --z-toasts-top: 70;
-   --z-lang: 1000;
- }
+ /* Светлой темы у игры фактически нет: ни один код в клиенте не выставляет
+    html[data-theme="light"] (переключателя темы в UI нет), а этот блок был
+    дословной копией :root — светлые токены никогда не существовали, только
+    имитировали поддержку. Вместо того чтобы дорисовывать неиспользуемую
+    ветку, убрали её здесь и в 10-ux-waves.css/11-redesign.css: значения
+    token'ов задаются один раз в :root и его финальном переопределении
+    в 11-redesign.css. */
 
  *, *::before, *::after {
    box-sizing: border-box;

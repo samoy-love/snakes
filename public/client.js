@@ -654,60 +654,40 @@ function setNameCellWithTitle(td, titleId, name, playerNum) {
   else td.replaceChildren(sp, document.createTextNode(nm));
 }
 
-function drawMiniCosmeticPreview(canvasEl, cat, id) {
-  if (!canvasEl) return;
-  const W = 44;
-  const H = 44;
-  const c = cosPrepCanvas(canvasEl, W, H);
-  if (!c) return;
-  c.fillStyle = 'rgba(0,0,0,0.26)';
-  c.fillRect(0, 0, W, H);
-
-  const base = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
-  const cx = W / 2;
-  const cy = H / 2;
-  const now = performance.now();
-
-  if (cat === 'frame') {
+// Одна функция на категорию, вместо цепочки if (cat === ...). Ключи —
+// COSMETICS_TABS (проверено tests/client_cosmetics_cats_usage.test.mjs):
+// забытая категория провалит тест, а не молча останется пустой иконкой.
+const MINI_COSMETIC_PREVIEW_BY_CAT = {
+  frame(c, { W, id }) {
     drawFrameRow(c, 2, 8, W - 4, 13, id, 1, '', '', false);
     drawFrameRow(c, 2, 22, W - 4, 14, id, 2, '', '', true);
-    return;
-  }
-
-  if (cat === 'capturefx') {
-    // Иконка проигрывает тот же цикл, что и игра, только короче.
+  },
+  // Иконка проигрывает тот же цикл, что и игра, только короче.
+  capturefx(c, { cx, cy, base, id, now }) {
     const p = ((now % 1400) / 1400);
     c.save();
     c.translate(0, 0);
     drawCaptureFx(c, cx, cy, 13, base, id, p);
     c.restore();
-    return;
-  }
-
-  if (cat === 'seg') {
-    // Квадратные плитки — ровно как след в игре (раньше рисовалась цепочка кружков).
-    // cell 10, а не 13: с 13 голова оказывалась в x≈47 при ширине канваса 44
-    // и обрезалась правым краем.
+  },
+  // Квадратные плитки — ровно как след в игре (раньше рисовалась цепочка кружков).
+  // cell 10, а не 13: с 13 голова оказывалась в x≈47 при ширине канваса 44
+  // и обрезалась правым краем.
+  seg(c, { cy, base, id, now }) {
     const cell = 10;
     for (let i = 0; i < 3; i++) {
       drawSegTile(c, 2 + i * cell, cy - cell / 2, cell, base, id, i, 0.95, now);
     }
     drawHead(c, 2 + 3 * cell + cell * 0.55, cy, cell, base, 0, 1, 0, now);
-    return;
-  }
-
-  if (cat === 'nameplate') {
+  },
+  nameplate(c, { cx, cy, base, id, now }) {
     drawNamePlate(c, 'YOU', cx, cy + 9, base, id, 0.98, 10, now);
-    return;
-  }
-
-  if (cat === 'head') {
+  },
+  head(c, { cx, cy, base, id, now }) {
     drawHead(c, cx - 3, cy, 34, base, id, 1, 0, now);
-    return;
-  }
-
-  if (cat === 'terr') {
-    // 2×2 клетки территории — тот же узор, что и на поле.
+  },
+  // 2×2 клетки территории — тот же узор, что и на поле.
+  terr(c, { W, H, base, id, now }) {
     const cell = 20;
     const ox = (W - cell * 2) / 2;
     const oy = (H - cell * 2) / 2;
@@ -719,17 +699,13 @@ function drawMiniCosmeticPreview(canvasEl, cat, id) {
     if (cosClampId(id) === 5) {
       drawTerrSeam(c, ox, oy, cell * 2, base, 15, 0.9, true);
     }
-    return;
-  }
-
-  if (cat === 'death') {
-    // Иконка статична (перерисовывается только при пересборке списка), поэтому
-    // берём фазу середины эффекта — на случайной фазе он был бы уже погасшим.
+  },
+  // Иконка статична (перерисовывается только при пересборке списка), поэтому
+  // берём фазу середины эффекта — на случайной фазе он был бы уже погасшим.
+  death(c, { cx, cy, base, id }) {
     drawDeathFx(c, cx, cy, 11, base, id, 0.42);
-    return;
-  }
-
-  if (cat === 'title') {
+  },
+  title(c, { cx, cy, id }) {
     c.save();
     c.font = `700 11px ${COS_FONT}`;
     c.textAlign = 'center';
@@ -737,8 +713,29 @@ function drawMiniCosmeticPreview(canvasEl, cat, id) {
     c.fillStyle = 'rgba(255,255,255,0.9)';
     c.fillText(id === 0 ? '—' : '«»', cx, cy);
     c.restore();
-    return;
   }
+};
+
+function drawMiniCosmeticPreview(canvasEl, cat, id) {
+  if (!canvasEl) return;
+  const W = 44;
+  const H = 44;
+  const c = cosPrepCanvas(canvasEl, W, H);
+  if (!c) return;
+  c.fillStyle = 'rgba(0,0,0,0.26)';
+  c.fillRect(0, 0, W, H);
+
+  const draw = MINI_COSMETIC_PREVIEW_BY_CAT[cat];
+  if (!draw) return;
+  draw(c, {
+    W,
+    H,
+    cx: W / 2,
+    cy: H / 2,
+    base: boostHsl(colors.get(you) || 'hsl(210 20% 60%)'),
+    now: performance.now(),
+    id
+  });
 }
 
 function wsSend(type, data) {
@@ -6523,62 +6520,68 @@ function cosmeticsOwnedCount(cat) {
   return ownedCountFromMask(cosmeticsMaskForCat(cat));
 }
 
+// Ключ i18n на категорию. Таблица индексируется COSMETICS_TABS (проверено
+// тестом tests/client_cosmetics_cats_usage.test.mjs) — забытая категория
+// упадёт на тесте, а не молча покажет ярлык соседней категории.
+const COSMETICS_LABEL_KEY_BY_CAT = {
+  terr: 'cosmetics.cat_terr',
+  seg: 'cosmetics.cat_seg',
+  head: 'cosmetics.cat_head',
+  death: 'cosmetics.cat_death',
+  capturefx: 'cosmetics.cat_capturefx',
+  nameplate: 'cosmetics.cat_nameplate',
+  frame: 'cosmetics.cat_frame',
+  title: 'cosmetics.cat_title'
+};
+
 function cosmeticsLabel(cat) {
-  if (cat === 'capturefx') return t('cosmetics.cat_capturefx');
-  if (cat === 'head') return t('cosmetics.cat_head');
-  if (cat === 'seg') return t('cosmetics.cat_seg');
-  if (cat === 'nameplate') return t('cosmetics.cat_nameplate');
-  if (cat === 'terr') return t('cosmetics.cat_terr');
-  if (cat === 'death') return t('cosmetics.cat_death');
-  if (cat === 'title') return t('cosmetics.cat_title');
-  return t('cosmetics.cat_frame');
+  return t(COSMETICS_LABEL_KEY_BY_CAT[cat] || 'cosmetics.cat_frame');
 }
+
+// Названия вариантов не повторяются между категориями: раньше «Лазурь/Алая/
+// Золото/Аметист» стояли и в рамках, и в плашках, отчего покупка ощущалась
+// как «купил цвет». Семьи названий (см. комментарий у каждой категории)
+// подобраны так, чтобы различие было в форме/структуре, а не в цвете.
+const COSMETICS_VARIANT_NAMES_BY_CAT = {
+  capturefx: {
+    en: ['Rings', 'Rays', 'Crystal', 'Spiral', 'Confetti', 'Magma', 'Vortex', 'Shards'],
+    ru: ['Кольца', 'Лучи', 'Кристалл', 'Спираль', 'Конфетти', 'Магма', 'Вихрь', 'Осколки']
+  },
+  seg: {
+    en: ['Classic', 'Neon', 'Stripes', 'Plasma', 'Sparks', 'Circuit', 'Mosaic', 'Void'],
+    ru: ['Классика', 'Неон', 'Полосы', 'Плазма', 'Искры', 'Схема', 'Мозаика', 'Бездна']
+  },
+  // Семейство «металлы и материалы» — совпадает с классами .frame0..7 в CSS.
+  frame: {
+    en: ['Steel', 'Copper', 'Chrome', 'Emerald', 'Obsidian', 'Aurora', 'Golden Age', 'Prism'],
+    ru: ['Сталь', 'Медь', 'Хром', 'Изумруд', 'Обсидиан', 'Северное сияние', 'Золотой век', 'Призма']
+  },
+  // Семейство «формы плашки» — различие в геометрии, не в цвете.
+  nameplate: {
+    en: ['Capsule', 'Bar', 'Bevel', 'Scroll', 'Terminal', 'Engrave', 'Gleam', 'Chevron'],
+    ru: ['Капсула', 'Планка', 'Скос', 'Свиток', 'Терминал', 'Гравюра', 'Блик', 'Шеврон']
+  },
+  head: {
+    en: ['Orb', 'Rhombus', 'Cube', 'Ring', 'Shield', 'Arrow', 'Eclipse', 'Star'],
+    ru: ['Орб', 'Ромб', 'Куб', 'Кольцо', 'Щит', 'Стрела', 'Затмение', 'Звезда']
+  },
+  // Семейство «поверхности»: различие в структуре узора, цвет всегда ваш.
+  terr: {
+    en: ['Solid', 'Hatch', 'Honeycomb', 'Tide', 'Circuit', 'Stained glass', 'Rift', 'Weave'],
+    ru: ['Заливка', 'Штриховка', 'Соты', 'Прилив', 'Схема', 'Витраж', 'Разлом', 'Ткань']
+  },
+  death: {
+    en: ['Flash', 'Pixels', 'Black hole', 'Glass', 'Supernova', 'Glitch', 'Ash', 'Discharge'],
+    ru: ['Вспышка', 'Пиксели', 'Чёрная дыра', 'Стекло', 'Сверхновая', 'Глитч', 'Пепел', 'Разряд']
+  }
+};
 
 function cosmeticsVariantName(cat, id) {
   const i = Math.max(0, Math.min(COSMETICS_MAX_ID, Number(id) || 0));
-  const en = lang === 'en';
-  // Названия не повторяются между категориями: раньше «Лазурь/Алая/Золото/Аметист»
-  // стояли и в рамках, и в плашках, отчего покупка ощущалась как «купил цвет».
-  if (cat === 'capturefx') {
-    return (en
-      ? ['Rings', 'Rays', 'Crystal', 'Spiral', 'Confetti', 'Magma', 'Vortex', 'Shards']
-      : ['Кольца', 'Лучи', 'Кристалл', 'Спираль', 'Конфетти', 'Магма', 'Вихрь', 'Осколки'])[i];
-  }
-  if (cat === 'seg') {
-    return (en
-      ? ['Classic', 'Neon', 'Stripes', 'Plasma', 'Sparks', 'Circuit', 'Mosaic', 'Void']
-      : ['Классика', 'Неон', 'Полосы', 'Плазма', 'Искры', 'Схема', 'Мозаика', 'Бездна'])[i];
-  }
-  if (cat === 'frame') {
-    // Семейство «металлы и материалы» — совпадает с классами .frame0..7 в CSS.
-    return (en
-      ? ['Steel', 'Copper', 'Chrome', 'Emerald', 'Obsidian', 'Aurora', 'Golden Age', 'Prism']
-      : ['Сталь', 'Медь', 'Хром', 'Изумруд', 'Обсидиан', 'Северное сияние', 'Золотой век', 'Призма'])[i];
-  }
-  if (cat === 'nameplate') {
-    // Семейство «формы плашки» — различие в геометрии, не в цвете.
-    return (en
-      ? ['Capsule', 'Bar', 'Bevel', 'Scroll', 'Terminal', 'Engrave', 'Gleam', 'Chevron']
-      : ['Капсула', 'Планка', 'Скос', 'Свиток', 'Терминал', 'Гравюра', 'Блик', 'Шеврон'])[i];
-  }
-  if (cat === 'head') {
-    return (en
-      ? ['Orb', 'Rhombus', 'Cube', 'Ring', 'Shield', 'Arrow', 'Eclipse', 'Star']
-      : ['Орб', 'Ромб', 'Куб', 'Кольцо', 'Щит', 'Стрела', 'Затмение', 'Звезда'])[i];
-  }
-  if (cat === 'terr') {
-    // Семейство «поверхности»: различие в структуре узора, цвет всегда ваш.
-    return (en
-      ? ['Solid', 'Hatch', 'Honeycomb', 'Tide', 'Circuit', 'Stained glass', 'Rift', 'Weave']
-      : ['Заливка', 'Штриховка', 'Соты', 'Прилив', 'Схема', 'Витраж', 'Разлом', 'Ткань'])[i];
-  }
-  if (cat === 'death') {
-    return (en
-      ? ['Flash', 'Pixels', 'Black hole', 'Glass', 'Supernova', 'Glitch', 'Ash', 'Discharge']
-      : ['Вспышка', 'Пиксели', 'Чёрная дыра', 'Стекло', 'Сверхновая', 'Глитч', 'Пепел', 'Разряд'])[i];
-  }
   if (cat === 'title') return cosTitleName(id) || t('cosmetics.title_none');
-  return String(i + 1);
+  const names = COSMETICS_VARIANT_NAMES_BY_CAT[cat];
+  if (!names) return String(i + 1);
+  return names[lang === 'en' ? 'en' : 'ru'][i];
 }
 
 /* --- Титулы в магазине -----------------------------------------------------
@@ -7367,7 +7370,13 @@ const COS_SCENE = {
   zoneH: 0.58,
   cellK: 0.13,
   cellMin: 14,
-  cellMax: 34
+  cellMax: 34,
+  // Панель меню и предпросмотр магазина имеют одинаковую пропорцию, но
+  // разную абсолютную ширину — если считать scell от их собственных fw/fh,
+  // клетки в них получаются разного размера, и одна и та же сцена выглядит
+  // по-разному. Размер клетки — от общего эталона, а не от конкретной
+  // панели, чтобы «меню» и «магазин» рисовали облик в одном масштабе.
+  cellRefMin: 186
 };
 
 function drawCosmeticsScene(ctx2, rect, opts) {
@@ -7384,7 +7393,7 @@ function drawCosmeticsScene(ctx2, rect, opts) {
   const baseC = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
   const scell = Math.max(
     COS_SCENE.cellMin,
-    Math.min(COS_SCENE.cellMax, Math.round(Math.min(fw, fh) * COS_SCENE.cellK))
+    Math.min(COS_SCENE.cellMax, Math.round(COS_SCENE.cellRefMin * COS_SCENE.cellK))
   );
 
   /* Зона считается ПЕРВОЙ и выравнивается по целому числу клеток: сетка фона
@@ -7409,9 +7418,13 @@ function drawCosmeticsScene(ctx2, rect, opts) {
 
   const plateFont = Math.max(11, Math.round(scell * 0.62));
   // Голова стоит сразу за кромкой зоны — змейка «только что вышла из дома»,
-  // а хвост ещё внутри. Ровно эта картинка и есть механика игры.
-  const headX = Math.round(zone.x + zone.w + scell * 1.2);
-  const headY = Math.round(zone.y + zone.h * 0.55);
+  // а хвост ещё внутри. Ровно эта картинка и есть механика игры. Отступ и
+  // ряд — целое число клеток от zone.x/zone.y: это та же сетка, по которой
+  // рисуются фон (drawCosmeticsFieldBackdrop) и территория (drawCosmeticsZone),
+  // дробный отступ раньше уводил голову с растра, и она «плавала» отдельно.
+  const headRow = Math.max(0, Math.floor(zone.h / scell / 2));
+  const headX = Math.round(zone.x + zone.w + scell * 2.5);
+  const headY = Math.round(zone.y + headRow * scell + scell / 2);
 
   const period = 2400;
   const p = reduceMotion ? 0.55 : (now % period) / period;
@@ -7422,7 +7435,7 @@ function drawCosmeticsScene(ctx2, rect, opts) {
     const dieStart = 0.45;
     const dieP = p < dieStart ? -1 : Math.min(1, (p - dieStart) / (COS_DEATH_MS / period));
     if (dieP < 0) {
-      drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, 6);
+      drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, 6, zone);
       drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
     } else {
       drawDeathFx(ctx2, headX, headY, Math.max(16, Math.round(scell * 1.25)), baseC, ids.death, dieP);
@@ -7432,7 +7445,7 @@ function drawCosmeticsScene(ctx2, rect, opts) {
   }
 
   drawCosmeticsZone(ctx2, zone, you, 0.55, ids.terr, scell);
-  drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, cat === 'seg' ? 8 : 6);
+  drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, cat === 'seg' ? 8 : 6, zone);
   drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
 
   /* Захват: вспышка над своей зоной в том же цикле, что и сцена.
@@ -7466,7 +7479,13 @@ function drawCosmeticsScene(ctx2, rect, opts) {
       const ph = Math.round(plateFont * 1.5);
       ctx2.strokeRect(headX - scell * 2.4, headY - scell * 0.95 - ph - 4, scell * 4.8, ph + 8);
     } else if (cat === 'seg') {
-      ctx2.strokeRect(headX - scell * 7.2, headY - scell * 0.72, scell * 6.4, scell * 1.44);
+      // Раньше бокс был зашит под старую геометрию хвоста (8 тайлов подряд от
+      // headX). Теперь тайлы, ушедшие под территорию, не рисуются вовсе
+      // (см. drawCosmeticsSnake) — обводка обязана останавливаться там же,
+      // где на самом деле кончается видимый хвост, а не залезать на зону.
+      const segRight = headX - scell / 2;
+      const segLeft = Math.max(zone.x + zone.w, segRight - scell * 8);
+      ctx2.strokeRect(segLeft, headY - scell * 0.62, segRight - segLeft, scell * 1.24);
     } else if (cat === 'terr') {
       ctx2.strokeRect(zone.x + 1, zone.y + 1, zone.w - 2, zone.h - 2);
     }
@@ -7527,15 +7546,24 @@ function renderCosmeticsPreview() {
   setHint();
 }
 
-function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, headColor, tileCount) {
+function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, headColor, tileCount, zone) {
   const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
   const c = headColor || base;
   const scell = Math.max(14, Math.round(cell));
   const now = performance.now();
   const tiles = Math.max(3, Math.min(12, Number(tileCount) || 6));
-  const startX = headX - scell * 0.85;
+  // Хвост кладём строго по той же сетке (шаг scell от headX), что и фон/
+  // территория — раньше стартовая точка была сдвинута на 0.85 клетки, и
+  // тайлы следа не совпадали с растром, из-за чего змейка «плавала».
+  const headLeft = headX - scell / 2;
+  const zoneRight = zone ? zone.x + zone.w : headLeft;
   for (let i = 0; i < tiles; i++) {
-    drawSegTile(ctx2, startX - i * scell - scell / 2, headY - scell / 2, scell, base, segId, i + 17, 0.88, now);
+    const tileLeft = headLeft - (i + 1) * scell;
+    // Тайл целиком лёг на уже занятую территорию — цветом следа его не
+    // красим: след существует только на ещё не захваченной земле, дальше
+    // хвост просто «уходит» под уже нарисованную зону.
+    if (tileLeft + scell <= zoneRight) continue;
+    drawSegTile(ctx2, tileLeft, headY - scell / 2, scell, base, segId, i + 17, 0.88, now);
   }
   drawHead(ctx2, headX, headY, scell, c, headId, 1, 0, now);
 }
@@ -8276,6 +8304,16 @@ const FEED_FOREIGN_CAPTURE_MIN = 48;
 
 /* actorNum (необязательный) — номер игрока, чьё это событие. Нужен только
    для значка архетипа бота (C4); на текст и схлопывание не влияет. */
+// K7/#8: флаг «киллфид нужно перерисовать» — гасится один раз в конце пакета
+// разбора событий (handleStateBinary). Раньше выставлялся вручную следом за
+// каждым pushEventFeed() в 12 разных ветках по kind — обе строки нужно было
+// не забыть написать вместе, а забытая просто не роняла ничего видимо: текст
+// уходил в eventFeed, но экран до следующего дёрнувшего дефолт-редрей пакета
+// не перерисовывался. Теперь pushEventFeed() сама метит флаг на каждом пути,
+// где feed реально меняется — новую ветку разбора протокола дублировать
+// нечего, звать нужно только сам pushEventFeed().
+let killfeedDirty = false;
+
 function pushEventFeed(text, kind, actorNum) {
   const t = performance.now();
   const s = String(text || '').trim();
@@ -8288,15 +8326,13 @@ function pushEventFeed(text, kind, actorNum) {
   if (head && head.text === s && head.k === k && t - head.t < 10000) {
     head.n = (head.n || 1) + 1;
     head.t = t;
+    killfeedDirty = true;
     return;
   }
   eventFeed.unshift({ t, text: s, k, n: 1, a });
   if (eventFeed.length > 64) eventFeed.length = 64;
+  killfeedDirty = true;
 }
-
-// K7: флаг «киллфид нужно перерисовать» — выставляется в цикле разбора
-// событий, гасится один раз в конце пакета.
-let killfeedDirty = false;
 
 function renderKillfeed() {
   if (!killfeedEl) return;
@@ -8831,7 +8867,6 @@ function handleStateBinary(buf) {
           // K5: первая смерть — теперь понятно, зачем баунти и киллы.
           obFireEvent('death');
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -8893,7 +8928,6 @@ function handleStateBinary(buf) {
           // K5: первый захват — момент, когда про бонусы уже есть смысл рассказать.
           obFireEvent('capture');
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9031,7 +9065,6 @@ function handleStateBinary(buf) {
             addToast('🏅', `${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'big', infoDesc(infoPack().achv, achv, ''), { tab: 'match', key: `achv_${achv}`, prio: 'jackpot' });
           }
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9057,7 +9090,6 @@ function handleStateBinary(buf) {
           sfx.contractAssigned();
           addToast('📜', `${infoPack().labels.contract}: ${contractLabel(type) || type}`, 'big', infoDesc(infoPack().contracts, type, ''), { tab: 'match', key: `contract_assign_${type}`, prio: 'important' });
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9091,7 +9123,6 @@ function handleStateBinary(buf) {
           sfx.contractDone();
           comboBump();
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9136,7 +9167,6 @@ function handleStateBinary(buf) {
             }
           }
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9157,7 +9187,6 @@ function handleStateBinary(buf) {
             addToast('😈', lang === 'en' ? 'Revenge!' : 'Месть!', 'big', lang === 'en' ? 'A kill in return for your death' : 'Убийство в ответ на вашу смерть', { tab: 'match', key: 'revenge', prio: 'jackpot' });
           }
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9186,7 +9215,6 @@ function handleStateBinary(buf) {
             }
           }
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9207,7 +9235,6 @@ function handleStateBinary(buf) {
         // если цель — ты, иначе 40%.
         sfx.bountyAssigned(target === you ? 1 : 0.4);
         if (target === you) fxFlashScreen([255, 140, 90], 0.7);
-        killfeedDirty = true;
         continue;
       }
 
@@ -9233,7 +9260,6 @@ function handleStateBinary(buf) {
         } else {
           sfx.bountyAssigned(0.4);
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9285,7 +9311,6 @@ function handleStateBinary(buf) {
           addShakeClass('micro', ...shakeDirFrom(ex, ey));
           comboBump();
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9314,7 +9339,6 @@ function handleStateBinary(buf) {
           }
           addShakeClass('medium', ...shakeDirFrom(ex, ey));
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9332,7 +9356,6 @@ function handleStateBinary(buf) {
         if (mn) addToast('⚡', `${infoPack().labels.round}: ${mn}`, 'big', infoDesc(infoPack().mutators, type, ''), { key: `mutator_${type}`, prio: 'important' });
         // J2: глобальное событие — 40% громкости.
         sfx.mutatorOn(0.4);
-        killfeedDirty = true;
         continue;
       }
 

@@ -41,7 +41,7 @@
 .frame2 {
   border-left-color: #c9d1d9;
   background-image: linear-gradient(90deg, rgba(201, 209, 217, 0.14), transparent 55%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 0 var(--frame-chrome-inset);
 }
 
 /* Изумруд: градиент + мягкое свечение имени */
@@ -57,7 +57,7 @@
 .frame4 {
   border-left-color: #4c1d95;
   background-image: linear-gradient(90deg, rgba(20, 12, 38, 0.72), rgba(0, 0, 0, 0.28) 70%);
-  box-shadow: inset 0 0 0 1px rgba(170, 120, 255, 0.28);
+  box-shadow: inset 0 0 0 1px var(--frame-obsidian-inset);
 }
 .frame4 td:nth-child(2) {
   color: #ede9fe;
