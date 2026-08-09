@@ -42,6 +42,10 @@
   /* .btnPrimary/.btnSecondary/.btnGhost/.iconBtn делят один и тот же фокус-ring
      (см. 02-cosmetics.css) — было 4 буквальных копии одного значения. */
   --btn-focus-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
+  /* Тот же градиент .btnPrimary был буквально продублирован в 02-cosmetics.css
+     (мёртвое правило, перекрытое этим же файлом порядком каскада) — один
+     источник вместо двух копий одного хардкода. Значение не менялось. */
+  --btn-primary-grad: linear-gradient(135deg, #2bd694, #3fb9dd);
 }
 
 /* --- Мобильные свайпы: без touch-action браузер сам съедает pointermove ----
@@ -124,7 +128,7 @@
 /* --- Кнопки ---------------------------------------------------------------- */
 .btnPrimary {
   border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent);
-  background: linear-gradient(135deg, #2bd694, #3fb9dd);
+  background: var(--btn-primary-grad);
   color: #04170f;
   text-shadow: none;
 }
@@ -672,4 +676,87 @@ body.inGame #hud:not(.lbPinned) #langToggle {
    карточкой, — на новом фоне он выглядел вставкой. */
 .deathOverlay .toastRow {
   background: rgba(5, 9, 16, 0.94);
+}
+
+/* ==========================================================================
+   ВОЛНА 11. Полноценный редизайн экрана итогов матча.
+   Прошлый заход свёл ровно один токен рамки .matchCard без визуальных
+   изменений — намеренно консервативно. Здесь — настоящий редизайн: бейдж
+   результата становится героем экрана, KPI/мини-карточки получают глубину
+   в духе .cosmeticsItem, таблица топ-игроков — собранный контейнер.
+   ========================================================================== */
+
+/* --- Бейдж результата: было — мелкая плоская таблетка вверху блока,
+   стало — крупный акцентный заголовок экрана, как у .btnPlay для победы. */
+.matchSummaryTop {
+  justify-content: center;
+  margin-bottom: var(--pad-lg);
+}
+
+.matchResultPill {
+  padding: 10px 28px;
+  border-radius: var(--r-lg);
+  font-size: var(--fs-title);
+  letter-spacing: 0.6px;
+  border: 1px solid color-mix(in srgb, var(--brand) 65%, transparent);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.matchResultWin {
+  background: linear-gradient(135deg, var(--brand), var(--brand2));
+  color: #03130c;
+  box-shadow: var(--btn-play-shadow);
+}
+
+/* Поражение — та же героика, что у победы (типографика, радиус, сила тени),
+   но исключительно на --accent: это единственный экран, где красный вообще
+   уместен по правилу волны 9 (см. комментарий вверху файла), и он обязан
+   читаться так же уверенно, как изумрудный градиент .matchResultWin, а не
+   тускнеть до нейтральной таблетки. */
+.matchResultLose {
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #1a0510));
+  color: #fff;
+  box-shadow: 0 12px 36px color-mix(in srgb, var(--accent) 35%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* --- KPI-карточки (место, очки): главные цифры экрана — приподнимаем их
+   над остальными мини-карточками градиентной подложкой и бренд-рамкой,
+   тем же приёмом, что и .cosmeticsItem.isSelected/.menuPanelPrimary. */
+.matchKpi {
+  position: relative;
+  border-color: color-mix(in srgb, var(--brand2) 30%, var(--border2));
+  background:
+    radial-gradient(140% 160% at 0% 0%, color-mix(in srgb, var(--brand2) 12%, transparent), transparent 65%),
+    rgba(255, 255, 255, 0.02);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.matchKpiValue {
+  color: var(--text);
+}
+
+/* --- Мини-карточки статистики: та же плотная сетка, что у карточек
+   магазина, но приглушённее KPI — вторичная информация, не героика. */
+.matchMini {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.18));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.matchMiniReward {
+  border-color: color-mix(in srgb, var(--gold) 45%, var(--border2));
+  background: linear-gradient(160deg, color-mix(in srgb, var(--gold) 14%, transparent), rgba(0, 0, 0, 0.18));
+}
+
+/* --- Таблица топ-игроков: собранный контейнер со своей глубиной,
+   парный к .matchSummary, а не отдельная плоская врезка. */
+.matchTableWrap {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.22));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.matchTable thead th {
+  background: rgba(5, 9, 16, 0.55);
 }

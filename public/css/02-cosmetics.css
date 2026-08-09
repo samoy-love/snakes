@@ -128,15 +128,15 @@
  }
 
  .cosmeticsItem.isOwned {
-   background-color: rgba(52, 211, 153, 0.07);
-   border-top-color: rgba(52, 211, 153, 0.22);
-   border-right-color: rgba(52, 211, 153, 0.22);
-   border-bottom-color: rgba(52, 211, 153, 0.22);
+   background-color: color-mix(in srgb, var(--brand) 7%, transparent);
+   border-top-color: color-mix(in srgb, var(--brand) 22%, transparent);
+   border-right-color: color-mix(in srgb, var(--brand) 22%, transparent);
+   border-bottom-color: color-mix(in srgb, var(--brand) 22%, transparent);
  }
 
  .cosmeticsItem.isOwned .cosmeticsItemTitle::before {
    content: '✓ ';
-   color: #34d399;
+   color: var(--brand);
    font-weight: 800;
  }
 
@@ -481,7 +481,7 @@
   padding: var(--pad-md) 14px;
   border-radius: var(--r-md);
   border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent);
-  background: linear-gradient(135deg, #2bd694, #3fb9dd);
+  background: var(--btn-primary-grad);
   color: rgba(255, 255, 255, 0.96);
   cursor: pointer;
   min-height: var(--control-h);
@@ -811,10 +811,46 @@
   margin-left: auto;
  }
 
+ /* Нативный чекбокс без appearance:none в паре с фоном/радиусом .menuPanelBody
+    input (11-redesign.css) рендерился по-разному в checked/unchecked: у
+    отмеченных ("Включить", "Глушить в фоне") accent-color рисовал бирюзовую
+    заливку с галочкой, а у неотмеченных ("Статистика (FPS)", "Компактно")
+    браузер показывал плоский серый квадрат без скругления и рамки — тот же
+    контрол выглядел как из другого интерфейса. appearance:none убирает
+    нативную отрисовку целиком, оба состояния теперь рисует один и тот же
+    набор правил ниже. */
  .menuPanelBody input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  accent-color: color-mix(in srgb, var(--accent2) 70%, rgba(255,255,255,0.25));
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  flex: 0 0 auto;
+  border-radius: var(--r-sm);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(3, 8, 16, 0.55);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+ }
+
+ .menuPanelBody input[type="checkbox"]:hover {
+  border-color: rgba(148, 163, 184, 0.4);
+ }
+
+ .menuPanelBody input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: var(--btn-focus-shadow);
+ }
+
+ .menuPanelBody input[type="checkbox"]:checked {
+  border-color: color-mix(in srgb, var(--brand) 55%, transparent);
+  background: linear-gradient(135deg, var(--brand), var(--brand2));
+  background-image:
+    linear-gradient(135deg, var(--brand), var(--brand2)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2303130c' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.3l3 3 6-6.6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat, no-repeat;
+  background-position: center, center;
+  background-size: cover, 12px 12px;
  }
 
  .menuPanelBody input[type="range"] {
@@ -979,7 +1015,7 @@
 
  .matchSummary {
   border-radius: var(--r-lg);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.18);
   padding: var(--pad-lg);
  }
@@ -1020,7 +1056,7 @@
  .matchKpi {
   padding: 10px;
   border-radius: var(--r-md);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.16);
   min-width: 0;
  }
@@ -1057,7 +1093,7 @@
  .matchMini {
   padding: 8px 10px;
   border-radius: var(--r-md);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.14);
   min-width: 0;
  }
@@ -1107,7 +1143,7 @@
   min-height: 0;
   overflow: auto;
   border-radius: var(--r-lg);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.14);
  }
 
@@ -1153,7 +1189,7 @@
 
  .deathReason {
    font-size: var(--fs-meta);
-   color: rgba(255, 255, 255, 0.86);
+   color: var(--muted);
    margin-bottom: 6px;
    font-weight: 700;
  }
@@ -1182,8 +1218,8 @@
  .deathStat {
    padding: 8px 10px;
    border-radius: var(--r-md);
-   border: 1px solid rgba(255, 255, 255, 0.10);
-   background: rgba(0, 0, 0, 0.18);
+   border: 1px solid var(--border);
+   background: var(--panel2);
  }
 
  .deathStatLabel {
@@ -1213,8 +1249,8 @@
  .deathYou {
    padding: var(--pad-md);
    border-radius: var(--r-md);
-   border: 1px solid rgba(255, 255, 255, 0.10);
-   background: rgba(0, 0, 0, 0.20);
+   border: 1px solid var(--border);
+   background: var(--panel2);
  }
 
  .deathYouTitle {
@@ -1240,8 +1276,8 @@
 
  .deathTop {
    border-radius: var(--r-md);
-   border: 1px solid rgba(255, 255, 255, 0.10);
-   background: rgba(0, 0, 0, 0.18);
+   border: 1px solid var(--border);
+   background: var(--panel2);
    overflow: hidden;
  }
 
