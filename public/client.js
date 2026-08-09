@@ -8272,6 +8272,16 @@ const FEED_FOREIGN_CAPTURE_MIN = 48;
 
 /* actorNum (необязательный) — номер игрока, чьё это событие. Нужен только
    для значка архетипа бота (C4); на текст и схлопывание не влияет. */
+// K7/#8: флаг «киллфид нужно перерисовать» — гасится один раз в конце пакета
+// разбора событий (handleStateBinary). Раньше выставлялся вручную следом за
+// каждым pushEventFeed() в 12 разных ветках по kind — обе строки нужно было
+// не забыть написать вместе, а забытая просто не роняла ничего видимо: текст
+// уходил в eventFeed, но экран до следующего дёрнувшего дефолт-редрей пакета
+// не перерисовывался. Теперь pushEventFeed() сама метит флаг на каждом пути,
+// где feed реально меняется — новую ветку разбора протокола дублировать
+// нечего, звать нужно только сам pushEventFeed().
+let killfeedDirty = false;
+
 function pushEventFeed(text, kind, actorNum) {
   const t = performance.now();
   const s = String(text || '').trim();
@@ -8284,15 +8294,13 @@ function pushEventFeed(text, kind, actorNum) {
   if (head && head.text === s && head.k === k && t - head.t < 10000) {
     head.n = (head.n || 1) + 1;
     head.t = t;
+    killfeedDirty = true;
     return;
   }
   eventFeed.unshift({ t, text: s, k, n: 1, a });
   if (eventFeed.length > 64) eventFeed.length = 64;
+  killfeedDirty = true;
 }
-
-// K7: флаг «киллфид нужно перерисовать» — выставляется в цикле разбора
-// событий, гасится один раз в конце пакета.
-let killfeedDirty = false;
 
 function renderKillfeed() {
   if (!killfeedEl) return;
@@ -8827,7 +8835,6 @@ function handleStateBinary(buf) {
           // K5: первая смерть — теперь понятно, зачем баунти и киллы.
           obFireEvent('death');
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -8889,7 +8896,6 @@ function handleStateBinary(buf) {
           // K5: первый захват — момент, когда про бонусы уже есть смысл рассказать.
           obFireEvent('capture');
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9027,7 +9033,6 @@ function handleStateBinary(buf) {
             addToast('🏅', `${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'big', infoDesc(infoPack().achv, achv, ''), { tab: 'match', key: `achv_${achv}`, prio: 'jackpot' });
           }
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9053,7 +9058,6 @@ function handleStateBinary(buf) {
           sfx.contractAssigned();
           addToast('📜', `${infoPack().labels.contract}: ${contractLabel(type) || type}`, 'big', infoDesc(infoPack().contracts, type, ''), { tab: 'match', key: `contract_assign_${type}`, prio: 'important' });
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9087,7 +9091,6 @@ function handleStateBinary(buf) {
           sfx.contractDone();
           comboBump();
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9132,7 +9135,6 @@ function handleStateBinary(buf) {
             }
           }
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9153,7 +9155,6 @@ function handleStateBinary(buf) {
             addToast('😈', lang === 'en' ? 'Revenge!' : 'Месть!', 'big', lang === 'en' ? 'A kill in return for your death' : 'Убийство в ответ на вашу смерть', { tab: 'match', key: 'revenge', prio: 'jackpot' });
           }
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9182,7 +9183,6 @@ function handleStateBinary(buf) {
             }
           }
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9203,7 +9203,6 @@ function handleStateBinary(buf) {
         // если цель — ты, иначе 40%.
         sfx.bountyAssigned(target === you ? 1 : 0.4);
         if (target === you) fxFlashScreen([255, 140, 90], 0.7);
-        killfeedDirty = true;
         continue;
       }
 
@@ -9229,7 +9228,6 @@ function handleStateBinary(buf) {
         } else {
           sfx.bountyAssigned(0.4);
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9281,7 +9279,6 @@ function handleStateBinary(buf) {
           addShakeClass('micro', ...shakeDirFrom(ex, ey));
           comboBump();
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9310,7 +9307,6 @@ function handleStateBinary(buf) {
           }
           addShakeClass('medium', ...shakeDirFrom(ex, ey));
         }
-        killfeedDirty = true;
         continue;
       }
 
@@ -9328,7 +9324,6 @@ function handleStateBinary(buf) {
         if (mn) addToast('⚡', `${infoPack().labels.round}: ${mn}`, 'big', infoDesc(infoPack().mutators, type, ''), { key: `mutator_${type}`, prio: 'important' });
         // J2: глобальное событие — 40% громкости.
         sfx.mutatorOn(0.4);
-        killfeedDirty = true;
         continue;
       }
 
