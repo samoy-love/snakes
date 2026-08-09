@@ -58,6 +58,48 @@
   -webkit-touch-callout: none;
 }
 
+/* --- Индикатор свайпа: видимая точка отсчёта и порог срабатывания -------- */
+#swipeIndicator {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 500;
+  opacity: 0;
+  transition: opacity 0.08s ease-out;
+}
+#swipeIndicator.isOn {
+  opacity: 1;
+}
+.swipeIndicator-deadzone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  margin-left: -22px;
+  margin-top: -22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
+}
+.swipeIndicator-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+  transition: transform 0.02s linear;
+}
+
 /* --- Оверлеи: глубина вместо красной засветки ------------------------------ */
 .overlay,
 .deathOverlay,
