@@ -935,38 +935,6 @@
   z-index: var(--z-modal2);
  }
 
- .toastCard {
-  width: min(760px, calc(100vw - 24px));
-  max-height: calc(100dvh - 24px - var(--sa-top) - var(--sa-bottom));
-  overflow: auto;
-  border-radius: var(--r-lg);
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border2));
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, transparent), rgba(0, 0, 0, 0.45));
-  box-shadow: var(--shadow-float-strong);
-  display: flex;
-  gap: 12px;
-  padding: var(--pad-lg);
-  animation: deathIn 220ms ease;
- }
-
- .toastIcon {
-  width: 46px;
-  height: 46px;
-  border-radius: var(--r-tab);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: rgba(0, 0, 0, 0.22);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--fs-title);
-  flex: 0 0 auto;
- }
-
- .toastBody {
-  flex: 1;
-  min-width: 0;
- }
-
  .matchCard {
    width: min(760px, calc(100vw - 24px));
    max-height: calc(100dvh - 24px - var(--sa-top) - var(--sa-bottom));
@@ -983,6 +951,15 @@
 
  .matchHeader {
    padding: var(--pad-lg) var(--pad-lg) var(--pad-md);
+ }
+
+ /* Ряд действий — общий для итогов матча и (теперь) экрана смерти: обе
+    карточки не скроллятся целиком (overflow: hidden на .matchCard), поэтому
+    в отличие от старого .toastRow ряду не нужна sticky-подложка. */
+ .matchActions {
+   display: flex;
+   gap: 8px;
+   padding: var(--pad-md) var(--pad-lg) var(--pad-lg);
  }
 
  .matchTitle {
@@ -1176,197 +1153,11 @@
   }
  }
 
- .toastSub {
-  font-size: var(--fs-meta);
-  color: var(--muted);
-  margin-bottom: 10px;
- }
-
  .deathReason {
    font-size: var(--fs-meta);
    color: var(--muted);
    margin-bottom: 6px;
    font-weight: 700;
- }
-
- .deathOverlay .toastTitle {
-   font-size: var(--fs-title);
-   letter-spacing: 0.2px;
- }
-
- .deathOverlay .toastSub {
-   color: rgba(229, 231, 235, 0.80);
- }
-
- .deathStats {
-   display: grid;
-   gap: 10px;
-   margin: 10px 0 10px;
- }
-
- .deathStatsGrid {
-   display: grid;
-   grid-template-columns: repeat(2, minmax(0, 1fr));
-   gap: 8px;
- }
-
- .deathStat {
-   padding: 8px 10px;
-   border-radius: var(--r-md);
-   border: 1px solid var(--border);
-   background: var(--panel2);
- }
-
- .deathStatLabel {
-   font-size: var(--fs-meta);
-   font-weight: 800;
-   color: var(--muted);
-   margin-bottom: 2px;
- }
-
- .deathStatValue {
-   font-size: var(--fs-body);
-   font-weight: 800;
-   color: var(--text);
-   font-variant-numeric: tabular-nums;
- }
-
- .deathStatPrimary .deathStatLabel {
-   text-transform: uppercase;
-   letter-spacing: 0.4px;
- }
-
- .deathStatPrimary .deathStatValue {
-   font-size: var(--fs-title);
-   letter-spacing: 0.2px;
- }
-
- .deathYou {
-   padding: var(--pad-md);
-   border-radius: var(--r-md);
-   border: 1px solid var(--border);
-   background: var(--panel2);
- }
-
- .deathYouTitle {
-   font-size: var(--fs-meta);
-   font-weight: 800;
-   letter-spacing: 0.3px;
-   text-transform: uppercase;
-   color: var(--muted);
-   margin-bottom: 6px;
- }
-
- .deathYouRow {
-   display: flex;
-   align-items: baseline;
-   justify-content: space-between;
-   gap: 10px;
- }
-
- .deathYouRow .num {
-   font-variant-numeric: tabular-nums;
-   font-weight: 800;
- }
-
- .deathTop {
-   border-radius: var(--r-md);
-   border: 1px solid var(--border);
-   background: var(--panel2);
-   overflow: hidden;
- }
-
- .deathTopTitle {
-   padding: 8px 10px;
-   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-   font-size: var(--fs-meta);
-   font-weight: 800;
-   letter-spacing: 0.3px;
-   text-transform: uppercase;
-   color: var(--muted);
- }
-
- .deathTop table {
-   width: 100%;
-   border-collapse: collapse;
-   table-layout: fixed;
- }
-
- .deathTop td {
-   padding: 7px 10px;
-   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-   font-size: var(--fs-meta);
-   white-space: nowrap;
- }
-
- .deathTop tr:last-child td {
-   border-bottom: none;
- }
-
- .deathTop td.num {
-   text-align: right;
-   font-variant-numeric: tabular-nums;
- }
-
- .deathTop td.name {
-   overflow: hidden;
-   text-overflow: ellipsis;
- }
-
- .deathTop tr.me td {
-   background: rgba(255, 255, 255, 0.06);
- }
-
- .deathTop tr.top1 td {
-   background: color-mix(in srgb, var(--accent) 12%, transparent);
- }
-
- .toastRow {
-   display: flex;
-   gap: 8px;
- }
-
- .toastRow .fieldInline {
-   flex: 1;
- }
-
- .toastRow input {
-   flex: 1;
-   padding: var(--pad-md) var(--pad-lg);
-   border-radius: var(--r-md);
-   border: 1px solid var(--border);
-   background: var(--panel2);
-   color: var(--text);
-   outline: none;
- }
-
- .toastRow input:focus-visible {
-   border-color: var(--focus);
-   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
- }
-
- .toastRow button:not(.btnPrimary):not(.btnGhost) {
-   padding: var(--pad-md) var(--pad-lg);
-   border-radius: var(--r-md);
-   border: 1px solid var(--border);
-   background: var(--btn);
-   color: var(--text);
-   cursor: pointer;
-   transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
- }
-
- .toastRow button:not(.btnPrimary):not(.btnGhost):hover {
-   background: var(--btn2);
- }
-
- .toastRow button:not(.btnPrimary):not(.btnGhost):active {
-   transform: translateY(1px);
- }
-
- .toastRow button:not(.btnPrimary):not(.btnGhost):focus-visible {
-   outline: none;
-   border-color: var(--focus);
-   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
  }
 
  @keyframes toastIn {
@@ -1392,7 +1183,7 @@
  }
 
  @media (prefers-reduced-motion: reduce) {
-   .deathOverlay.toastCard {
+   .deathOverlay.matchCard {
      animation: none;
    }
    .btnPrimary.isLoading::before,

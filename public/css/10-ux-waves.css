@@ -9,49 +9,21 @@
    !important. Всё, что относится к одному пункту отчёта, лежит рядом.
    ========================================================================== */
 
-/* --- U1. Экран смерти: убран дубль, кнопки всегда в зоне видимости ---------
-   .deathYou (рисует client.js) дословно повторял три из пяти строк
-   .deathStatsGrid — Место, Очки, Киллы. Скрываем именно повторы; остаются
-   Зона и Контракт, которых в верхней сетке нет.
-   Порядок строк внутри .deathYou фиксирован разметкой client.js:
-   1 — заголовок, 2 Место, 3 Очки, 4 Зона, 5 Киллы, 6 Контракт (опц.).
-   Правильное решение — убрать дубли в самом client.js; до этого правило
-   ниже безопасно вырождается в no-op, если блока не будет вовсе. */
-.deathStats .deathYou > .deathYouRow:nth-child(2),
-.deathStats .deathYou > .deathYouRow:nth-child(3),
-.deathStats .deathYou > .deathYouRow:nth-child(5) {
-  display: none;
-}
+/* --- U1. Экран смерти: карточка стала .matchCard (см. index.html) ---------
+   Ряд действий и скролл внутренней таблицы теперь устроены так же, как на
+   экране итогов матча (.matchCard/.matchHeader/.matchResults/.matchActions,
+   см. 02-cosmetics.css) — отдельная подложка и sticky-позиционирование
+   больше не нужны, карточка сама не скроллится (overflow: hidden).
 
-/* Ряд действий закреплён у нижней кромки карточки: карточка скроллится,
-   но «Играть снова» видна на любом экране без прокрутки. */
-.deathOverlay .toastBody {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.deathOverlay .toastRow {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  margin: var(--pad-md) calc(var(--pad-lg) * -1) calc(var(--pad-lg) * -1);
-  padding: var(--pad-md) var(--pad-lg) var(--pad-lg);
-  border-top: 1px solid var(--border2);
-  background: rgba(9, 11, 15, 0.92);
-  backdrop-filter: blur(8px);
-}
-
-/* На низком экране топ-5 съедает высоту, ради которой всё и затевалось:
+   На низком экране топ-5 съедает высоту, ради которой всё и затевалось:
    оставляем три строки — полный список есть в итогах матча. */
 @media (max-height: 720px) {
-  .deathStats .deathTop tbody tr:nth-child(n + 4) {
+  #deathStats .matchTable tbody tr:nth-child(n + 4) {
     display: none;
   }
 
-  .deathStats {
+  #deathStats {
     gap: var(--pad-sm);
-    margin: var(--pad-sm) 0;
   }
 }
 
@@ -342,14 +314,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  /* Новых анимаций волна не добавляет; закрепляем, что липкий ряд действий
-     экрана смерти не получает плавных переходов. */
-  .deathOverlay .toastRow {
-    transition: none;
-  }
-}
-
 /* ==========================================================================
    ВОЛНА 7. Приёмочное UX-ревью: закрытие регрессий прошлой волны.
    Блок идёт последним в файле и перекрывает ранние правила порядком.
@@ -389,7 +353,6 @@
 .overlayTitle,
 .bigBannerTitle,
 .matchTitle,
-.deathOverlay .toastTitle,
 .overlay .card .btnPlay,
 .matchKpiValue,
 #title {
@@ -592,9 +555,8 @@ body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
 }
 
 /* --- U9. Тач-цели под входной анимацией карточек --------------------------
-   .overlay .card / .toastCard анимируются из scale(0.985); измерение попадает
+   .overlay .card / .matchCard анимируются из scale(0.985); измерение попадает
    в кадр анимации и 44px превращаются в 43.34px. Компенсируем запасом. */
-.deathOverlay .toastRow > button,
 .matchActions > button,
 .matchNextActions > button,
 #restartBtn,
@@ -605,11 +567,6 @@ body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
 }
 
 /* --- U10. Мелочи ---------------------------------------------------------- */
-
-/* Заголовок «Топ-5» стоял над таблицей из 12 строк. */
-.deathStats .deathTop tbody tr:nth-child(n + 6) {
-  display: none;
-}
 
 /* menu.controls_desc и menu.hint дублируются дословно: пока показан
    онбординг, второй экземпляр совета прячем. */

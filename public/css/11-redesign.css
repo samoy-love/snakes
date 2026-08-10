@@ -226,7 +226,6 @@
 .menuPanelBody select,
 .roomsControls input,
 .roomsControls select,
-.toastRow input,
 #nameInput {
   background: rgba(3, 8, 16, 0.55);
   border-color: rgba(148, 163, 184, 0.20);
@@ -367,20 +366,21 @@ body.inGame #hud:not(.lbPinned):focus-within {
    ========================================================================== */
 
 /* --- Личный рекорд на экране смерти ----------------------------------------
-   Четвёртая карточка в .deathStatsGrid. Обычное состояние — нейтральное,
-   «Новый рекорд» подсвечивается золотом: это единственная хорошая новость на
-   экране проигрыша, и она обязана читаться первой после места. */
-.deathStat.deathStatRecord {
+   Карточка в .matchMiniGrid (та же сетка, что и в итогах матча). Обычное
+   состояние — нейтральное, «Новый рекорд» подсвечивается золотом: это
+   единственная хорошая новость на экране проигрыша, и она обязана читаться
+   первой после места. */
+.matchMini.deathRecord {
   border-color: color-mix(in srgb, var(--gold) 55%, transparent);
   background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 16%, transparent), rgba(0, 0, 0, 0.2));
   animation: recordPop 420ms cubic-bezier(0.16, 1.5, 0.3, 1) both;
 }
 
-.deathStat.deathStatRecord .deathStatLabel {
+.matchMini.deathRecord .matchMiniLabel {
   color: var(--gold);
 }
 
-.deathStat.deathStatRecord .deathStatValue {
+.matchMini.deathRecord .matchMiniValue {
   color: var(--gold);
   text-shadow: 0 0 14px color-mix(in srgb, var(--gold) 45%, transparent);
 }
@@ -470,7 +470,7 @@ body.inGame #hud:not(.lbPinned):focus-within {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .deathStat.deathStatRecord,
+  .matchMini.deathRecord,
   .menuMetaBarFill {
     animation: none;
     transition: none;
@@ -696,26 +696,18 @@ body.inGame #hud:not(.lbPinned) #langToggle {
 }
 
 /* --- Экран смерти: парный к экрану итогов ----------------------------------
-   Красный здесь по правилу волны 9 (он остаётся только опасности и смерти),
-   но карточка не получила её обработки: осталась на литерале rgba(255,45,85)
-   вместо var(--accent) и на старой подложке rgba(0,0,0,0.45), тогда как
-   карточка итогов уже переехала на глубокую rgba(5,9,16,0.92). Рядом с
-   изумрудным интерфейсом это читалось как экран из другой версии игры.
-   Теперь это та же карточка, что и итоги, только в опасном цвете. */
-.deathOverlay.toastCard {
+   Красный здесь по правилу волны 9 (он остаётся только опасности и смерти).
+   Разметка теперь буквально .matchCard (см. public/index.html) — экран
+   смерти использует те же компоненты, что и итоги матча (.matchKpiGrid,
+   .matchMiniGrid, .matchTable), просто на опасном цвете вместо бренда. */
+.deathOverlay.matchCard {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border2));
   background: linear-gradient(150deg, color-mix(in srgb, var(--accent) 12%, transparent), rgba(5, 9, 16, 0.92));
 }
 
-.deathOverlay .toastIcon {
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-  background: color-mix(in srgb, var(--accent) 14%, rgba(0, 0, 0, 0.3));
-  color: color-mix(in srgb, var(--accent) 70%, #fff);
-}
-
 /* Липкий ряд действий стоял на своей тёмной подложке, не связанной с
    карточкой, — на новом фоне он выглядел вставкой. */
-.deathOverlay .toastRow {
+.deathOverlay .matchActions {
   background: rgba(5, 9, 16, 0.94);
 }
 
