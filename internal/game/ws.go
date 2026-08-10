@@ -199,6 +199,8 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				rate, burst = 2, 4
 			case "setName":
 				rate, burst = 1, 2
+			case "clientTiming":
+				rate, burst = 1, 2
 			case "leave":
 				rate, burst = 1, 3
 			case "respawn":
@@ -247,6 +249,25 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			client.name.Store(nm)
 			client.broadcastNameUpdate(r.Context())
 			client.sendRooms(r.Context(), hub)
+		case "clientTiming":
+			// G-lag: клиент шлёт это только когда сам заметил заметную
+			// задержку (см. markJoinFunnelFirstState в client.js) — не на
+			// каждый вход, поэтому в проде лог не шумит. Данные не доверенные
+			// (пришли от браузера), поэтому только числа, никакого построения
+			// путей/интерпретации на их основе.
+			var p struct {
+				Kind      string `json:"kind"`
+				Mode      string `json:"mode"`
+				ToInitMs  int    `json:"toInitMs"`
+				ToStateMs int    `json:"toStateMs"`
+			}
+			if json.Unmarshal(msg.Data, &p) != nil {
+				continue
+			}
+			if p.ToInitMs < 0 || p.ToInitMs > 60000 || p.ToStateMs < 0 || p.ToStateMs > 60000 {
+				continue
+			}
+			log.Printf("client_timing_slow kind=%q mode=%q to_init_ms=%d to_state_ms=%d ip=%q", p.Kind, p.Mode, p.ToInitMs, p.ToStateMs, client.ip)
 		case "join":
 			if !client.lastJoinAt.IsZero() && time.Since(client.lastJoinAt) < 300*time.Millisecond {
 				continue

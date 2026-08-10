@@ -278,6 +278,15 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 		c.sendJSON(ctx, "error", map[string]any{"message": "rooms_limit_reached"})
 		return
 	}
+	// G-lag: жалоба «долго не начинается движение после клика Играть» не
+	// воспроизвелась по чтению кода — нужны реальные тайминги с прода, а не
+	// догадки. join логируется целиком, только если он реально медленный
+	// (>150мс — за пределами того, что игрок спишет на обычную сетевую
+	// задержку), с разбивкой по фазам, чтобы не гадать, что именно тормозит:
+	// подготовка бота-состава комнаты — самый вероятный подозреваемый, она
+	// синхронна и держит rm.mu на всё время join.
+	joinStartedAt := time.Now()
+	var botSyncDur time.Duration
 	c.leaveRoomInternal(ctx, false)
 
 	name := c.name.Load().(string)
@@ -352,7 +361,9 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 	rm.forceFullSnapshot = true
 	rm.cancelCleanupLocked()
 	// G7: thin the bot field out so a busy room is not a mob.
+	botSyncStartedAt := time.Now()
 	rm.syncBotPopulationLocked()
+	botSyncDur = time.Since(botSyncStartedAt)
 
 	rm.setKnownNameLocked(pnum, name, true)
 	rm.sendDailyStateToPlayer(pl)
@@ -405,6 +416,13 @@ func (c *Client) joinRoom(ctx context.Context, hub *Hub, rm *Room) {
 		initPayload["matchResults"] = matchResults
 	}
 	c.sendJSON(ctx, "init", initPayload)
+	// Тайминг критического пути игрока: сколько прошло от получения join до
+	// того, как ему ушёл init — это то, что реально задерживает первое
+	// движение на клиенте, всё после (broadcast остальным) на него уже не
+	// влияет. Логируем только если заметно медленнее нормы.
+	if d := time.Since(joinStartedAt); d > 150*time.Millisecond {
+		log.Printf("join_slow room=%d client_num=%d total_ms=%.3f botSync_ms=%.3f", rm.id, pnum, float64(d)/float64(time.Millisecond), float64(botSyncDur)/float64(time.Millisecond))
+	}
 
 	rm.mu.Lock()
 	chatHistory := make([]ChatMessage, len(rm.chat))
