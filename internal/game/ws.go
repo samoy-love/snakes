@@ -224,6 +224,11 @@ func handleWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			}
 			if rate > 0 && !wsIPLimiter.Allow(key, rate, burst) {
 				metrics.RateLimitedTotal.Inc("ws_command")
+				// G-lag: "rate_limited" в ws_close раньше не говорил, ЧТО
+				// именно упёрлось в лимит — жалобу на замирание при заходе
+				// после рестарта сервера (массовый реконнект) было нечем
+				// подтвердить. Тип сообщения — не секрет, безопасно писать.
+				log.Printf("ws_rate_limited ip=%q type=%q rate=%.1f burst=%.1f", client.ip, msg.Type, rate, burst)
 				client.closeWith(websocket.StatusPolicyViolation, "rate_limited")
 				return
 			}
