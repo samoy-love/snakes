@@ -260,21 +260,20 @@
     <div id="endOverlay" class="endOverlay hidden" role="dialog" aria-modal="true">
       <div
         id="deathOverlay"
-        class="deathOverlay toastCard hidden"
+        class="deathOverlay matchCard hidden"
         role="document"
         aria-labelledby="deathTitle"
         aria-describedby="deathHint"
       >
-        <div class="toastIcon" aria-hidden="true">✖</div>
-        <div class="toastBody">
-          <div id="deathTitle" class="toastTitle" data-i18n="death.title">Вы проиграли</div>
+        <div class="matchHeader">
+          <div id="deathTitle" class="matchTitle" data-i18n="death.title">Вы проиграли</div>
           <div id="deathReason" class="deathReason"></div>
-          <div id="deathHint" class="toastSub" data-i18n="death.hint">Enter — снова • Esc — меню</div>
-          <div id="deathStats" class="deathStats" aria-live="polite"></div>
-          <div class="toastRow">
-            <button id="restartBtn" class="btnPrimary" aria-label="Играть снова" data-i18n="death.play_again" data-i18n-aria-label="death.play_again">Играть снова</button>
-            <button id="deathMenuBtn" class="btnGhost" aria-label="В меню" data-i18n="common.to_menu" data-i18n-aria-label="common.to_menu">В меню</button>
-          </div>
+          <div id="deathHint" class="matchSub" data-i18n="death.hint">Enter — снова • Esc — меню</div>
+        </div>
+        <div id="deathStats" class="matchResults" aria-live="polite"></div>
+        <div class="matchActions">
+          <button id="restartBtn" class="btnPrimary" aria-label="Играть снова" data-i18n="death.play_again" data-i18n-aria-label="death.play_again">Играть снова</button>
+          <button id="deathMenuBtn" class="btnGhost" aria-label="В меню" data-i18n="common.to_menu" data-i18n-aria-label="common.to_menu">В меню</button>
         </div>
       </div>
 

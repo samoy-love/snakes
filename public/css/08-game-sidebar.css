@@ -512,7 +512,7 @@ img.emoji {
      padding: calc(12px + var(--sa-top)) calc(12px + var(--sa-right)) calc(12px + var(--sa-bottom)) calc(12px + var(--sa-left));
    }
 
-   .deathOverlay.toastCard {
+   .deathOverlay.matchCard {
      width: min(560px, 100%);
    }
  }
@@ -614,36 +614,15 @@ img.emoji {
      padding: calc(var(--pad-lg) + var(--sa-top)) calc(var(--pad-lg) + var(--sa-right)) calc(var(--pad-lg) + var(--sa-bottom)) calc(var(--pad-lg) + var(--sa-left));
    }
 
-   .deathOverlay.toastCard {
+   .deathOverlay.matchCard {
      width: min(520px, 100%);
-     flex-direction: column;
-     align-items: stretch;
-     gap: 10px;
    }
 
-   .deathOverlay .toastIcon {
-     width: 44px;
-     height: 44px;
-     border-radius: var(--r-tab);
-     align-self: flex-start;
-   }
-
-   .deathOverlay .toastRow {
+   .deathOverlay .matchActions {
      flex-direction: column;
      align-items: stretch;
    }
 
-   .deathOverlay .fieldInline {
-     flex-direction: column;
-     align-items: stretch;
-     gap: 6px;
-   }
-
-   .deathOverlay .fieldLabel {
-     font-size: var(--fs-meta);
-   }
-
-   .deathOverlay input,
    .deathOverlay button {
      width: 100%;
      min-height: 44px;

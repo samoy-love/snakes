@@ -5015,9 +5015,8 @@ function renderDeathStats() {
       const pid = String(p.n);
       const nm = p.nm || String(p.n);
       const isMe = p.n === you;
-      const isTop1 = i === 0;
       return `
-        <tr class="${isMe ? 'me' : ''} ${isTop1 ? 'top1' : ''} frame${cosClampId(p.cosFrame)}" data-pid="${pid}">
+        <tr class="${isMe ? 'matchRowMe' : ''} frame${cosClampId(p.cosFrame)}" data-pid="${pid}">
           <td class="num">${i + 1}</td>
           <td class="name">${playerTitleHtml(cosTitleByPlayer.get(p.n) || 0)}${escapeHtml(nm)}</td>
           <td class="num">${Number(p.p) || 0}</td>
@@ -5026,82 +5025,71 @@ function renderDeathStats() {
     })
     .join('');
 
-  const youBlock =
-    meIndex >= 0
-      ? `
-    <div class="deathYou">
-      <div class="deathYouTitle">${escapeHtml(t('death.your_result'))}</div>
-      <div class="deathYouRow">
-        <div>${escapeHtml(t('death.place'))}</div>
-        <div class="num">${escapeHtml(place)}</div>
-      </div>
-      <div class="deathYouRow">
-        <div>${escapeHtml(t('death.points'))}</div>
-        <div class="num">${fmtInt(points)}</div>
-      </div>
-      <div class="deathYouRow">
-        <div>${escapeHtml(t('death.zone'))}</div>
-        <div class="num">${fmtInt(cells)} • ${fmtPct1(pct)}</div>
-      </div>
-      <div class="deathYouRow">
-        <div>${escapeHtml(t('death.kills'))}</div>
-        <div class="num">${fmtInt(youKills)}</div>
-      </div>
-      ${
-        contractText
-          ? `
-      <div class="deathYouRow">
-        <div>${escapeHtml(t('death.contract'))}</div>
-        <div class="num">${escapeHtml(contractText)}</div>
-      </div>
-      `
-          : ''
-      }
-    </div>
-    `
-      : '';
-
   // Рекорд считаем один раз на показ оверлея: renderDeathStats зовётся и на
   // обновлениях состояния, поэтому «новый рекорд» сохраняется в deathBestShown.
   const bestInfo = deathBestShown || commitBestPct(pct);
   deathBestShown = bestInfo;
 
+  const isTop1 = place && place !== '—' && place.startsWith('1/');
+
   setSafeHtml(
     deathStatsEl,
     `
-    <div class="deathStatsGrid">
-      <div class="deathStat deathStatPrimary">
-        <div class="deathStatLabel">${escapeHtml(t('death.place'))}</div>
-        <div class="deathStatValue">${escapeHtml(place)}</div>
+    <div class="matchSummary" aria-label="${escapeHtml(t('death.your_result'))}">
+      <div class="matchKpiGrid">
+        <div class="matchKpi">
+          <div class="matchKpiLabel">${escapeHtml(t('death.place'))}</div>
+          <div class="matchKpiValue">${escapeHtml(place)}</div>
+        </div>
+        <div class="matchKpi">
+          <div class="matchKpiLabel">${escapeHtml(t('death.points'))}</div>
+          <div class="matchKpiValue">${fmtInt(points)}</div>
+        </div>
       </div>
-      <div class="deathStat">
-        <div class="deathStatLabel">${escapeHtml(t('death.points'))}</div>
-        <div class="deathStatValue">${fmtInt(points)}</div>
+
+      <div class="matchMiniGrid">
+        <div class="matchMini">
+          <div class="matchMiniLabel">${escapeHtml(t('death.zone'))}</div>
+          <div class="matchMiniValue">${fmtInt(cells)} • ${fmtPct1(pct)}</div>
+        </div>
+        <div class="matchMini">
+          <div class="matchMiniLabel">${escapeHtml(t('death.kills'))}</div>
+          <div class="matchMiniValue">${fmtInt(youKills)}</div>
+        </div>
+        ${
+          // До первого осмысленного забега рекорда нет, и «Рекорд зоны 0,0%» —
+          // не мотиватор, а насмешка. Карточка появляется вместе с рекордом.
+          bestInfo.best > 0
+            ? `
+        <div class="matchMini${bestInfo.isRecord ? ' deathRecord' : ''}">
+          <div class="matchMiniLabel">${escapeHtml(bestInfo.isRecord ? t('death.new_record') : t('death.best_zone'))}</div>
+          <div class="matchMiniValue">${fmtPct1(bestInfo.best)}</div>
+        </div>`
+            : ''
+        }
+        ${
+          contractText
+            ? `
+        <div class="matchMini">
+          <div class="matchMiniLabel">${escapeHtml(t('death.contract'))}</div>
+          <div class="matchMiniValue">${escapeHtml(contractText)}</div>
+        </div>`
+            : ''
+        }
       </div>
-      <div class="deathStat">
-        <div class="deathStatLabel">${escapeHtml(t('death.kills'))}</div>
-        <div class="deathStatValue">${fmtInt(youKills)}</div>
-      </div>
-      ${
-        // До первого осмысленного забега рекорда нет, и «Рекорд зоны 0,0%» —
-        // не мотиватор, а насмешка. Карточка появляется вместе с рекордом.
-        bestInfo.best > 0
-          ? `
-      <div class="deathStat${bestInfo.isRecord ? ' deathStatRecord' : ''}">
-        <div class="deathStatLabel">${escapeHtml(bestInfo.isRecord ? t('death.new_record') : t('death.best_zone'))}</div>
-        <div class="deathStatValue">${fmtPct1(bestInfo.best)}</div>
-      </div>`
-          : ''
-      }
+
+      <div class="matchNextGap">${isTop1 ? escapeHtml(t('death.top1')) : escapeHtml(t('death.try_again'))}</div>
     </div>
 
-    <div class="toastSub">${place && place !== '—' && place.startsWith('1/') ? escapeHtml(t('death.top1')) : escapeHtml(t('death.try_again'))}</div>
-
-    ${youBlock}
-
-    <div class="deathTop">
-      <div class="deathTopTitle">${escapeHtml(t('death.top'))}</div>
-      <table>
+    <div class="matchTableWrap" role="region" aria-label="${escapeHtml(t('death.top'))}">
+      <table class="matchTable">
+        <thead>
+          <tr>
+            <th class="num">#</th>
+            <th>${escapeHtml(t('match.player'))}</th>
+            <th class="num">${escapeHtml(t('death.points'))}</th>
+          </tr>
+        </thead>
         <tbody>
           ${rows}
         </tbody>
