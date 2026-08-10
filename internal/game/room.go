@@ -2642,8 +2642,31 @@ func (r *Room) step() {
 		decPooledRef(sharedEventsPD)
 	}
 	_ = ctx
+	// Раньше room_step_slow (>750мс) писал только суммарную длительность, а
+	// разбивку по фазам (bot/move/roi/send) получал только room_step_perf
+	// (за бюджетом тика, но короче 750мс) — самые тяжёлые тики оказывались
+	// наименее диагностируемыми. Обе ветки теперь пишут один и тот же набор
+	// полей, различается только префикс лога (severity) и порог.
 	if d := time.Since(stepStartedAt); d > 750*time.Millisecond {
-		log.Printf("room_step_slow room=%d tick=%d dur_ms=%d clients=%d players=%d", r.id, tickNow, d.Milliseconds(), len(clients), len(players))
+		log.Printf(
+			"room_step_slow room=%d tick=%d total_ms=%.3f bot_ms=%.3f move_ms=%.3f roi_ms=%.3f send_ms=%.3f clients=%d players=%d alive=%d forceROI=%t changedGrid=%d changedTrail=%d roiFast=%d roiScan=%d roiSkipped=%d",
+			r.id,
+			tickNow,
+			float64(d)/float64(time.Millisecond),
+			float64(botDur)/float64(time.Millisecond),
+			float64(moveDur)/float64(time.Millisecond),
+			float64(roiDur)/float64(time.Millisecond),
+			float64(sendDur)/float64(time.Millisecond),
+			len(clients),
+			len(players),
+			len(alive),
+			forceROI,
+			changedGridN,
+			changedTrailN,
+			roiFast,
+			roiScan,
+			roiSkipped,
+		)
 	} else if d > time.Duration(TickMS)*time.Millisecond {
 		log.Printf(
 			"room_step_perf room=%d tick=%d total_ms=%.3f bot_ms=%.3f move_ms=%.3f roi_ms=%.3f send_ms=%.3f clients=%d players=%d alive=%d forceROI=%t changedGrid=%d changedTrail=%d roiFast=%d roiScan=%d roiSkipped=%d",

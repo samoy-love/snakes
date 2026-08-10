@@ -4804,6 +4804,7 @@ function updateRoomsUi() {
 }
 
 playBtn?.addEventListener('click', () => {
+  markJoinFunnelStart('auto');
   // Пустой ник не должен быть барьером: подставляем случайный и стартуем.
   ensureNickBeforePlay();
   const nm = submitNameFromInput(menuNameInput);
@@ -4828,6 +4829,7 @@ playBtn?.addEventListener('click', () => {
 
 joinRoomBtn?.addEventListener('click', () => {
   if (selectedRoomId == null) return;
+  markJoinFunnelStart('room');
   const nm = submitNameFromInput(menuNameInput);
   if (!nm) {
     updateMenuNameUi();
@@ -6132,7 +6134,50 @@ canvas.addEventListener('pointercancel', endSwipe);
 
 // Zoom disabled: fixed visible area regardless of screen size
 
+/* G-lag: диагностика жалобы «поле рисуется, а движение долго не начинается».
+   Три контрольные точки одной воронки: клик «Играть»/«Войти» → сервер прислал
+   init (сама команда join обработана) → пришёл первый бинарный снапшот
+   состояния ПОСЛЕ init (клиент реально может отрисовать живых игроков).
+   Считаем именно от клика, а не от отправки join: если сокет ещё
+   переподключается, эта задержка тоже часть того, что видит игрок. */
+let joinFunnelAt = 0;
+let joinFunnelMode = '';
+let joinFunnelInitAt = 0;
+let joinFunnelAwaitingFirstState = false;
+
+function markJoinFunnelStart(mode) {
+  joinFunnelAt = performance.now();
+  joinFunnelMode = mode;
+  joinFunnelInitAt = 0;
+  joinFunnelAwaitingFirstState = false;
+}
+
+function markJoinFunnelInit() {
+  if (!joinFunnelAt) return;
+  joinFunnelInitAt = performance.now();
+  joinFunnelAwaitingFirstState = true;
+}
+
+function markJoinFunnelFirstState() {
+  if (!joinFunnelAwaitingFirstState || !joinFunnelAt) return;
+  joinFunnelAwaitingFirstState = false;
+  const now = performance.now();
+  const toInitMs = Math.round(joinFunnelInitAt - joinFunnelAt);
+  const toStateMs = Math.round(now - joinFunnelAt);
+  try {
+    console.log(`[join_funnel] mode=${joinFunnelMode} click_to_init_ms=${toInitMs} click_to_first_state_ms=${toStateMs}`);
+  } catch {}
+  // Только заметно медленные случаи шлём на сервер — иначе обычная игра
+  // превращается в лог-спам на каждый вход. 800мс — за пределами того, что
+  // ощущается как «мгновенно», но не срабатывает на обычный пинг.
+  if (toStateMs > 800) {
+    wsSend('clientTiming', { kind: 'join_funnel', mode: joinFunnelMode, toInitMs, toStateMs });
+  }
+  joinFunnelAt = 0;
+}
+
 function onInit(msg) {
+  markJoinFunnelInit();
   W = msg.w;
   H = msg.h;
   N = W * H;
@@ -8692,6 +8737,7 @@ function renderTeamHud() {
 
 function handleStateBinary(buf) {
   if (!(buf instanceof ArrayBuffer) || buf.byteLength < 1) return;
+  markJoinFunnelFirstState();
   try {
     const dv = new DataView(buf);
     const bl = dv.byteLength;
