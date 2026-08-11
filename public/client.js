@@ -55,6 +55,7 @@ import {
   ownedCountFromMask
 } from './client_cos_model.js';
 import { buyButtonState, equipButtonState, visibleItems } from './client_cos_ui.js';
+import { renderMenuMetaImpl, showMenuOverlayImpl, updateMenuNameUiImpl } from './client_menu_ui.js';
 import {
   approxTickNow,
   formatClock,
@@ -2669,26 +2670,7 @@ function syncMenuOnboardingUi() {
 }
 
 function updateMenuNameUi() {
-  if (!menuNameInput) return;
-  const v = normalizeMenuNickInput(menuNameInput.value);
-  // Пустое поле — не ошибка: при старте ник подставляется автоматически.
-  // Иначе новый игрок видит красную ошибку и заблокированный «Играть» ещё
-  // до того, как что-либо сделал.
-  const empty = !v.raw;
-  let errKey = '';
-  if (!empty) {
-    if (v.hasBadChars) errKey = 'menu.nick_error_chars';
-    else if (!v.value) errKey = 'menu.nick_error_required';
-    else if (v.value.length < 2) errKey = 'menu.nick_error_length';
-  }
-
-  const ok = !errKey;
-  // «Играть» блокируется только при реально некорректном вводе, но не пустым полем.
-  if (playBtn) playBtn.disabled = !ok;
-  try {
-    menuNameInput.setAttribute('aria-invalid', ok ? 'false' : 'true');
-  } catch {}
-  if (menuNameError) menuNameError.textContent = ok ? '' : t(errKey);
+  updateMenuNameUiImpl({ menuNameInput, normalizeMenuNickInput, playBtn, menuNameError, t });
 }
 
 // Гарантирует непустой ник перед стартом: пустое поле заполняется случайным.
@@ -4388,35 +4370,43 @@ deathMenuBtn?.addEventListener('click', () => {
 });
 
 function showMenuOverlay() {
-  cancelDeathSlowMo();
-  if (menuOverlay) menuOverlay.classList.remove('hidden');
-  if (deathOverlay) deathOverlay.classList.add('hidden');
-  overlayManager.close('death');
-  overlayManager.open('menu');
-  started = false;
-  youAlive = false;
-  try {
-    document.body.classList.remove('inGame');
-  } catch {}
-  updateMenuNameUi();
-  syncMenuOnboardingUi();
-  createRoomPending = false;
-  updateRoomsCreateUi();
-  lastYouStats = null;
-  if (roomsLoadTimeout) {
-    clearTimeout(roomsLoadTimeout);
-    roomsLoadTimeout = 0;
-  }
-  if (roomsLoading && (!Array.isArray(lastRooms) || lastRooms.length === 0)) {
-    roomsLoading = false;
-  }
-  overlayManager.focusDefault('menu');
-  if (topHudEl) topHudEl.setAttribute('aria-hidden', 'true');
-  youStreak = 0;
-  syncOverlayUiState();
-  // C3: панель «Ваш облик» — рисуем сразу, как только меню показано.
-  scheduleMenuSkinPreview();
-  renderMenuMeta();
+  showMenuOverlayImpl({
+    cancelDeathSlowMo,
+    menuOverlay,
+    deathOverlay,
+    overlayManager,
+    setStarted: (v) => {
+      started = v;
+    },
+    setYouAlive: (v) => {
+      youAlive = v;
+    },
+    updateMenuNameUi,
+    syncMenuOnboardingUi,
+    setCreateRoomPending: (v) => {
+      createRoomPending = v;
+    },
+    updateRoomsCreateUi,
+    setLastYouStats: (v) => {
+      lastYouStats = v;
+    },
+    getRoomsLoadTimeout: () => roomsLoadTimeout,
+    setRoomsLoadTimeout: (v) => {
+      roomsLoadTimeout = v;
+    },
+    getRoomsLoading: () => roomsLoading,
+    setRoomsLoading: (v) => {
+      roomsLoading = v;
+    },
+    getLastRooms: () => lastRooms,
+    topHudEl,
+    setYouStreak: (v) => {
+      youStreak = v;
+    },
+    syncOverlayUiState,
+    scheduleMenuSkinPreview,
+    renderMenuMeta
+  });
 }
 
 function hideMenuOverlay() {
@@ -4432,44 +4422,22 @@ function hideMenuOverlay() {
 const menuMetaEl = document.getElementById('menuMeta');
 
 function renderMenuMeta() {
-  if (!menuMetaEl) return;
-  if (menuOverlay?.classList.contains('hidden')) return;
-
-  const rows = [];
-
-  for (const slot of dailySlots()) {
-    const it = youDailies.get(slot);
-    if (!it || !it.type || it.goal <= 0) continue;
-    const prog = Math.max(0, Math.min(it.goal, Number(it.prog) || 0));
-    const done = prog >= it.goal;
-    const pct = (prog / it.goal) * 100;
-    rows.push(`
-      <div class="menuMetaRow${done ? ' isDone' : ''}" title="${escapeHtml(t('meta.tasks_hint'))}">
-        <span class="menuMetaIcon" aria-hidden="true">${done ? '🏁' : '📅'}</span>
-        <span class="menuMetaText">${escapeHtml(dailyLabel(it.type))}</span>
-        <span class="menuMetaValue">${fmtInt(prog)}/${fmtInt(it.goal)}</span>
-        <span class="menuMetaBar"><span class="menuMetaBarFill" style="width:${pct.toFixed(1)}%"></span></span>
-      </div>`);
-  }
-
-  // Прогресс до первого скина — только пока он действительно первый.
-  let ownedExtra = 0;
-  for (const cat of COSMETICS_CATS) ownedExtra += Math.max(0, cosmeticsOwnedCount(cat) - 1);
-  const price = cosmeticsCheapestPrice();
-  if (ownedExtra === 0 && price > 0) {
-    const have = Math.max(0, Math.floor(Number(youStyle) || 0));
-    const left = missingFor(price, have);
-    const pct = Math.max(0, Math.min(100, (have / price) * 100));
-    rows.push(`
-      <div class="menuMetaRow${left === 0 ? ' isDone' : ''}">
-        <span class="menuMetaIcon" aria-hidden="true">✨</span>
-        <span class="menuMetaText">${escapeHtml(t('match.first_skin'))}</span>
-        <span class="menuMetaValue">${left > 0 ? `${fmtInt(have)}/${fmtInt(price)}` : escapeHtml(t('cosmetics.buy'))}</span>
-        <span class="menuMetaBar"><span class="menuMetaBarFill" style="width:${pct.toFixed(1)}%"></span></span>
-      </div>`);
-  }
-
-  setSafeHtml(menuMetaEl, rows.join(''));
+  renderMenuMetaImpl({
+    menuMetaEl,
+    menuOverlay,
+    dailySlots,
+    youDailies,
+    dailyLabel,
+    escapeHtml,
+    t,
+    fmtInt,
+    COSMETICS_CATS,
+    cosmeticsOwnedCount,
+    cosmeticsCheapestPrice,
+    missingFor,
+    getYouStyle: () => youStyle,
+    setSafeHtml
+  });
 }
 
 leaveBtn?.addEventListener('click', () => {
