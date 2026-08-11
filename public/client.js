@@ -120,6 +120,31 @@ import {
   setSafeHtml
 } from './client_util.js';
 import { renderMetaHudImpl, renderTeamHudImpl, renderTopHudImpl } from './client_hud.js';
+import {
+  applyFxPresetImpl,
+  applyHudSettingsImpl,
+  bindSettingsUiImpl,
+  ensureFxPresetControlImpl,
+  ensureSettingsStateImpl,
+  hideSettingsOverlayImpl,
+  resetSettingsStateImpl,
+  saveSettingsStateImpl,
+  showSettingsOverlayImpl
+} from './client_settings.js';
+import {
+  addShakeClassImpl,
+  addShakeImpl,
+  addToastImpl,
+  comboBreakImpl,
+  comboBumpImpl,
+  comboResetImpl,
+  fxFlashScreenImpl,
+  pushEventFeedImpl,
+  renderComboHudImpl,
+  renderKillfeedImpl,
+  showBigBannerImpl,
+  triggerHitstopImpl
+} from './client_fx_ui.js';
 
 installErrorLogging();
 
@@ -262,7 +287,7 @@ function setLang(next) {
     syncMatchOverlayActions();
   } catch {}
   try {
-    ensureFxPresetControl();
+    ensureFxPresetControlImpl(settingsDeps());
   } catch {}
   try {
     updateMatchCountdown();
@@ -1171,13 +1196,7 @@ function playBeep(freq, ms, vol) {
 }
 
 function applyHudSettings() {
-  const b = document.body;
-  if (!b) return;
-  try {
-    b.style.setProperty('--hud-brightness', String(hudBrightness));
-    b.style.setProperty('--hud-contrast', String(hudContrast));
-    b.style.setProperty('--hud-panel-alpha', String(hudPanelOpacity));
-  } catch {}
+  applyHudSettingsImpl(settingsDeps());
 }
 
 function getHudDensityDefault() {
@@ -1241,7 +1260,7 @@ function addFxBurst(x, y, kind, extra) {
 }
 
 function addShake(amount, dirX, dirY) {
-  fx.addShake(amount, () => ({ shakeIntensity, addShakeVel }), dirX, dirY);
+  addShakeImpl(amount, dirX, dirY, { fx, shakeIntensity, addShakeVel });
 }
 
 function addShakeVel(dx, dy) {
@@ -1320,29 +1339,20 @@ function fxVolumeScale() {
 
 const HITSTOP_TIME_SCALE = 0.15;
 
-let hitstopFrom = 0;
-let hitstopUntil = 0;
+// { from, until } — общее состояние с triggerHitstopImpl() в client_fx_ui.js
+// (передаётся туда по ссылке, обе стороны читают/пишут одни и те же поля).
+const hitstopState = { from: 0, until: 0 };
 
 function triggerHitstop(ms) {
-  const k = fxHitstopScale();
-  if (k <= 0) return;
-  const dur = Math.max(0, Number(ms) || 0) * k;
-  if (dur <= 0) return;
-  const now = performance.now();
-  if (now < hitstopUntil) {
-    hitstopUntil = Math.max(hitstopUntil, now + dur);
-    return;
-  }
-  hitstopFrom = now;
-  hitstopUntil = now + dur;
+  triggerHitstopImpl(ms, { fxHitstopScale, hitstopState });
 }
 
 // Сколько «съел» hitstop из окна [since, now]. Вычитается из времени
 // интерполяции, поэтому змейки в эти миллисекунды почти стоят.
 function hitstopLostMs(since, now) {
-  if (!hitstopUntil) return 0;
-  const s = Math.max(hitstopFrom, Number(since) || 0);
-  const e = Math.min(now, hitstopUntil);
+  if (!hitstopState.until) return 0;
+  const s = Math.max(hitstopState.from, Number(since) || 0);
+  const e = Math.min(now, hitstopState.until);
   if (e <= s) return 0;
   return (e - s) * (1 - HITSTOP_TIME_SCALE);
 }
@@ -1353,19 +1363,7 @@ function normalizeFxPreset(v) {
 }
 
 function applyFxPreset(next, fromUser) {
-  const v = normalizeFxPreset(next);
-  if (!v) return;
-  fxPreset = v;
-  if (fromUser) fxPresetUserSet = true;
-  try {
-    document.body.dataset.fxPreset = fxPreset;
-  } catch {}
-  const sel = document.getElementById('fxPresetSelect');
-  if (sel) {
-    try {
-      sel.value = fxPreset;
-    } catch {}
-  }
+  applyFxPresetImpl(next, fromUser, settingsDeps());
 }
 
 /* ==========================================================================
@@ -1466,167 +1464,25 @@ function animateNumber(el, from, to, ms, opts) {
  * J9 — полноэкранная вспышка (#fxFlash)
  * ======================================================================== */
 
-const FX_FLASH_MIN_INTERVAL_MS = 400; // не чаще 2.5 Гц
-const FX_FLASH_PEAK_ALPHA = 0.35;
-const FX_FLASH_DUR_MS = 280;
-const FX_FLASH_RISE_MS = 90;
-
-let fxFlashLastAt = 0;
-let fxFlashRaf = 0;
-
-function clampByte(v) {
-  const n = Math.round(Number(v) || 0);
-  return Math.max(0, Math.min(255, n));
-}
-
-// Красный канал не должен мигать изолированно: подтягиваем G/B под R.
-function safeFlashRgb(rgb) {
-  let r = clampByte(rgb?.[0]);
-  let g = clampByte(rgb?.[1]);
-  let b = clampByte(rgb?.[2]);
-  const floor = Math.round(r * 0.45);
-  if (g < floor) g = floor;
-  if (b < floor) b = floor;
-  return [r, g, b];
-}
-
 function fxFlashScreen(rgb, strength) {
-  if (!fxEnabled) return;
-  const scale = fxFlashScale();
-  if (scale <= 0) return;
-  const el = document.getElementById('fxFlash');
-  if (!el) return;
-
-  const now = performance.now();
-  if (now - fxFlashLastAt < FX_FLASH_MIN_INTERVAL_MS) return;
-  fxFlashLastAt = now;
-
-  const [r, g, b] = safeFlashRgb(rgb);
-  const s = Math.max(0, Math.min(1, Number(strength ?? 1)));
-  const peak = Math.min(FX_FLASH_PEAK_ALPHA, FX_FLASH_PEAK_ALPHA * s * scale);
-  if (peak <= 0.005) return;
-
-  try {
-    if (fxFlashRaf) cancelAnimationFrame(fxFlashRaf);
-  } catch {}
-  fxFlashRaf = 0;
-
-  try {
-    el.style.transition = 'none';
-    el.style.background = `radial-gradient(circle at 50% 50%, rgba(${r},${g},${b},0.90) 0%, rgba(${r},${g},${b},0.42) 42%, rgba(${r},${g},${b},0) 72%)`;
-    el.style.opacity = '0';
-    el.classList.add('isOn');
-  } catch {
-    return;
-  }
-
-  const t0 = performance.now();
-  const step = () => {
-    const age = performance.now() - t0;
-    if (age >= FX_FLASH_DUR_MS) {
-      try {
-        el.style.opacity = '0';
-        el.classList.remove('isOn');
-      } catch {}
-      fxFlashRaf = 0;
-      return;
-    }
-    const a =
-      age < FX_FLASH_RISE_MS
-        ? (age / FX_FLASH_RISE_MS) * peak
-        : peak * (1 - (age - FX_FLASH_RISE_MS) / (FX_FLASH_DUR_MS - FX_FLASH_RISE_MS));
-    try {
-      el.style.opacity = Math.max(0, a).toFixed(3);
-    } catch {}
-    fxFlashRaf = requestAnimationFrame(step);
-  };
-  fxFlashRaf = requestAnimationFrame(step);
+  fxFlashScreenImpl(rgb, strength, { fxEnabled, fxFlashScale });
 }
 
 /* ==========================================================================
  * J13 — центральный баннер крупных событий (#bigBanner)
  * ======================================================================== */
 
-const BIG_BANNER_MIN_INTERVAL_MS = 3000;
-const BIG_BANNER_TTL_MS = 2600;
-
-let bigBannerLastAt = 0;
-let bigBannerTimer = 0;
-
 // Возвращает true, если баннер показан. Иначе вызывающий откатывается на тост.
 function showBigBanner(icon, title, sub, mod) {
-  if (!fxBannerEnabled()) return false;
-  const el = document.getElementById('bigBanner');
-  if (!el) return false;
-
-  const now = performance.now();
-  if (now - bigBannerLastAt < BIG_BANNER_MIN_INTERVAL_MS) return false;
-  bigBannerLastAt = now;
-
-  try {
-    if (bigBannerTimer) clearTimeout(bigBannerTimer);
-  } catch {}
-  bigBannerTimer = 0;
-
-  try {
-    el.classList.remove('bannerJackpot', 'bannerDanger');
-    const m = String(mod || '');
-    if (m === 'jackpot') el.classList.add('bannerJackpot');
-    else if (m === 'danger') el.classList.add('bannerDanger');
-
-    const wrap = document.createElement('div');
-    wrap.className = 'bigBannerInner';
-
-    const ic = document.createElement('div');
-    ic.className = 'bigBannerIcon';
-    ic.textContent = String(icon || '★');
-
-    const tt = document.createElement('div');
-    tt.className = 'bigBannerTitle';
-    tt.textContent = String(title || '');
-
-    wrap.appendChild(ic);
-    wrap.appendChild(tt);
-
-    const s = String(sub || '').trim();
-    if (s) {
-      const se = document.createElement('div');
-      se.className = 'bigBannerSub';
-      se.textContent = s;
-      wrap.appendChild(se);
-    }
-
-    el.replaceChildren(wrap);
-    el.setAttribute('role', 'status');
-    el.setAttribute('aria-live', 'polite');
-    // Перезапуск анимации: снимаем класс, форсируем рефлоу, ставим обратно.
-    el.classList.remove('isOn');
-    void el.offsetWidth;
-    el.classList.add('isOn');
-  } catch {
-    return false;
-  }
-
-  bigBannerTimer = setTimeout(() => {
-    bigBannerTimer = 0;
-    try {
-      el.classList.remove('isOn');
-    } catch {}
-  }, BIG_BANNER_TTL_MS);
-  return true;
+  return showBigBannerImpl(icon, title, sub, mod, { fxBannerEnabled });
 }
 
 /* ==========================================================================
  * J14 — классы тряски
  * ======================================================================== */
 
-const SHAKE_CLASSES = { micro: 0.08, small: 0.2, medium: 0.4, large: 0.7 };
-
 function addShakeClass(kind, dirX, dirY) {
-  const amt = SHAKE_CLASSES[String(kind || '')] ?? SHAKE_CLASSES.small;
-  const scaled = amt * fxShakeScale();
-  if (scaled <= 0) return;
-  addShake(scaled, dirX, dirY);
+  addShakeClassImpl(kind, dirX, dirY, { fxShakeScale, fx, shakeIntensity, addShakeVel });
 }
 
 // Вектор «от точки события к моей голове» — толчок в сторону игрока.
@@ -1682,82 +1538,27 @@ function addScorePopup(x, y, value) {
  * J10 — комбо с растущим тоном
  * ======================================================================== */
 
-const COMBO_WINDOW_MS = 3000;
-let comboCount = 0;
-let comboLastAt = 0;
-let comboTimer = 0;
-
-let comboHudSig = '';
+// Геттеры, а не снимок значений: comboBump() планирует comboBreak() через
+// setTimeout, и к моменту срабатывания started/youKills могли измениться —
+// нужны актуальные значения на момент вызова, а не те, что были при постановке.
+function comboDeps() {
+  return { getStarted: () => started, getYouKills: () => youKills, sfx };
+}
 
 function renderComboHud() {
-  const el = document.getElementById('hudCombo');
-  if (!el) return;
-  // renderTopHud вызывается каждый кадр — пересобираем DOM только при изменении.
-  const sig = started ? `${youKills}|${comboCount}` : '';
-  if (sig === comboHudSig) return;
-  comboHudSig = sig;
-
-  const showCombo = comboCount >= 2;
-  if (!started) {
-    el.classList.remove('isOn');
-    el.replaceChildren();
-    return;
-  }
-  try {
-    const kills = document.createElement('span');
-    kills.className = 'hudComboKills';
-    kills.textContent = `⚔ ${youKills}`;
-
-    el.replaceChildren(kills);
-
-    if (showCombo) {
-      const c = document.createElement('span');
-      c.className = 'hudComboValue';
-      c.textContent = `x${comboCount}`;
-      const grow = Math.min(2.0, 1 + (comboCount - 2) * 0.14);
-      c.style.fontSize = `${(100 * grow).toFixed(0)}%`;
-      el.appendChild(c);
-    }
-    el.classList.toggle('isOn', showCombo || youKills > 0);
-  } catch {}
+  renderComboHudImpl(comboDeps());
 }
 
 function comboBump() {
-  const now = performance.now();
-  if (now - comboLastAt > COMBO_WINDOW_MS) comboCount = 0;
-  comboLastAt = now;
-  comboCount++;
-
-  if (comboCount >= 2) {
-    // +2 полутона за шаг цепочки.
-    const semis = Math.min(24, (comboCount - 2) * 2);
-    sfx.comboStep(semis);
-  }
-  renderComboHud();
-
-  try {
-    if (comboTimer) clearTimeout(comboTimer);
-  } catch {}
-  comboTimer = setTimeout(comboBreak, COMBO_WINDOW_MS + 40);
+  comboBumpImpl(comboDeps());
 }
 
 function comboBreak() {
-  comboTimer = 0;
-  const had = comboCount;
-  comboCount = 0;
-  renderComboHud();
-  if (had >= 2) sfx.comboBreak();
+  comboBreakImpl(comboDeps());
 }
 
 function comboReset() {
-  try {
-    if (comboTimer) clearTimeout(comboTimer);
-  } catch {}
-  comboTimer = 0;
-  comboCount = 0;
-  comboLastAt = 0;
-  comboHudSig = '';
-  renderComboHud();
+  comboResetImpl(comboDeps());
 }
 
 /* ==========================================================================
@@ -6028,284 +5829,106 @@ function tickRemainSeconds(untilTick) {
 }
 
 function ensureSettingsState() {
-  try {
-    const raw = localStorage.getItem('snakes_settings_v1');
-    if (raw) {
-      const s = JSON.parse(raw);
-      fxEnabled = s.fxEnabled ?? fxEnabled;
-      fxIntensity = s.fxIntensity ?? fxIntensity;
-      shakeIntensity = s.shakeIntensity ?? shakeIntensity;
-      perfEnabled = s.perfEnabled ?? perfEnabled;
-      perfCompact = s.perfCompact ?? perfCompact;
-      soundEnabled = s.soundEnabled ?? soundEnabled;
-      soundVolume = s.soundVolume ?? soundVolume;
-      muteOnBlur = s.muteOnBlur ?? muteOnBlur;
-      hapticsEnabled = s.hapticsEnabled ?? hapticsEnabled;
-      hudBrightness = s.hudBrightness ?? hudBrightness;
-      hudContrast = s.hudContrast ?? hudContrast;
-      hudPanelOpacity = s.hudPanelOpacity ?? hudPanelOpacity;
-      const p = normalizeFxPreset(s.fxPreset);
-      if (p) {
-        fxPreset = p;
-        fxPresetUserSet = !!s.fxPresetUserSet;
-      }
-    }
-  } catch {}
-
-  // J22: без явного выбора пользователя уважаем системный запрет анимаций.
-  if (!fxPresetUserSet && prefersReducedMotion()) fxPreset = 'calm';
-  applyFxPreset(fxPreset, false);
-
-  if (fxEnabledInput) fxEnabledInput.checked = !!fxEnabled;
-  if (fxIntensityInput) fxIntensityInput.value = String(fxIntensity);
-  if (shakeIntensityInput) shakeIntensityInput.value = String(shakeIntensity);
-  if (perfEnabledInput) perfEnabledInput.checked = !!perfEnabled;
-  if (perfCompactInput) perfCompactInput.checked = !!perfCompact;
-  if (soundEnabledInput) soundEnabledInput.checked = !!soundEnabled;
-  if (soundVolumeInput) soundVolumeInput.value = String(soundVolume);
-  if (muteOnBlurInput) muteOnBlurInput.checked = !!muteOnBlur;
-  if (hapticsInput) hapticsInput.checked = !!hapticsEnabled;
-  if (hudBrightnessInput) hudBrightnessInput.value = String(hudBrightness);
-  if (hudContrastInput) hudContrastInput.value = String(hudContrast);
-  if (hudPanelOpacityInput) hudPanelOpacityInput.value = String(hudPanelOpacity);
-
-  syncHapticsRowUi();
-
-  if (perfEl) perfEl.style.display = perfEnabled ? '' : 'none';
-  applyPerfUi();
-  applyHudSettings();
-
-  applyHudDensity(getHudDensityDefault());
+  ensureSettingsStateImpl(settingsDeps());
 }
 
 function saveSettingsState() {
-  try {
-    localStorage.setItem(
-      'snakes_settings_v1',
-      JSON.stringify({
-        fxEnabled,
-        fxIntensity,
-        shakeIntensity,
-        perfEnabled,
-        perfCompact,
-        soundEnabled,
-        soundVolume,
-        muteOnBlur,
-        hapticsEnabled,
-        hudBrightness,
-        hudContrast,
-        hudPanelOpacity,
-        fxPreset,
-        fxPresetUserSet
-      })
-    );
-  } catch {}
+  saveSettingsStateImpl(settingsDeps());
 }
 
 function resetSettingsState() {
-  fxEnabled = true;
-  fxIntensity = 0.85;
-  shakeIntensity = 0.55;
-  perfEnabled = false;
-  perfCompact = false;
-  soundEnabled = true;
-  soundVolume = 0.7;
-  muteOnBlur = true;
-  hapticsEnabled = true;
-  hudBrightness = 1;
-  hudContrast = 1;
-  hudPanelOpacity = 0.82;
-  soundMutedByBlur = false;
-  fxPresetUserSet = false;
-  applyFxPreset(prefersReducedMotion() ? 'calm' : 'normal', false);
-
-  if (fxEnabledInput) fxEnabledInput.checked = !!fxEnabled;
-  if (fxIntensityInput) fxIntensityInput.value = String(fxIntensity);
-  if (shakeIntensityInput) shakeIntensityInput.value = String(shakeIntensity);
-  if (perfEnabledInput) perfEnabledInput.checked = !!perfEnabled;
-  if (perfCompactInput) perfCompactInput.checked = !!perfCompact;
-  if (soundEnabledInput) soundEnabledInput.checked = !!soundEnabled;
-  if (soundVolumeInput) soundVolumeInput.value = String(soundVolume);
-  if (muteOnBlurInput) muteOnBlurInput.checked = !!muteOnBlur;
-  if (hapticsInput) hapticsInput.checked = !!hapticsEnabled;
-  if (hudBrightnessInput) hudBrightnessInput.value = String(hudBrightness);
-  if (hudContrastInput) hudContrastInput.value = String(hudContrast);
-  if (hudPanelOpacityInput) hudPanelOpacityInput.value = String(hudPanelOpacity);
-
-  if (perfEl) perfEl.style.display = perfEnabled ? '' : 'none';
-  applyPerfUi();
-  applyHudSettings();
-  saveSettingsState();
+  resetSettingsStateImpl(settingsDeps());
 }
 
 function showSettingsOverlay() {
-  if (settingsOverlay) settingsOverlay.classList.remove('hidden');
-  overlayManager.open('settings');
-  syncOverlayUiState();
-  overlayManager.focusDefault('settings');
+  showSettingsOverlayImpl(settingsDeps());
 }
 
 function hideSettingsOverlay() {
-  if (settingsOverlay) settingsOverlay.classList.add('hidden');
-  overlayManager.close('settings');
-  syncOverlayUiState();
+  hideSettingsOverlayImpl(settingsDeps());
 }
 
-// J22: тумблер пресета. Разметку добавляет вёрсточный агент (#fxPresetSelect);
-// пока её нет — создаём поле сами, чтобы настройка была доступна.
-function ensureFxPresetControl() {
-  let sel = document.getElementById('fxPresetSelect');
-  if (!sel) {
-    const anchor = fxEnabledInput?.closest?.('.fieldInline') || null;
-    const host = anchor?.parentElement || null;
-    if (!host) return null;
-    try {
-      const label = document.createElement('label');
-      label.className = 'fieldInline';
-      const span = document.createElement('span');
-      span.className = 'fieldLabel';
-      span.setAttribute('data-i18n', 'settings.fx_preset');
-      span.textContent = t('settings.fx_preset');
-      sel = document.createElement('select');
-      sel.id = 'fxPresetSelect';
-      label.appendChild(span);
-      label.appendChild(sel);
-
-      const hint = document.createElement('div');
-      hint.className = 'fieldHint';
-      hint.setAttribute('data-i18n', 'settings.fx_preset_hint');
-      hint.textContent = t('settings.fx_preset_hint');
-
-      host.insertBefore(label, anchor);
-      host.insertBefore(hint, anchor);
-    } catch {
-      return null;
-    }
-  }
-
-  try {
-    const opts = [
-      ['calm', t('settings.fx_preset_calm')],
-      ['normal', t('settings.fx_preset_normal')],
-      ['casino', t('settings.fx_preset_casino')]
-    ];
-    const need = sel.options?.length !== opts.length;
-    if (need) sel.replaceChildren();
-    for (let i = 0; i < opts.length; i++) {
-      let op = sel.options?.[i];
-      if (!op) {
-        op = document.createElement('option');
-        sel.appendChild(op);
-      }
-      op.value = opts[i][0];
-      op.textContent = opts[i][1];
-    }
-    sel.value = fxPreset;
-  } catch {}
-  return sel;
+/* Общий набор геттеров/сеттеров и ссылок для DOM-функций настроек в
+   client_settings.js. Построен как функция (не как объект один раз), потому
+   что часть переменных состояния (fxEnabled, hudBrightness и т.д.)
+   переприсваивается — деп должен читать/писать их актуальные значения. */
+function settingsDeps() {
+  return {
+    // DOM-узлы
+    perfEl,
+    settingsBtn,
+    settingsOverlay,
+    closeSettingsBtn,
+    fxEnabledInput,
+    fxIntensityInput,
+    shakeIntensityInput,
+    perfEnabledInput,
+    perfCompactInput,
+    soundEnabledInput,
+    soundVolumeInput,
+    muteOnBlurInput,
+    hapticsInput,
+    testBeepBtn,
+    resetSettingsBtn,
+    hudBrightnessInput,
+    hudContrastInput,
+    hudPanelOpacityInput,
+    // Геттеры/сеттеры изменяемого состояния client.js
+    getFxEnabled: () => fxEnabled,
+    setFxEnabled: (v) => { fxEnabled = v; },
+    getFxIntensity: () => fxIntensity,
+    setFxIntensity: (v) => { fxIntensity = v; },
+    getShakeIntensity: () => shakeIntensity,
+    setShakeIntensity: (v) => { shakeIntensity = v; },
+    getPerfEnabled: () => perfEnabled,
+    setPerfEnabled: (v) => { perfEnabled = v; },
+    getPerfCompact: () => perfCompact,
+    setPerfCompact: (v) => { perfCompact = v; },
+    getSoundEnabled: () => soundEnabled,
+    setSoundEnabled: (v) => { soundEnabled = v; },
+    getSoundVolume: () => soundVolume,
+    setSoundVolume: (v) => { soundVolume = v; },
+    getMuteOnBlur: () => muteOnBlur,
+    setMuteOnBlur: (v) => { muteOnBlur = v; },
+    getHapticsEnabled: () => hapticsEnabled,
+    setHapticsEnabled: (v) => { hapticsEnabled = v; },
+    getHudBrightness: () => hudBrightness,
+    setHudBrightness: (v) => { hudBrightness = v; },
+    getHudContrast: () => hudContrast,
+    setHudContrast: (v) => { hudContrast = v; },
+    getHudPanelOpacity: () => hudPanelOpacity,
+    setHudPanelOpacity: (v) => { hudPanelOpacity = v; },
+    getSoundMutedByBlur: () => soundMutedByBlur,
+    setSoundMutedByBlur: (v) => { soundMutedByBlur = v; },
+    getFxPreset: () => fxPreset,
+    setFxPreset: (v) => { fxPreset = v; },
+    getFxPresetUserSet: () => fxPresetUserSet,
+    setFxPresetUserSet: (v) => { fxPresetUserSet = v; },
+    // Функции/таблицы, общие с остальным client.js
+    normalizeFxPreset,
+    prefersReducedMotion,
+    applyFxPreset,
+    applyHudSettings,
+    applyPerfUi,
+    applyHudDensity,
+    getHudDensityDefault,
+    syncHapticsRowUi,
+    ensureSettingsState,
+    saveSettingsState,
+    resetSettingsState,
+    showSettingsOverlay,
+    hideSettingsOverlay,
+    overlayManager,
+    syncOverlayUiState,
+    sfx,
+    t,
+    playBeep,
+    vibrate
+  };
 }
 
 function bindSettingsUi() {
-  ensureSettingsState();
-
-  const fxPresetSelect = ensureFxPresetControl();
-  fxPresetSelect?.addEventListener('change', () => {
-    applyFxPreset(fxPresetSelect.value, true);
-    saveSettingsState();
-    sfx.ui();
-  });
-
-  settingsBtn?.addEventListener('click', () => {
-    showSettingsOverlay();
-  });
-  closeSettingsBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    hideSettingsOverlay();
-  });
-
-  settingsOverlay?.addEventListener('click', (e) => {
-    if (e.target === settingsOverlay) {
-      hideSettingsOverlay();
-    }
-  });
-
-  fxEnabledInput?.addEventListener('change', () => {
-    fxEnabled = !!fxEnabledInput.checked;
-    saveSettingsState();
-  });
-  fxIntensityInput?.addEventListener('input', () => {
-    fxIntensity = Math.max(0, Math.min(1, Number(fxIntensityInput.value) || 0));
-    saveSettingsState();
-  });
-  shakeIntensityInput?.addEventListener('input', () => {
-    shakeIntensity = Math.max(0, Math.min(1, Number(shakeIntensityInput.value) || 0));
-    saveSettingsState();
-  });
-  perfEnabledInput?.addEventListener('change', () => {
-    perfEnabled = !!perfEnabledInput.checked;
-    if (perfEl) perfEl.style.display = perfEnabled ? '' : 'none';
-    saveSettingsState();
-  });
-  perfCompactInput?.addEventListener('change', () => {
-    perfCompact = !!perfCompactInput.checked;
-    applyPerfUi();
-    saveSettingsState();
-  });
-  soundEnabledInput?.addEventListener('change', () => {
-    soundEnabled = !!soundEnabledInput.checked;
-    saveSettingsState();
-  });
-  soundVolumeInput?.addEventListener('input', () => {
-    soundVolume = Math.max(0, Math.min(1, Number(soundVolumeInput.value) || 0));
-    saveSettingsState();
-  });
-
-  muteOnBlurInput?.addEventListener('change', () => {
-    muteOnBlur = !!muteOnBlurInput.checked;
-    if (!muteOnBlur) soundMutedByBlur = false;
-    saveSettingsState();
-  });
-
-  hapticsInput?.addEventListener('change', () => {
-    hapticsEnabled = !!hapticsInput.checked;
-    saveSettingsState();
-    // Отклик на сам переключатель: игрок сразу чувствует, что именно включил.
-    if (hapticsEnabled) vibrate(30);
-  });
-
-  hudBrightnessInput?.addEventListener('input', () => {
-    hudBrightness = Math.max(0.5, Math.min(2, Number(hudBrightnessInput.value) || 1));
-    applyHudSettings();
-    saveSettingsState();
-  });
-  hudContrastInput?.addEventListener('input', () => {
-    hudContrast = Math.max(0.5, Math.min(2, Number(hudContrastInput.value) || 1));
-    applyHudSettings();
-    saveSettingsState();
-  });
-  hudPanelOpacityInput?.addEventListener('input', () => {
-    hudPanelOpacity = Math.max(0.3, Math.min(1, Number(hudPanelOpacityInput.value) || 0.82));
-    applyHudSettings();
-    saveSettingsState();
-  });
-
-  testBeepBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    playBeep(660, 120, 1);
-  });
-
-  resetSettingsBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    resetSettingsState();
-  });
-
-  window.addEventListener('blur', () => {
-    if (!muteOnBlur) return;
-    soundMutedByBlur = true;
-  });
-  window.addEventListener('focus', () => {
-    soundMutedByBlur = false;
-  });
+  bindSettingsUiImpl(settingsDeps());
 }
 
 /* Общий набор геттеров/сеттеров и ссылок для DOM-функций магазина в
@@ -6449,83 +6072,18 @@ function bindCosmeticsUi() {
 }
 
 function addToast(icon, text, variant, subtext, action) {
-  if (!eventToastsEl) return;
-  const now = performance.now();
-  let v = String(variant || '');
-  if (v === 'big' && now < bigToastCooldownUntil) v = '';
-
-  let st = subtext;
-  let act = action;
-  if (!act && st && typeof st === 'object') {
-    act = st;
-    st = '';
-  }
-
-  // J20: ключ не включает вариант. Раньше `v` даунгрейдился с 'big' на '' при
-  // активном кулдауне, из-за чего одно событие получало два разных ключа и
-  // вместо счётчика «x2» появлялся второй тост.
-  const key = String(act?.key || `${String(icon || '')}|${String(text || '')}|${String(st || '')}`);
-  const prio = String(act?.prio || (String(variant || '') === 'big' ? 'important' : 'minor'));
-
-  const prev = toastByKey.get(key);
-  if (prev && prev.el) {
-    prev.at = now;
-    prev.count = (prev.count || 1) + 1;
-    if (toastPrioValue(prio) > toastPrioValue(prev.prio)) prev.prio = prio;
-    try {
-      const bt = String(prev.baseText || prev.text || '');
-      if (prev.textEl) prev.textEl.textContent = `${bt} x${prev.count}`;
-      toastBump(prev.el);
-      if (prev.timer) clearTimeout(prev.timer);
-      prev.timer = setTimeout(() => {
-        try {
-          prev.el?.remove?.();
-        } catch {}
-        toastByKey.delete(key);
-        toastDrain();
-      }, (prev.variant || v) === 'big' ? 8200 : 2200);
-    } catch {}
-    return;
-  }
-
-  if (prev && !prev.el) {
-    prev.at = now;
-    prev.count = (prev.count || 1) + 1;
-    if (toastPrioValue(prio) > toastPrioValue(prev.prio)) prev.prio = prio;
-    return;
-  }
-
-  const item = {
-    key,
-    icon,
-    text: String(text || ''),
-    baseText: String(text || ''),
-    variant: v,
-    prio,
-    subtext: String(st || ''),
-    action: act,
-    at: now,
-    count: 1,
-    el: null,
-    textEl: null,
-    timer: 0,
-  };
-
-  toastByKey.set(key, item);
-  if (eventToastsEl.children.length >= MAX_EVENT_TOASTS) {
-    // J19: важное событие вытесняет самый незначительный тост на экране.
-    const worst = toastLowestMounted();
-    if (worst && toastPrioValue(item.prio) > toastPrioValue(worst.prio)) {
-      toastUnmount(worst);
-      toastMount(item);
-      return;
-    }
-    toastQueue.push(key);
-    return;
-  }
-
-  toastMount(item);
-  return;
+  addToastImpl(icon, text, variant, subtext, action, {
+    eventToastsEl,
+    getBigToastCooldownUntil: () => bigToastCooldownUntil,
+    toastByKey,
+    toastQueue,
+    MAX_EVENT_TOASTS,
+    toastPrioValue,
+    toastMount,
+    toastLowestMounted,
+    toastUnmount,
+    toastDrain
+  });
 }
 
 /* C6: порог, ниже которого ЧУЖОЙ захват в ленту не идёт. Домашний квадрат на
@@ -6547,88 +6105,32 @@ const FEED_FOREIGN_CAPTURE_MIN = 48;
 let killfeedDirty = false;
 
 function pushEventFeed(text, kind, actorNum) {
-  const t = performance.now();
-  const s = String(text || '').trim();
-  if (!s) return;
-  const k = String(kind || '');
-  const a = Number.isFinite(Number(actorNum)) ? Number(actorNum) : null;
-  /* C8: подряд идущие одинаковые строки читались как зависший лог. Схлопываем
-     их в одну с множителем ×N (окно 10 с — дальше строка всё равно истечёт). */
-  const head = eventFeed[0];
-  if (head && head.text === s && head.k === k && t - head.t < 10000) {
-    head.n = (head.n || 1) + 1;
-    head.t = t;
-    killfeedDirty = true;
-    return;
-  }
-  /* UX15: однотипные события одного игрока подряд (например "захватил +N зоны")
-     схлопываем в одну строку с суммой, а не плодим повторы — сравниваем текст
-     без хвостового числа, чтобы разные +N всё равно объединялись. */
-  if (head && head.k === k && head.a === a && a != null && t - head.t < 10000) {
-    const m = /^(.*\+)(\d+)(\D*)$/.exec(s);
-    const hm = head.text ? /^(.*\+)(\d+)(\D*)$/.exec(head.text) : null;
-    if (m && hm && m[1] === hm[1] && m[3] === hm[3]) {
-      head.text = `${hm[1]}${Number(hm[2]) + Number(m[2])}${hm[3]}`;
-      head.t = t;
-      killfeedDirty = true;
-      return;
+  pushEventFeedImpl(text, kind, actorNum, {
+    eventFeed,
+    setKillfeedDirty: (v) => {
+      killfeedDirty = v;
     }
-  }
-  eventFeed.unshift({ t, text: s, k, n: 1, a });
-  if (eventFeed.length > 64) eventFeed.length = 64;
-  killfeedDirty = true;
+  });
 }
 
 function renderKillfeed() {
-  if (!killfeedEl) return;
-  const now = performance.now();
-  const small = window.innerWidth <= 720;
-  const maxAge = small ? 8000 : 12000;
-  const maxLines = small ? 4 : 6;
-  const visible = eventFeed.filter((e) => now - e.t < maxAge).slice(0, maxLines);
-  /* C8: замер до правки — 195 узлов за 12 с. Половина пересборок приходилась на
-     пакеты, где видимый текст не менялся вообще: killfeedDirty выставляется на
-     любое событие, а строк на экране всего 4-6. Сверяем подпись и не трогаем
-     DOM, когда рисовать нечего нового. */
-  // C4: значок бота входит в подпись — иначе приход cosExtra не перерисует ленту.
-  const sig =
-    visible.map((e) => `${e.k}${e.text}${e.n || 1}${botArchInfo(e.a) ? `b${e.a}` : ''}${e.a === you ? 'm' : ''}`).join('') + lang;
-  if (renderKillfeed._sig === sig) return;
-  renderKillfeed._sig = sig;
-
-  const lines = visible.map((e) => {
-    const div = document.createElement('div');
-    const k = String(e?.k || '').trim();
-    div.className = k ? `killLine killLine${k}` : 'killLine';
-    // УХ31: отличаем свои события от чужих цветом левой полосы/фона.
-    if (you && e?.a != null && Number(e.a) === you) div.classList.add('killLineMine');
-    else if (e?.a != null) div.classList.add('killLineOther');
-    // C8: множитель схлопнутых повторов.
-    const rep = Number(e?.n) || 1;
-    const txt = rep > 1 ? `${e.text} ×${rep}` : e.text;
-    // C4: в килфиде колонка узкая — оставляем только глиф, без подписи архетипа.
-    const badge = botArchBadge(e.a, { glyphOnly: true });
-    if (badge) div.replaceChildren(badge, document.createTextNode(txt));
-    else div.textContent = txt;
-    return div;
+  renderKillfeedImpl({
+    killfeedEl,
+    eventFeed,
+    you,
+    lang,
+    botArchInfo,
+    botArchBadge,
+    rightEventsDetailsEl,
+    getEventsUnreadCount: () => eventsUnreadCount,
+    setEventsUnreadCount: (v) => {
+      eventsUnreadCount = v;
+    },
+    setBadgeCount,
+    rightEventsBadgeEl,
+    syncRightEmptyStates
   });
-  killfeedEl.replaceChildren(...lines);
-
-  try {
-    if (rightEventsDetailsEl && !rightEventsDetailsEl.open && lines.length) {
-      if (!renderKillfeed._u || now - renderKillfeed._u > 1200) {
-        renderKillfeed._u = now;
-        eventsUnreadCount = Math.min(999, eventsUnreadCount + 1);
-        setBadgeCount(rightEventsBadgeEl, eventsUnreadCount);
-      }
-    }
-  } catch {}
-  try {
-    syncRightEmptyStates();
-  } catch {}
 }
-
-renderKillfeed._u = 0;
 
 // ...
 
