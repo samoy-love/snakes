@@ -1,4 +1,5 @@
 import { clientState } from './client_state.js';
+import { computeDrawCamera } from './client_draw.js';
 import {
   ensureLeaderboardDom,
   resetLeaderboardUi,
@@ -7253,81 +7254,16 @@ function draw() {
 
   const viewH = Math.max(1, ch - occludedBottom);
 
-  // J12: hitstop замедляет только интерполяцию игроков, не эффекты.
-  const interpNow = performance.now();
-  const interpElapsed = interpNow - lastPacketAt - hitstopLostMs(lastPacketAt, interpNow);
-  const interp = Math.max(0, Math.min(1, interpElapsed / tickMs));
-
-  const my = getInterpPlayer(you, interp);
-  const nt = approxNowTick();
-  const speedActive = !!(my && my.a && nt != null && youSpeedUntilTick && nt < youSpeedUntilTick);
-  const targetX = my ? my.ix + 0.5 : W / 2;
-  const targetY = my ? my.iy + 0.5 : H / 2;
-  clientState.camX = followCamera(clientState.camX, targetX);
-  clientState.camY = followCamera(clientState.camY, targetY);
-
-  {
-    const now = performance.now();
-    const dt = now - (draw._shakeAt || now);
-    draw._shakeAt = now;
-    const next = decayShake({
-      x: shakeX, y: shakeY, vx: shakeVelX, vy: shakeVelY,
-      dtMs: dt, intensity: shakeIntensity
-    });
-    shakeX = next.x;
-    shakeY = next.y;
-    shakeVelX = next.vx;
-    shakeVelY = next.vy;
-  }
-
-  /* C1: масштаб считался только от вьюпорта, а ROI сервера фиксирован (80×56).
-     На портретном телефоне (viewH/cw > 1.4) масштаб упирался в ширину, по
-     высоте на экран влезало под сотню рядов — и всё, что выходило за 56 рядов
-     ROI, закрашивалось туманом: до 40% экрана. Клэмпим масштаб снизу так,
-     чтобы экран никогда не был больше фактического ROI. На десктопе
-     (cw/viewH ≈ 1.6) обе поправки меньше базового значения и ничего не
-     меняют. */
-  const baseCell = cellSizeFor({ cw, viewH, roi: lastRoi, roiGrant });
-
-  /* Драматический наезд на точку гибели: чистый визуальный множитель поверх
-     baseCell, не влияющий на ROI/сетевой запрос вьюпорта (см. beginDeathZoom
-     / updateDeathZoom выше). Камера на время наезда смешивается с точкой
-     гибели, а не с текущей целью followCamera. */
-  const { zoom: deathZoom, mixToAnchor: deathZoomMix } = updateDeathZoom(performance.now());
-  const cell = baseCell * deathZoom;
-  const camXForZoom = clientState.camX + (deathZoomAnchorX - clientState.camX) * deathZoomMix;
-  const camYForZoom = clientState.camY + (deathZoomAnchorY - clientState.camY) * deathZoomMix;
-
-  /* Камера жёстко зафиксирована на игроке: никакого сдвига по направлению
-     движения. Так просил заказчик — «взгляд» не должен уезжать вперёд при
-     смене направления.
-     Историю двух предыдущих попыток стоит держать в уме, чтобы не вернуться:
-     1) поправка «затолкать вьюпорт внутрь ROI» считалась от края окна, а окно
-        сервер снапит по ROIStep — величина была ступенчатой, и сглаживание не
-        убирало ступеньку, а растягивало её в рывок (0.005..0.6 клетки за кадр);
-     2) ведение вперёд на серверный lookahead рывок убрало, но давало ровно тот
-        эффект, который заказчику не нужен — камера доворачивала на поворотах.
-     Чтобы при нулевом ведении сзади не появлялся туман, сервер тоже перестал
-     смещать окно вперёд (roiLookahead → 0), и ROI центрируется на голове. */
-  clientState.camLeadX = 0;
-  clientState.camLeadY = 0;
+  const drawCameraDeps = { cw, viewH, you, W, H, tickMs, lastPacketAt, youSpeedUntilTick, shakeX, shakeY, shakeVelX, shakeVelY, shakeIntensity, lastRoi, roiGrant, deathZoomAnchorX, deathZoomAnchorY, getInterpPlayer, approxNowTick, hitstopLostMs, updateDeathZoom };
+  const cam = computeDrawCamera(performance.now(), drawCameraDeps);
+  const { interp, my, nt, speedActive, targetX, targetY, cell, screenBounds, offsetX, offsetY, minX, minY, maxX, maxY, gb, gMinX, gMinY, gMaxX, gMaxY } = cam;
+  const nextShakeX = cam.shakeX, nextShakeY = cam.shakeY, nextShakeVelX = cam.shakeVelX, nextShakeVelY = cam.shakeVelY;
+  shakeX = nextShakeX;
+  shakeY = nextShakeY;
+  shakeVelX = nextShakeVelX;
+  shakeVelY = nextShakeVelY;
 
   ctx.clearRect(0, 0, cw, ch);
-
-  const screenBounds = visibleBounds({
-    cw, viewH, cell,
-    camX: camXForZoom + clientState.camLeadX, camY: camYForZoom + clientState.camLeadY,
-    shakeX, shakeY, W, H
-  });
-  const { offsetX, offsetY, minX, minY, maxX, maxY } = screenBounds;
-
-  /* K1: границы горячего цикла по сетке — пересечение экрана с последним
-     полученным ROI. За его пределами gridOwner/trailOwner заведомо устарели. */
-  const gb = clampToRoi(screenBounds, lastRoi);
-  const gMinX = gb.minX;
-  const gMinY = gb.minY;
-  const gMaxX = gb.maxX;
-  const gMaxY = gb.maxY;
 
   /* C1: рамка обзора на миникарте рисовалась по границам экрана и заявляла
      обзор больше реального — всё, что за ROI, на экране всё равно туман.

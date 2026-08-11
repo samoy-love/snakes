@@ -31,6 +31,7 @@ import { maskNonCode, extractDeclared, unknownIdentifiers } from './helpers/js_s
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_JS = readFileSync(path.join(__dirname, '../public/client.js'), 'utf8');
 const CLIENT_SHOP_UI_JS = readFileSync(path.join(__dirname, '../public/client_shop_ui.js'), 'utf8');
+const CLIENT_DRAW_JS = readFileSync(path.join(__dirname, '../public/client_draw.js'), 'utf8');
 
 function extractFunctionBody(source, name) {
   const start = source.indexOf(`function ${name}(`);
@@ -103,6 +104,23 @@ test('renderCosmeticsSkeletonImpl() не читает идентификатор
     unknown,
     [],
     `renderCosmeticsSkeletonImpl() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
+// computeDrawCamera() — вынесена из draw() (§ шаг «Камера/зум/screenBounds»).
+// Живёт в своём файле и не тянет ничего из client.js через замыкание — все
+// значения приходят параметром deps, поэтому её верхний уровень собственный.
+test('computeDrawCamera() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'computeDrawCamera');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `computeDrawCamera() читает необъявленные идентификаторы: ${unknown.join(', ')}`
   );
 });
 
