@@ -1,5 +1,5 @@
 import { clientState } from './client_state.js';
-import { computeDrawCamera, paintEntities, paintFieldFx, paintTerrain } from './client_draw.js';
+import { computeDrawCamera, paintEntities, paintFieldFx, paintTerrain, renderPerfPanel } from './client_draw.js';
 import {
   ensureLeaderboardDom,
   resetLeaderboardUi,
@@ -92,7 +92,6 @@ import {
   formatInt,
   formatNumber as formatNumberIntl,
   formatPct1,
-  formatRate as formatRateOf,
   formatRemainMs,
   numberLocale as localeOf,
   remainMsToTick
@@ -7189,15 +7188,6 @@ function drawMinimap() {
   minimapHadChunkUpdate = res.hadChunkUpdate;
 }
 
-function formatRate(bps) {
-  return formatRateOf(bps);
-}
-
-function perfValueSpan(text, bad) {
-  const cls = bad ? 'perfBad' : 'perfOk';
-  return `<span class="perfValue ${cls}">${text}</span>`;
-}
-
 function getInterpPlayer(id, t) {
   const b = currPlayers.get(id);
   if (!b) return null;
@@ -7904,35 +7894,11 @@ function draw() {
     }
   }
 
-  const pingText = pingMs == null ? '…' : `${pingMs.toFixed(0)}ms`;
-  const upText = formatRate(upBps);
-  const downText = formatRate(downBps);
-  const tr = tickrate ? `${tickrate.toFixed(1)}` : '…';
-  const sr = tickMs ? `${(1000 / tickMs).toFixed(1)}` : '…';
-  const rid = roomId == null ? '…' : String(roomId);
-
-  const fpsText = fps ? fps.toFixed(0) : '…';
-  const srvNum = tickMs ? 1000 / tickMs : null;
-  const tickBad = srvNum != null && tickrate ? tickrate < srvNum * 0.8 : tr === '…';
-
-  const roomBad = roomId == null;
-  const fpsBad = fps ? fps < 30 : fpsText === '…';
-  const pingBad = pingMs == null ? true : pingMs > 150;
-  const upBad = upText === '…';
-  const downBad = downText === '…';
-  const srvBad = srvNum == null;
-
   if (!perfEnabled) {
     return;
   }
 
-  setSafeHtml(perfEl, `
-    <div class="perfRow">${escapeHtml(t('perf.room'))}: ${perfValueSpan(rid, roomBad)}</div>
-    <div class="perfRow">${escapeHtml(t('perf.fps'))}: ${perfValueSpan(fpsText, fpsBad)}</div>
-    <div class="perfRow">${escapeHtml(t('perf.ping'))}: ${perfValueSpan(pingText, pingBad)}</div>
-    <div class="perfRow">${escapeHtml(t('perf.traffic'))}: ↑ ${perfValueSpan(upText, upBad)}&nbsp;&nbsp;↓ ${perfValueSpan(downText, downBad)}</div>
-    <div class="perfRow">${escapeHtml(t('perf.ticks'))}: ${perfValueSpan(tr, tickBad)} (${escapeHtml(t('perf.server'))} ${perfValueSpan(sr, srvBad)})</div>
-  `);
+  renderPerfPanel(perfEl, { roomId, fps, pingMs, upBps, downBps, tickrate, tickMs }, t);
 }
 
 bindSettingsUi();

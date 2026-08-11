@@ -177,6 +177,23 @@ test('paintFieldFx() не читает идентификаторы, котор�
   );
 });
 
+// renderPerfPanel() — вынесена из конца draw() (§ шаг «Панель #perf в конце
+// draw()»). Как и остальные функции этого файла, не тянет ничего из
+// client.js через замыкание — метрики и t() приходят параметрами.
+test('renderPerfPanel() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'renderPerfPanel');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `renderPerfPanel() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
 // handleStateBinary() — тот же класс риска: единый курсор чтения буфера `o`
 // двигается вручную по всей функции (§6.4 отчёта разведки от 2026-08-05),
 // и вынос куска вроде pickPlayerRecordSize должен оставить обвязку вокруг

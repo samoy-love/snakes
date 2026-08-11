@@ -20,6 +20,8 @@ import { clientState } from './client_state.js';
 import { cellSizeFor, followCamera, decayShake, visibleBounds, clampToRoi, dirVec } from './client_field_view.js';
 import { boostHsl } from './client_color.js';
 import { trailVisualState } from './client_trail_style.js';
+import { formatRate as formatRateOf } from './client_format.js';
+import { escapeHtml, setSafeHtml } from './client_util.js';
 import {
   cosClampId,
   cosTerrAlphaMod,
@@ -612,4 +614,49 @@ export function paintFieldFx(ctx, cameraFrame, now, deps) {
       ctx.restore();
     }
   }
+}
+
+function perfValueSpan(text, bad) {
+  const cls = bad ? 'perfBad' : 'perfOk';
+  return `<span class="perfValue ${cls}">${text}</span>`;
+}
+
+/* Панель #perf: FPS/пинг/трафик/тики. Вынесено из конца draw() (public/
+   client.js) — draw() по-прежнему вызывает её последней строкой, передавая
+   уже собранные метрики кадра (roomId/fps/pingMs/upBps/downBps/tickrate/
+   tickMs) и функцию перевода t(). Сама draw() решает, звать ли её вообще —
+   ранний return при !perfEnabled остаётся в draw(), сюда не переехал.
+
+   Не тянет ничего из client.js через замыкание — весь верхний уровень
+   собственный, поэтому держит tests/client_draw_wiring.test.mjs зелёным
+   тем же способом, что computeDrawCamera()/paintTerrain()/paintEntities()/
+   paintFieldFx(). */
+export function renderPerfPanel(perfEl, metrics, t) {
+  const { roomId, fps, pingMs, upBps, downBps, tickrate, tickMs } = metrics;
+
+  const pingText = pingMs == null ? '…' : `${pingMs.toFixed(0)}ms`;
+  const upText = formatRateOf(upBps);
+  const downText = formatRateOf(downBps);
+  const tr = tickrate ? `${tickrate.toFixed(1)}` : '…';
+  const sr = tickMs ? `${(1000 / tickMs).toFixed(1)}` : '…';
+  const rid = roomId == null ? '…' : String(roomId);
+
+  const fpsText = fps ? fps.toFixed(0) : '…';
+  const srvNum = tickMs ? 1000 / tickMs : null;
+  const tickBad = srvNum != null && tickrate ? tickrate < srvNum * 0.8 : tr === '…';
+
+  const roomBad = roomId == null;
+  const fpsBad = fps ? fps < 30 : fpsText === '…';
+  const pingBad = pingMs == null ? true : pingMs > 150;
+  const upBad = upText === '…';
+  const downBad = downText === '…';
+  const srvBad = srvNum == null;
+
+  setSafeHtml(perfEl, `
+    <div class="perfRow">${escapeHtml(t('perf.room'))}: ${perfValueSpan(rid, roomBad)}</div>
+    <div class="perfRow">${escapeHtml(t('perf.fps'))}: ${perfValueSpan(fpsText, fpsBad)}</div>
+    <div class="perfRow">${escapeHtml(t('perf.ping'))}: ${perfValueSpan(pingText, pingBad)}</div>
+    <div class="perfRow">${escapeHtml(t('perf.traffic'))}: ↑ ${perfValueSpan(upText, upBad)}&nbsp;&nbsp;↓ ${perfValueSpan(downText, downBad)}</div>
+    <div class="perfRow">${escapeHtml(t('perf.ticks'))}: ${perfValueSpan(tr, tickBad)} (${escapeHtml(t('perf.server'))} ${perfValueSpan(sr, srvBad)})</div>
+  `);
 }
