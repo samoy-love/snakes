@@ -93,6 +93,9 @@ type Room struct {
 
 	mutatorType  uint8
 	mutatorUntil uint32
+	// mutatorAt — тики (от начала матча), на которых открываются окна
+	// мутаторов. Разыгрываются заново на каждый матч, см. rollMutatorSchedule.
+	mutatorAt [3]uint32
 
 	powerUps      []PowerUp
 	nextPowerUpID uint16

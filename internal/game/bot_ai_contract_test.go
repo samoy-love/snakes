@@ -206,9 +206,20 @@ func TestApplyBotPersonalityInvariants(t *testing.T) {
 				if p.aiHuntGate < 0 {
 					t.Fatalf("tier=%d arch=%d: huntGate %v", tier, arch, p.aiHuntGate)
 				}
-				// Только фермеру можно за общий потолок бюджета.
-				if arch != ArchFarmer && p.aiBudgetCap != BotTrailBudgetCap {
+				// Только фермеру можно ЗА общий потолок бюджета. Ниже потолка
+				// опускаться разрешено: с R4 это делает лёгкий тир, и именно
+				// разница в длине петли отличает его от сильного.
+				if arch != ArchFarmer && p.aiBudgetCap > BotTrailBudgetCap {
 					t.Fatalf("arch=%d получил потолок фермера %d", arch, p.aiBudgetCap)
+				}
+				if p.aiBudgetCap <= 0 {
+					t.Fatalf("tier=%d arch=%d: потолок бюджета %d", tier, arch, p.aiBudgetCap)
+				}
+				// R4: фермеру потолок обязан остаться выше пола, который ему
+				// ставит botTrailBudget, иначе архетип молча схлопывается.
+				if arch == ArchFarmer && p.aiBudgetCap <= BotTrailBudgetCap {
+					t.Fatalf("tier=%d: потолок фермера %d не выше общего %d",
+						tier, p.aiBudgetCap, BotTrailBudgetCap)
 				}
 			}
 		}
@@ -306,6 +317,12 @@ func TestHunterCensusNeverSticks(t *testing.T) {
 	b3 := newHuntBot(r, 4, ArchAggressor)
 	b4 := newHuntBot(r, 5, ArchAggressor)
 
+	// R1: пока человек не отстроился, на него охотится один бот, а не трое.
+	if got := huntCapFor(victim); got != HuntCapHumanFledgling {
+		t.Fatalf("лимит охотников на новичка = %d, ожидалось %d", got, HuntCapHumanFledgling)
+	}
+	// Дальше проверяется полный лимит, поэтому человек «отстраивается».
+	victim.owned = make([]int, HuntFledglingCells)
 	if got := huntCapFor(victim); got != HuntCapHuman {
 		t.Fatalf("лимит охотников на человека = %d, ожидалось %d", got, HuntCapHuman)
 	}

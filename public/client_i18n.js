@@ -71,7 +71,7 @@ export const I18N = {
     'cosmetics.offline_hint': 'Данные косметики будут синхронизированы после входа в матч.',
 
     'death.title': 'Вы проиграли',
-    'death.hint': 'Enter — снова • Esc — меню',
+    'death.hint': 'Space — снова • Esc — меню',
     'death.play_again': 'Играть снова',
 
     'match.title': 'Матч завершён',
@@ -156,12 +156,12 @@ export const I18N = {
     'hud.zone': 'Зона',
 
     'right.match': 'Матч',
-    'right.team': 'Команда',
+    'right.team': 'Игроки',
     'right.events': 'События',
 
     'right.match_empty_title': 'Нет данных',
     'right.match_empty_desc': 'Начните матч, чтобы увидеть прогресс и задания',
-    'right.team_empty_title': 'Нет команды',
+    'right.team_empty_title': 'Пока пусто',
     'right.team_empty_desc': 'Войдите в матч, чтобы увидеть таблицу игроков',
     'right.events_empty_title': 'Тихо',
     'right.events_empty_desc': 'События появятся во время матча',
@@ -355,7 +355,7 @@ export const I18N = {
     'onb.shop_title': 'Магазин открыт',
     'onb.shop_desc': 'Копи ✨ Стиль и меняй его на внешний вид змейки.',
 
-    'reclaim.hint': 'Твоя земля остывает 20 секунд — успей вернуться и забрать её обратно.',
+    'reclaim.hint': 'Твоя земля остывает {sec} секунд — успей вернуться и забрать её обратно.',
     'reclaim.toast': 'Земля возвращена',
     'reclaim.toast_desc': 'Ты успел вернуться до конца остывания.',
 
@@ -497,7 +497,7 @@ export const I18N = {
     'cosmetics.offline_hint': 'Cosmetics data will sync after you enter a match.',
 
     'death.title': 'You lost',
-    'death.hint': 'Enter — again • Esc — menu',
+    'death.hint': 'Space — again • Esc — menu',
     'death.play_again': 'Play again',
 
     'match.title': 'Match finished',
@@ -580,12 +580,12 @@ export const I18N = {
     'hud.zone': 'Zone',
 
     'right.match': 'Match',
-    'right.team': 'Team',
+    'right.team': 'Players',
     'right.events': 'Events',
 
     'right.match_empty_title': 'No data',
     'right.match_empty_desc': 'Start a match to see progress and tasks',
-    'right.team_empty_title': 'No team',
+    'right.team_empty_title': 'Nothing yet',
     'right.team_empty_desc': 'Join a match to see the player table',
     'right.events_empty_title': 'Quiet',
     'right.events_empty_desc': 'Events will appear during the match',
@@ -757,7 +757,7 @@ export const I18N = {
     'onb.shop_title': 'Shop unlocked',
     'onb.shop_desc': 'Bank ✨ Style and spend it on the look of your snake.',
 
-    'reclaim.hint': 'Your land stays warm for 20 seconds — get back in time and take it back.',
+    'reclaim.hint': 'Your land stays warm for {sec} seconds — get back in time and take it back.',
     'reclaim.toast': 'Land reclaimed',
     'reclaim.toast_desc': 'You made it back before the land cooled down.',
 
