@@ -2280,8 +2280,7 @@ let prevPlayers = new Map();
 let currPlayers = new Map();
 let lastPacketAt = performance.now();
 
-let camX = null;
-let camY = null;
+// camX/camY теперь в clientState (public/client_state.js)
 
 /* VIEW_CELLS_X/Y и ROI_MARGIN_CELLS переехали в client_field_view.js —
    там же вся геометрия вида и тесты на неё. Здесь они только импортируются:
@@ -2292,8 +2291,7 @@ let camY = null;
    остаются нулями, чтобы не разносить эту правку по всему draw(); окно ROI
    сервер тоже центрирует на голове (roiLookahead в protocol.go возвращает 0),
    поэтому вьюпорт лежит внутри окна по построению. */
-let camLeadX = 0;
-let camLeadY = 0;
+// camLeadX/camLeadY теперь в clientState (public/client_state.js)
 /* C1: запас, который вычитается из фактического ROI при подборе масштаба.
    Сервер снапит окно по 8 клеток (main.go ROIStep) и сдвигает его на 12 клеток
    вперёд по направлению движения (ROILookahead), то есть относительно игрока
@@ -4419,10 +4417,10 @@ function resetClientForNewMatch() {
   currPlayers = new Map();
   headIndexByOwner = new Map();
   lastPacketAt = performance.now();
-  camX = null;
-  camY = null;
-  camLeadX = 0;
-  camLeadY = 0;
+  clientState.camX = null;
+  clientState.camY = null;
+  clientState.camLeadX = 0;
+  clientState.camLeadY = 0;
 
   shakeX = 0;
   shakeY = 0;
@@ -10256,8 +10254,8 @@ function draw() {
   const speedActive = !!(my && my.a && nt != null && youSpeedUntilTick && nt < youSpeedUntilTick);
   const targetX = my ? my.ix + 0.5 : W / 2;
   const targetY = my ? my.iy + 0.5 : H / 2;
-  camX = followCamera(camX, targetX);
-  camY = followCamera(camY, targetY);
+  clientState.camX = followCamera(clientState.camX, targetX);
+  clientState.camY = followCamera(clientState.camY, targetY);
 
   {
     const now = performance.now();
@@ -10288,8 +10286,8 @@ function draw() {
      гибели, а не с текущей целью followCamera. */
   const { zoom: deathZoom, mixToAnchor: deathZoomMix } = updateDeathZoom(performance.now());
   const cell = baseCell * deathZoom;
-  const camXForZoom = camX + (deathZoomAnchorX - camX) * deathZoomMix;
-  const camYForZoom = camY + (deathZoomAnchorY - camY) * deathZoomMix;
+  const camXForZoom = clientState.camX + (deathZoomAnchorX - clientState.camX) * deathZoomMix;
+  const camYForZoom = clientState.camY + (deathZoomAnchorY - clientState.camY) * deathZoomMix;
 
   /* Камера жёстко зафиксирована на игроке: никакого сдвига по направлению
      движения. Так просил заказчик — «взгляд» не должен уезжать вперёд при
@@ -10302,14 +10300,14 @@ function draw() {
         эффект, который заказчику не нужен — камера доворачивала на поворотах.
      Чтобы при нулевом ведении сзади не появлялся туман, сервер тоже перестал
      смещать окно вперёд (roiLookahead → 0), и ROI центрируется на голове. */
-  camLeadX = 0;
-  camLeadY = 0;
+  clientState.camLeadX = 0;
+  clientState.camLeadY = 0;
 
   ctx.clearRect(0, 0, cw, ch);
 
   const screenBounds = visibleBounds({
     cw, viewH, cell,
-    camX: camXForZoom + camLeadX, camY: camYForZoom + camLeadY,
+    camX: camXForZoom + clientState.camLeadX, camY: camYForZoom + clientState.camLeadY,
     shakeX, shakeY, W, H
   });
   const { offsetX, offsetY, minX, minY, maxX, maxY } = screenBounds;
