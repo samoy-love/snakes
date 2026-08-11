@@ -583,6 +583,15 @@ const (
 	BountyWindowTicks  = 700
 	BountyCooldown     = 400 // E11
 	BountyCooldownLate = 150 // F4: the final phase re-arms the bounty faster
+
+	// BountyWeightFloor is the weight the weakest candidate carries in the
+	// bounty draw; everyone else adds their lead over him (R2). It sets how
+	// hard the draw tilts. At the measured end-of-match spread (leader ~1100,
+	// tail ~570) the leader comes out about four times as likely as the tail,
+	// and the tail still keeps a real chance rather than an exemption. Early
+	// in the match the field is bunched and the draw is nearly flat, which is
+	// correct — there is no leader to mark yet.
+	BountyWeightFloor = 150
 )
 
 const (

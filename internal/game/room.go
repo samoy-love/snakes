@@ -728,15 +728,53 @@ func (r *Room) maybeUpdateBounty() {
 	}
 	if r.bountyTarget == 0 {
 		// E11: bots are ordinary candidates now, not a fallback.
+		//
+		// R2: the draw is weighted by match points. A flat draw marked the
+		// player at the bottom of the table exactly as often as the leader,
+		// and a whole room hunting whoever is already losing is not drama, it
+		// is a pile-on — the worst possible thing to hand a beginner. The
+		// floor keeps every candidate reachable, the weight makes the leader
+		// the likely answer.
 		cands := make([]uint16, 0, len(r.players))
-		for _, p := range r.players {
+		for num, p := range r.players {
 			if p == nil || !p.alive {
 				continue
 			}
-			cands = append(cands, p.num)
+			cands = append(cands, num)
 		}
-		if len(cands) > 0 {
-			r.bountyTarget = cands[r.rng.Intn(len(cands))]
+		// Map iteration order is random and the weighted walk below consumes
+		// the candidates in order, so it has to be pinned.
+		sort.Slice(cands, func(i, j int) bool { return cands[i] < cands[j] })
+		// The weight is the lead over the WEAKEST candidate, not the raw
+		// score. Raw scores barely tilt anything: measured, a room sits inside
+		// a 570-1100 band and mid-match inside a much tighter one, so
+		// floor+points made the leader all of 1.5x more likely than the tail —
+		// a flat draw with extra steps. Measuring from the bottom of the field
+		// makes the weight track the spread that actually exists at that
+		// moment: nearly flat early, when there is no leader to mark, and
+		// sharply tilted late, when there is.
+		lo := 0
+		for i, num := range cands {
+			if v := int(r.points[num]); i == 0 || v < lo {
+				lo = v
+			}
+		}
+		weight := func(num uint16) int { return BountyWeightFloor + int(r.points[num]) - lo }
+		total := 0
+		for _, num := range cands {
+			total += weight(num)
+		}
+		if total > 0 {
+			roll := r.rng.Intn(total)
+			pick := cands[len(cands)-1]
+			for _, num := range cands {
+				roll -= weight(num)
+				if roll < 0 {
+					pick = num
+					break
+				}
+			}
+			r.bountyTarget = pick
 			r.bountyUntil = r.tick + BountyWindowTicks
 			r.pushEvent(Event{Kind: EventBountyAssign, A: r.bountyTarget, C: r.bountyUntil})
 			r.metaDirty = true
