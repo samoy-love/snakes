@@ -6630,8 +6630,6 @@ function renderKillfeed() {
 
 renderKillfeed._u = 0;
 
-}
-
 // ...
 
 function handleStateBinary(buf) {
