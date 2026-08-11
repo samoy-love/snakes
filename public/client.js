@@ -2445,7 +2445,7 @@ updateUnreadBadge();
 
 function updateChatLayout() {
   if (!chat || !chatLog) return;
-  const count = chatMessages.length;
+  const count = clientState.chatMessages.length;
   chat.classList.toggle('chatEmpty', count <= 0);
   let max = 320;
   if (count <= 0) max = 80;
@@ -2470,7 +2470,7 @@ const waveScale = 0.55;
 const waveAlpha = 0.10;
 const wavePeriodMs = (Math.PI * 2) / waveSpeed;
 
-const chatMessages = [];
+// chatMessages теперь в clientState.chatMessages (public/client_state.js)
 const nameById = new Map();
 /* C5: сервер шлёт английский вариант имени (nmEn) в nameUpdate и matchResult —
    клиент его никогда не читал, и в EN топ-5 выглядел кириллицей. Единая точка
@@ -5780,10 +5780,10 @@ function formatTime(t) {
 }
 
 function addChatLine(msg) {
-  chatMessages.push(msg);
+  clientState.chatMessages.push(msg);
   let shifted = false;
-  while (chatMessages.length > 200) {
-    chatMessages.shift();
+  while (clientState.chatMessages.length > 200) {
+    clientState.chatMessages.shift();
     shifted = true;
   }
   if (chat.classList.contains('collapsed')) {
@@ -5805,10 +5805,10 @@ function addChatLine(msg) {
     return;
   }
 
-  if (chatRenderedCount === chatMessages.length - 1) {
+  if (chatRenderedCount === clientState.chatMessages.length - 1) {
     const atBottom = chatLog.scrollTop + chatLog.clientHeight >= chatLog.scrollHeight - 24;
     chatLog.appendChild(buildChatLineElement(msg));
-    chatRenderedCount = chatMessages.length;
+    chatRenderedCount = clientState.chatMessages.length;
     if (atBottom) chatLog.scrollTop = chatLog.scrollHeight;
   } else {
     renderChat();
@@ -5849,12 +5849,12 @@ function renderChat() {
   const atBottom = chatLog.scrollTop + chatLog.clientHeight >= chatLog.scrollHeight - 24;
 
   const frag = document.createDocumentFragment();
-  for (const m of chatMessages) {
+  for (const m of clientState.chatMessages) {
     frag.appendChild(buildChatLineElement(m));
   }
 
   chatLog.replaceChildren(frag);
-  chatRenderedCount = chatMessages.length;
+  chatRenderedCount = clientState.chatMessages.length;
   if (atBottom) chatLog.scrollTop = chatLog.scrollHeight;
   updateChatLayout();
 }
@@ -9742,9 +9742,9 @@ function handleStateBinary(buf) {
 
 function onChatInit(history) {
   chatLog.textContent = '';
-  chatMessages.length = 0;
+  clientState.chatMessages.length = 0;
   if (!Array.isArray(history)) return;
-  for (const m of history) chatMessages.push(m);
+  for (const m of history) clientState.chatMessages.push(m);
   renderChat();
   chatDirty = false;
   updateChatLayout();
@@ -10040,7 +10040,7 @@ function onState(s) {
     }
   }
 
-  if (nameChanged && chatMessages.length) renderChat();
+  if (nameChanged && clientState.chatMessages.length) renderChat();
 
   headIndexByOwner.clear();
   for (const p of s.players) {
