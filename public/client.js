@@ -2696,7 +2696,7 @@ let lastLeaderboardRenderAt = 0;
 
 let leaderboardTable = null;
 let leaderboardTbody = null;
-let leaderboardRowsById = new Map();
+// leaderboardRowsById теперь в clientState.leaderboardRowsById (public/client_state.js)
 let lastLeaderboardSig = '';
 
 let lbMode = 'top';
@@ -4441,7 +4441,7 @@ function resetClientForNewMatch() {
   lastLeaderboardSig = '';
   lbAroundIndex = null;
   lbAroundIndexAt = 0;
-  leaderboardRowsById = new Map();
+  clientState.leaderboardRowsById = new Map();
   try {
     leaderboardTbody?.replaceChildren?.();
   } catch {}
@@ -5342,10 +5342,10 @@ function updateLeaderboard() {
     const pid = String(p.n);
     nextIds.add(pid);
 
-    let tr = leaderboardRowsById.get(pid);
+    let tr = clientState.leaderboardRowsById.get(pid);
     if (!tr) {
       tr = createLeaderboardRow(p);
-      leaderboardRowsById.set(pid, tr);
+      clientState.leaderboardRowsById.set(pid, tr);
     }
 
     if (p.n === you) tr.classList.add('me');
@@ -5381,15 +5381,15 @@ function updateLeaderboard() {
 
   for (const it of pick) {
     const pid = String(it.p.n);
-    const tr = leaderboardRowsById.get(pid);
+    const tr = clientState.leaderboardRowsById.get(pid);
     if (!tr) continue;
     leaderboardTbody.appendChild(tr);
   }
 
-  for (const [pid, tr] of leaderboardRowsById) {
+  for (const [pid, tr] of clientState.leaderboardRowsById) {
     if (nextIds.has(pid)) continue;
     if (!tr || tr.classList.contains('lb-leave')) {
-      leaderboardRowsById.delete(pid);
+      clientState.leaderboardRowsById.delete(pid);
       continue;
     }
     tr.classList.remove('lb-enter');
@@ -5397,13 +5397,13 @@ function updateLeaderboard() {
     setTimeout(() => {
       tr.remove();
     }, 260);
-    leaderboardRowsById.delete(pid);
+    clientState.leaderboardRowsById.delete(pid);
   }
 
   const moved = [];
   if (!reduceMotion) {
     for (const pid of nextIds) {
-      const tr = leaderboardRowsById.get(pid);
+      const tr = clientState.leaderboardRowsById.get(pid);
       if (!tr) continue;
       const firstTop = firstTops.get(pid);
       if (firstTop == null) continue;
@@ -5421,7 +5421,7 @@ function updateLeaderboard() {
 
   requestAnimationFrame(() => {
     for (const pid of nextIds) {
-      const tr = leaderboardRowsById.get(pid);
+      const tr = clientState.leaderboardRowsById.get(pid);
       if (!tr) continue;
       if (tr.classList.contains('lb-enter')) tr.classList.remove('lb-enter');
     }
