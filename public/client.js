@@ -1,5 +1,5 @@
 import { clientState } from './client_state.js';
-import { computeDrawCamera } from './client_draw.js';
+import { computeDrawCamera, paintEntities, paintTerrain } from './client_draw.js';
 import {
   ensureLeaderboardDom,
   resetLeaderboardUi,
@@ -1940,8 +1940,6 @@ function scheduleViewportSend(delayMs = 250) {
   }, Math.max(0, delayMs));
 }
 
-// C10: переиспользуемая карта Path2D под пунктир остывающей территории.
-const coolEdgePaths = new Map();
 // C10: градиенты фона кадра зависят только от размеров вьюпорта.
 let bgGradCacheKey = '';
 let bgGradLinear = null;
@@ -7303,29 +7301,6 @@ function draw() {
 
   const nowFrame = performance.now();
 
-  const segByOwner = new Map();
-  // Цвет владельца кэшируем до горячего цикла: drawSegTile зовётся для каждой
-  // клетки следа каждый кадр, лишний boostHsl там не нужен.
-  const hslByOwner = new Map();
-  // Стиль территории приходит отдельным JSON (`cosExtra`), а не в 21-байтной
-  // записи снапшота. Паттерн создаётся ОДИН раз на владельца за кадр, дальше в
-  // цикле по клеткам остаётся один fillRect.
-  const terrByOwner = new Map();
-  const terrStyleByOwner = new Map();
-  for (const p of clientState.lastState.players) {
-    segByOwner.set(p.n, cosClampId(p.cosSeg));
-    const hsl = boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)');
-    hslByOwner.set(p.n, hsl);
-    const tid = cosClampId(cosTerrByPlayer.get(p.n) || 0);
-    if (tid) {
-      terrByOwner.set(p.n, tid);
-      if (cosTerrIsPattern(tid)) {
-        const st = cosTerrFillStyle(ctx, hsl, tid, offsetX, offsetY, cell);
-        if (st) terrStyleByOwner.set(p.n, st);
-      }
-    }
-  }
-
   if (fxEnabled && speedActive) {
     const dt = Math.min(40, nowFrame - (draw._spAt || nowFrame));
     draw._spAt = nowFrame;
@@ -7359,249 +7334,20 @@ function draw() {
     }
   }
 
-  // I2: собственный след — главный объект риска в игре. Раньше он отличался от
-  // собственной территории всего на 0.07 альфы. Теперь: 0.85 + светлая обводка,
-  // а на длинном следе (сигнал риска) добавляется пульсация яркости.
-  const trailStyle = trailVisualState({
-    trailLen: youTrailLen,
-    pulseFrom: TRAIL_PULSE_FROM,
-    fxEnabled,
-    reducedMotion: prefersReducedMotion(),
-    nowFrame
+  // I2/F18/C10: клетки поля/территорий, cool-edge пути остывающей территории,
+  // следы и лёгкая сетка поверх — см. client_draw.js: paintTerrain().
+  const terrainResult = paintTerrain(ctx, cam, {
+    nowFrame, you, W, H,
+    colors, gridOwner, trailOwner, gridFillAt, headIndexByOwner,
+    cosTerrByPlayer, coolDeadlineByOwner, coolSeenAt,
+    getOwnerFillStyle, gridCellOwner, gridCellIsCooling,
+    RECLAIM_WINDOW_MS, fillAnimMs, wavePeriodMs, waveScale, waveSpeed, waveAlpha,
+    youTrailLen, TRAIL_PULSE_FROM, fxEnabled, reducedMotion: prefersReducedMotion()
   });
-  const ownTrailA = trailStyle.ownAlpha;
-  const otherTrailA = trailStyle.otherAlpha;
-  const ownTrailStroke = trailStyle.ownStroke;
-  const drawOwnOutline = cell >= 8;
-
-  // F18/I4: ближайшая своя клетка ищется бесплатно, прямо в горячем цикле.
-  let nearHomeD = Infinity;
-  let nearHomeX = -1;
-  let nearHomeY = -1;
-  const headCX = my ? my.ix : -1;
-  const headCY = my ? my.iy : -1;
-
-  /* C10: пунктир остывающей территории раньше стоил save()+setLineDash(новый
-     массив)+strokeRect+restore() НА КАЖДУЮ клетку — после смерти это 1000-2000
-     клеток в кадре. Теперь рёбра копятся в Path2D (по одному на квантованный
-     цвет), рисуются только по границе области, а пунктир задаётся один раз. */
-  const coolPaths = coolEdgePaths;
-  coolPaths.clear();
-  const coolSame = (nx, ny, owner) => {
-    if (nx < 0 || ny < 0 || nx >= W || ny >= H) return false;
-    const raw = gridOwner[ny * W + nx];
-    return gridCellIsCooling(raw) && gridCellOwner(raw) === owner;
-  };
-
-  for (let y = gMinY; y <= gMaxY; y++) {
-    for (let x = gMinX; x <= gMaxX; x++) {
-      const i = y * W + x;
-      const rawOwner = gridOwner[i];
-      // F5: старший бит = «клетка остывает, её ещё можно вернуть».
-      const cooling = gridCellIsCooling(rawOwner);
-      const o = cooling ? 0 : rawOwner;
-      const coolOwner = cooling ? gridCellOwner(rawOwner) : 0;
-      const t = trailOwner[i];
-
-      if (cooling) {
-        // Остывающая территория: полупрозрачная заливка, пунктирная граница,
-        // ритм пульса подсказывает, что время уходит.
-        // F5: плюс затухание по мере приближения к концу окна — чем ближе
-        // истечение, тем бледнее клетка и тем чаще пульс.
-        const px = offsetX + x * cell;
-        const py = offsetY + y * cell;
-        // Точное время истечения — из EventCoolBatch; клиентская оценка по
-        // первому увиденному кадру остаётся запасным вариантом.
-        const deadline = coolDeadlineByOwner.get(coolOwner) || 0;
-        const seen = coolSeenAt ? coolSeenAt[i] : 0;
-        const prog = deadline
-          ? Math.max(0, Math.min(1, 1 - (deadline - nowFrame) / RECLAIM_WINDOW_MS))
-          : seen
-            ? Math.max(0, Math.min(1, (nowFrame - seen) / RECLAIM_WINDOW_MS))
-            : 0;
-        const fade = 1 - prog * 0.8;
-        const rate = 0.005 + 0.012 * prog;
-        const pulse = 0.5 + 0.5 * Math.sin(nowFrame * rate - (x + y) * 0.35);
-        ctx.fillStyle = getOwnerFillStyle(coolOwner, (0.14 + 0.10 * pulse) * fade);
-        ctx.fillRect(px, py, cell, cell);
-        if (cell >= 7) {
-          // Альфа квантуется до 1/16 — иначе на каждую клетку приходился бы
-          // свой Path2D и группировка не давала бы выигрыша.
-          const aq = Math.max(1, Math.round((0.45 + 0.25 * pulse) * fade * 16)) / 16;
-          const key = getOwnerFillStyle(coolOwner, aq);
-          let path = coolPaths.get(key);
-          if (!path) {
-            path = new Path2D();
-            coolPaths.set(key, path);
-          }
-          const x1 = px + 0.5;
-          const y1 = py + 0.5;
-          const x2 = px + cell - 0.5;
-          const y2 = py + cell - 0.5;
-          if (!coolSame(x, y - 1, coolOwner)) {
-            path.moveTo(x1, y1);
-            path.lineTo(x2, y1);
-          }
-          if (!coolSame(x, y + 1, coolOwner)) {
-            path.moveTo(x1, y2);
-            path.lineTo(x2, y2);
-          }
-          if (!coolSame(x - 1, y, coolOwner)) {
-            path.moveTo(x1, y1);
-            path.lineTo(x1, y2);
-          }
-          if (!coolSame(x + 1, y, coolOwner)) {
-            path.moveTo(x2, y1);
-            path.lineTo(x2, y2);
-          }
-        }
-      }
-
-      if (o === you && headCX >= 0) {
-        const hdx = x - headCX;
-        const hdy = y - headCY;
-        const hd = hdx * hdx + hdy * hdy;
-        if (hd < nearHomeD) {
-          nearHomeD = hd;
-          nearHomeX = x;
-          nearHomeY = y;
-        }
-      }
-
-      if (o !== 0) {
-        const baseA = 0.58;
-        const filledAt = gridFillAt ? gridFillAt[i] : 0;
-        const age = filledAt ? nowFrame - filledAt : 1e9;
-
-        let waveA = 0;
-        if (filledAt && age >= fillAnimMs) {
-          const t = age - fillAnimMs;
-          if (t < wavePeriodMs) {
-            const wave = 0.5 + 0.5 * Math.sin((x * 0.85 + y * 1.15) * waveScale - t * waveSpeed);
-            const fade = 1 - (t / wavePeriodMs);
-            waveA = waveAlpha * wave * fade;
-          }
-        }
-
-        const px = offsetX + x * cell;
-        const py = offsetY + y * cell;
-        const tid = terrByOwner.get(o) || 0;
-
-        // Одна альфа на все три фазы (появление / анимация заливки / покой),
-        // чтобы стиль территории подключался ровно в одном месте.
-        let a;
-        let shineA = 0;
-        if (age < 0) {
-          a = 0.12 + waveA * 0.35;
-        } else if (age < fillAnimMs) {
-          const p = Math.max(0, Math.min(1, age / fillAnimMs));
-          a = Math.min(0.92, baseA * (0.25 + 0.75 * p) + waveA * 0.5);
-          shineA = 0.18 * (1 - Math.abs(p - 0.5) * 2);
-        } else {
-          a = Math.min(0.92, baseA + waveA);
-        }
-        if (tid) a = Math.max(0, Math.min(1, a + cosTerrAlphaMod(tid, x, y, nowFrame)));
-
-        const pat = tid ? terrStyleByOwner.get(o) : null;
-        if (pat) {
-          // try/finally, а не просто парные присваивания до/после: без него
-          // исключение внутри fillRect (например, битый CanvasPattern) оставит
-          // globalCompositeOperation залипшим на 'lighter' до конца сессии —
-          // ничего не сбрасывает его в начале кадра, и вся дальнейшая
-          // отрисовка тем же ctx (территория, HUD) начнёт светлеть.
-          const additive = cosTerrIsAdditive(tid);
-          if (additive) ctx.globalCompositeOperation = 'lighter';
-          try {
-            ctx.globalAlpha = a;
-            ctx.fillStyle = pat;
-            ctx.fillRect(px, py, cell, cell);
-          } finally {
-            ctx.globalAlpha = 1;
-            if (additive) ctx.globalCompositeOperation = 'source-over';
-          }
-        } else {
-          ctx.fillStyle = getOwnerFillStyle(o, a);
-          ctx.fillRect(px, py, cell, cell);
-        }
-
-        if (shineA > 0.01) {
-          ctx.fillStyle = getOwnerFillStyle(o, Math.min(0.92, 0.22 + shineA + waveA * 0.35));
-          const inset = Math.max(1, (cell * 0.18) | 0);
-          ctx.fillRect(px + inset, py + inset, cell - inset * 2, cell - inset * 2);
-        }
-
-        // Витраж: светящийся шов только по внешней границе владения.
-        if (tid === 5 && cell >= 7) {
-          let e = 0;
-          if (y === 0 || gridOwner[i - W] !== o) e |= 1;
-          if (x === W - 1 || gridOwner[i + 1] !== o) e |= 2;
-          if (y === H - 1 || gridOwner[i + W] !== o) e |= 4;
-          if (x === 0 || gridOwner[i - 1] !== o) e |= 8;
-          if (e) drawTerrSeam(ctx, px, py, cell, hslByOwner.get(o) || 'hsl(210 20% 60%)', e, 0.75);
-        }
-      }
-
-      if (t !== 0) {
-        const mineTrail = t === you;
-        let a = mineTrail ? ownTrailA : otherTrailA;
-        if (headIndexByOwner.get(t) === i) a *= interp;
-        if (a > 0.02) {
-          const segId = segByOwner.get(t) || 0;
-          const px = offsetX + x * cell;
-          const py = offsetY + y * cell;
-          // Единый источник правды: тот же drawSegTile, что и в магазине.
-          drawSegTile(ctx, px, py, cell, hslByOwner.get(t) || 'hsl(210 20% 60%)', segId, x * 31 + y * 17, a, nowFrame);
-
-          if (mineTrail && drawOwnOutline) {
-            ctx.strokeStyle = ownTrailStroke;
-            ctx.lineWidth = 1;
-            ctx.strokeRect(px + 1.5, py + 1.5, cell - 3, cell - 3);
-          }
-        }
-      }
-    }
-  }
-
-  // C10: один save/restore и один setLineDash на весь кадр вместо одного на клетку.
-  if (coolPaths.size) {
-    const dash = Math.max(2, cell * 0.22);
-    ctx.save();
-    ctx.setLineDash([dash, dash]);
-    ctx.lineDashOffset = -nowFrame * 0.02;
-    ctx.lineWidth = 1;
-    for (const [style, path] of coolPaths) {
-      ctx.strokeStyle = style;
-      ctx.stroke(path);
-    }
-    ctx.restore();
-    coolPaths.clear();
-  }
-
-  if (nearHomeX >= 0) {
-    youNearestHomeX = nearHomeX;
-    youNearestHomeY = nearHomeY;
+  if (terrainResult.hasNearHome) {
+    youNearestHomeX = terrainResult.nearHomeX;
+    youNearestHomeY = terrainResult.nearHomeY;
     youNearestHomeAt = nowFrame;
-  }
-
-  {
-    // Сетка в бренд-гамме: чистый белый на #060a12 читался холодным «дребезгом».
-    ctx.strokeStyle = 'rgba(120,220,190,0.055)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    const step = cell >= 16 ? 1 : 2;
-    for (let x = minX; x <= maxX; x += step) {
-      const px = offsetX + x * cell;
-      ctx.moveTo(px, offsetY + minY * cell);
-      ctx.lineTo(px, offsetY + (maxY + 1) * cell);
-    }
-    ctx.stroke();
-    ctx.beginPath();
-    for (let y = minY; y <= maxY; y += step) {
-      const py = offsetY + y * cell;
-      ctx.moveTo(offsetX + minX * cell, py);
-      ctx.lineTo(offsetX + (maxX + 1) * cell, py);
-    }
-    ctx.stroke();
   }
 
   /* K1: туман за пределами ROI. Рисуется после сетки и до рамки карты, чтобы
@@ -7834,155 +7580,12 @@ function draw() {
     }
   }
 
-  ctx.font = `12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-
-  for (const p of clientState.lastState.players) {
-    if (!p.a) continue;
-    const ip = getInterpPlayer(p.n, interp) || { ...p, ix: p.x, iy: p.y };
-    const c = boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)');
-    const px = offsetX + (ip.ix + 0.5) * cell;
-    const py = offsetY + (ip.iy + 0.5) * cell;
-
-    const [dx, dy] = dirVec(ip.d);
-    if (fxEnabled && p.n === you && speedActive) {
-      ctx.save();
-      ctx.globalAlpha = 0.55 * (0.35 + fxIntensity * 0.65);
-      ctx.strokeStyle = c;
-      ctx.shadowColor = c;
-      ctx.shadowBlur = Math.max(10, cell * 0.9);
-      ctx.lineWidth = Math.max(2, cell * 0.14);
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(px, py);
-      ctx.lineTo(px - dx * cell * 0.85, py - dy * cell * 0.85);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    const isBounty = !!(bountyTarget && p.n === bountyTarget);
-    // Байт `sh` — битовая маска: бит0 = щит, бит1 = неуязвимость после респавна.
-    const shMask = Number(ip.sh) || 0;
-    const hasShield = (shMask & 1) !== 0;
-    const hasInvuln = (shMask & 2) !== 0;
-    const hasSpeed = !!(p.n === you && speedActive);
-    const speedType = hasSpeed ? (youSpeedType === 4 ? 4 : 2) : 0;
-
-    if (hasInvuln) {
-      const tt = performance.now() * 0.010 + (p.n % 997) * 0.02;
-      const pulse = 0.5 + 0.5 * Math.sin(tt);
-      ctx.save();
-      ctx.globalAlpha = 0.30 + 0.30 * pulse;
-      ctx.setLineDash([Math.max(2, cell * 0.14), Math.max(2, cell * 0.12)]);
-      ctx.lineDashOffset = -performance.now() * 0.04;
-      ctx.strokeStyle = 'rgba(255,255,255,0.92)';
-      ctx.lineWidth = Math.max(1, cell * 0.07);
-      ctx.beginPath();
-      ctx.arc(px, py, cell * (0.54 + 0.04 * pulse), 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (hasShield) {
-      const tt = performance.now() * 0.004 + (p.n % 997) * 0.01;
-      const pulse = 0.5 + 0.5 * Math.sin(tt);
-      const rr = cell * (0.46 + 0.04 * pulse);
-      ctx.save();
-      ctx.globalAlpha = 0.22 + 0.18 * pulse;
-      ctx.strokeStyle = 'rgba(120,200,255,0.95)';
-      ctx.shadowColor = 'rgba(120,200,255,0.95)';
-      ctx.shadowBlur = Math.max(10, cell * 0.8);
-      ctx.lineWidth = Math.max(2, cell * 0.10);
-      ctx.beginPath();
-      ctx.arc(px, py, rr, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (hasSpeed) {
-      const tt = performance.now() * 0.006 + (p.n % 997) * 0.02;
-      const pulse = 0.5 + 0.5 * Math.sin(tt);
-      const rr = cell * (speedType === 4 ? (0.64 + 0.035 * pulse) : (0.60 + 0.03 * pulse));
-      ctx.save();
-      ctx.globalAlpha = (speedType === 4 ? 0.18 : 0.16) + (speedType === 4 ? 0.14 : 0.12) * pulse;
-      ctx.strokeStyle = speedType === 4 ? 'rgba(190,150,255,0.94)' : 'rgba(255,215,0,0.92)';
-      ctx.shadowColor = speedType === 4 ? 'rgba(190,150,255,0.85)' : 'rgba(255,215,0,0.75)';
-      ctx.shadowBlur = Math.max(8, cell * (speedType === 4 ? 0.85 : 0.7));
-      ctx.lineWidth = Math.max(2, cell * (speedType === 4 ? 0.095 : 0.08));
-      if (speedType === 4) {
-        ctx.beginPath();
-        ctx.arc(px, py, rr, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha *= 0.60;
-        ctx.lineWidth = Math.max(1, cell * 0.06);
-        ctx.beginPath();
-        ctx.arc(px, py, rr * 0.82, 0, Math.PI * 2);
-        ctx.stroke();
-      } else {
-        ctx.setLineDash([Math.max(2, cell * 0.10), Math.max(2, cell * 0.10)]);
-        ctx.lineDashOffset = -performance.now() * 0.02;
-        ctx.beginPath();
-        ctx.arc(px, py, rr, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
-    // Голова и направляющий нос — единый drawHead, тот же и в магазине.
-    drawHead(ctx, px, py, cell, c, ip.cosHead, dx, dy, nowFrame);
-
-    if (isBounty) {
-      ctx.save();
-      ctx.strokeStyle = 'rgba(255,80,80,0.95)';
-      ctx.lineWidth = Math.max(2, cell * 0.11);
-      ctx.setLineDash([Math.max(3, cell * 0.16), Math.max(2, cell * 0.10)]);
-      ctx.lineDashOffset = -performance.now() * 0.03;
-      ctx.shadowColor = 'rgba(255,80,80,0.75)';
-      ctx.shadowBlur = Math.max(10, cell * 0.75);
-      ctx.beginPath();
-      ctx.arc(px, py, cell * 0.70, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (hasShield || hasSpeed || isBounty || hasInvuln) {
-      const badges = [];
-      if (hasInvuln) badges.push({ fill: 'rgba(255,255,255,0.95)', stroke: 'rgba(0,0,0,0.35)' });
-      if (hasShield) badges.push({ fill: 'rgba(120,200,255,0.95)', stroke: 'rgba(255,255,255,0.25)' });
-      if (hasSpeed) badges.push({ fill: speedType === 4 ? 'rgba(190,150,255,0.95)' : 'rgba(255,215,0,0.95)', stroke: 'rgba(255,255,255,0.25)' });
-      if (isBounty) badges.push({ fill: 'rgba(255,80,80,0.95)', stroke: 'rgba(255,255,255,0.25)' });
-
-      const br = Math.max(2, cell * 0.075);
-      const gap = br * 2.25;
-      const bx0 = px - ((badges.length - 1) * gap) / 2;
-      const by = py - cell * 0.72;
-      ctx.save();
-      ctx.globalAlpha = 0.95;
-      ctx.shadowColor = 'rgba(0,0,0,0.35)';
-      ctx.shadowBlur = 6;
-      for (let i = 0; i < badges.length; i++) {
-        const b = badges[i];
-        const bx = bx0 + i * gap;
-        ctx.beginPath();
-        ctx.arc(bx, by, br, 0, Math.PI * 2);
-        ctx.fillStyle = b.fill;
-        ctx.fill();
-        ctx.lineWidth = Math.max(1, cell * 0.03);
-        ctx.strokeStyle = b.stroke;
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
-    /* Титул идёт перед ником — он виден всем, кто видит плашку.
-       C4: у бота перед титулом идёт глиф архетипа. В канвасе CSS-бейджа быть
-       не может, поэтому берём тот же символ, что рисует .botArch::before —
-       один знак, плашка от него почти не растёт, а «кто передо мной» читается
-       ещё до того, как бот что-то сделает. */
-    const archGlyph = botArchGlyph(ip.n);
-    const label = `${archGlyph ? `${archGlyph} ` : ''}${cosTitlePrefix(cosTitleByPlayer.get(ip.n) || 0)}${ip.nm ? String(ip.nm) : String(ip.n)}`;
-    // Плашка ника — единый drawNamePlate, тот же и в магазине.
-    drawNamePlate(ctx, label, px, py - cell * 0.58, c, ip.cosNameplate, 0.95, 12, nowFrame);
-  }
+  // Змеи/следы/nameplate-метки/индикаторы направления — см. client_draw.js:
+  // paintEntities().
+  paintEntities(ctx, cam, {
+    you, colors, fxEnabled, fxIntensity, bountyTarget, youSpeedType,
+    cosTitleByPlayer, getInterpPlayer, botArchGlyph, cosTitlePrefix
+  }, nowFrame);
 
   // I4: радар угрозы. Дуга по краю экрана в направлении чужой головы ближе
   // 25 клеток, пока игрок вне своей территории. Интенсивность растёт при сближении.

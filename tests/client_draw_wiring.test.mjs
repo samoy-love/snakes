@@ -124,6 +124,41 @@ test('computeDrawCamera() не читает идентификаторы, кот
   );
 });
 
+// paintTerrain() — вынесена из draw() (§ шаг «Отрисовка сетки/территорий»).
+// Как и computeDrawCamera(), не тянет ничего из client.js через замыкание —
+// всё приходит параметром deps, поэтому её верхний уровень собственный.
+test('paintTerrain() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'paintTerrain');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `paintTerrain() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
+// paintEntities() — вынесена из draw() (§ шаг «Отрисовка игроков/следов/
+// меток»). Как и computeDrawCamera()/paintTerrain(), не тянет ничего из
+// client.js через замыкание — всё приходит параметром state, поэтому её
+// верхний уровень собственный.
+test('paintEntities() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'paintEntities');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `paintEntities() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
 // handleStateBinary() — тот же класс риска: единый курсор чтения буфера `o`
 // двигается вручную по всей функции (§6.4 отчёта разведки от 2026-08-05),
 // и вынос куска вроде pickPlayerRecordSize должен оставить обвязку вокруг
