@@ -4647,7 +4647,18 @@ function renderRoomsList(rooms, emptyMessage) {
 
     const meta = document.createElement('div');
     meta.className = 'roomRowMeta';
-    meta.textContent = `${humans}/${limit}`;
+    if (humans === 0) {
+      meta.classList.add('isEmpty');
+      const countSpan = document.createElement('span');
+      countSpan.textContent = `${humans}/${limit}`;
+      const badge = document.createElement('span');
+      badge.className = 'roomEmptyBadge';
+      badge.textContent = t('rooms.badge_empty');
+      meta.appendChild(countSpan);
+      meta.appendChild(badge);
+    } else {
+      meta.textContent = `${humans}/${limit}`;
+    }
 
     const list = document.createElement('div');
     list.className = 'roomRowSub';
