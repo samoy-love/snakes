@@ -677,6 +677,7 @@ export function syncCosmeticsUiImpl(deps) {
     COSMETICS_TAB_ICON_BY_CAT,
     getCosmeticsCat,
     setCosmeticsCat,
+    getCosmeticsSelId,
     setCosmeticsSelId,
     getYouTitleId,
     cosmeticsEqForCat,
