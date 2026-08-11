@@ -15,6 +15,7 @@ import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
 import { filterAndSortRooms } from './client_rooms.js';
 import { renderRoomsList, renderRoomsEmpty, updateRoomsStats } from './client_rooms_ui.js';
 import { PLAYER_RECORD_SIZES, pickPlayerRecordSize } from './client_protocol.js';
+import { handlePlayersMessage } from './client_ws_handlers.js';
 import { trailVisualState } from './client_trail_style.js';
 import { DEATH_REASON, deathReasonSuffix } from './client_death.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
@@ -6007,102 +6008,19 @@ function handleStateBinary(buf) {
 
   // ROI update: type(1)=2, tick(4), players, rx/ry/rw/rh, dg, dt
   if (msgType === 2) {
-    if (o + 4 + 2 > bl) return;
-    const tick = dv.getUint32(o, true);
-    o += 4;
-    const pc = dv.getUint16(o, true);
-    o += 2;
-
-    const [perPlayerV4, perPlayerV3, perPlayerV2] = PLAYER_RECORD_SIZES;
-    const perPlayer = pickPlayerRecordSize(bl - o, pc);
-    if (perPlayer === null) return;
-    const players = [];
-    for (let k = 0; k < pc; k++) {
-      const n = dv.getUint16(o, true);
-      o += 2;
-      const x = dv.getUint16(o, true);
-      o += 2;
-      const y = dv.getUint16(o, true);
-      o += 2;
-      const d = dv.getUint8(o);
-      o += 1;
-      const a = dv.getUint8(o) === 1;
-      o += 1;
-      const s = dv.getUint16(o, true);
-      o += 2;
-      const p = dv.getUint16(o, true);
-      o += 2;
-      const hue = dv.getUint16(o, true);
-      o += 2;
-      let sh = 0;
-      let bot = 0;
-      let cosCaptureFx = 0;
-      let cosHead = 0;
-      let cosSeg = 0;
-      let cosNameplate = 0;
-      let cosFrame = 0;
-      if (perPlayer === perPlayerV2 || perPlayer === perPlayerV3) {
-        sh = dv.getUint8(o);
-        o += 1;
-      }
-      if (perPlayer === perPlayerV4) {
-        sh = dv.getUint8(o);
-        o += 1;
-      }
-      if (perPlayer === perPlayerV4) {
-        bot = dv.getUint8(o);
-        o += 1;
-      }
-      if (perPlayer === perPlayerV3 || perPlayer === perPlayerV4) {
-        cosCaptureFx = dv.getUint8(o);
-        o += 1;
-        cosHead = dv.getUint8(o);
-        o += 1;
-        cosSeg = dv.getUint8(o);
-        o += 1;
-        cosNameplate = dv.getUint8(o);
-        o += 1;
-        cosFrame = dv.getUint8(o);
-        o += 1;
-      }
-      const c = hueToHsl(hue);
-      if (bot) botIds.add(n);
-      players.push({
-        n,
-        x,
-        y,
-        d: DIR_NAMES[d] || 'right',
-        a,
-        c,
-        s,
-        p,
-        sh,
-        cosCaptureFx,
-        cosHead,
-        cosSeg,
-        cosNameplate,
-        cosFrame,
-        nm: displayNameOf(n, bot ? botDisplayName(n) : `${t('leaderboard.player')} ${n}`),
-        b: 0
-      });
-    }
-    const rx = dv.getUint16(o, true);
-    o += 2;
-    const ry = dv.getUint16(o, true);
-    o += 2;
-    const rw = dv.getUint16(o, true);
-    o += 2;
-    const rh = dv.getUint16(o, true);
-    o += 2;
-    const lenDG = dv.getUint32(o, true);
-    o += 4;
-    const lenDT = dv.getUint32(o, true);
-    o += 4;
-    if (o + lenDG + lenDT > bl) return;
-    const dg = buf.slice(o, o + lenDG);
-    o += lenDG;
-    const dt = buf.slice(o, o + lenDT);
-    onState({ full: false, tick, t: Date.now(), players, dg, dt, roi: { rx, ry, rw, rh } });
+    const nextO = handlePlayersMessage(dv, o, {
+      PLAYER_RECORD_SIZES,
+      pickPlayerRecordSize,
+      hueToHsl,
+      botIds,
+      DIR_NAMES,
+      displayNameOf,
+      botDisplayName,
+      t,
+      onState
+    });
+    if (nextO === null) return;
+    o = nextO;
     return;
   }
 
