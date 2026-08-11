@@ -949,6 +949,44 @@ func (r *Room) applyBotPersonality(p *Player, tier uint8, arch uint8) {
 		p.aiCaution = 0.35 + 0.40*r.rng.Float32()
 	}
 
+	// R4: the tier used to move reaction speed, sight and willingness to
+	// chase, and almost nothing about how much land a bot ends up holding.
+	// Measured over 12 matches x 3000 ticks the easy tier scored 760 points
+	// against 848 for hard — 12%, which is invisible in a results table; the
+	// difference showed up only in kills (3.3 against 5.5), so the three tiers
+	// read as three levels of aggression rather than three levels of skill.
+	//
+	// The two knobs that actually turn into territory are how far a bot runs
+	// before it starts looking for a way home, and how well it reads a trap.
+	// Both were tier-blind. They are not any more, and they move together on
+	// purpose: S4 already established that longer loops WITHOUT the survival
+	// profile to finish them make held territory go down, not up. So the hard
+	// tier gets range and trap awareness at once, and the easy tier loses
+	// both — which is also what makes an easy bot pleasant to hunt.
+	tierBait := float32(0)
+	switch p.aiTier {
+	case TierEasy:
+		p.aiCloseFrac -= 0.12
+		p.aiBudgetCap -= 6
+		tierBait = -0.15
+	case TierHard:
+		// The cap itself is not raised: past ~30 cells the extra length is
+		// paid for entirely in trail_cut deaths (S4). Hard gets to actually
+		// reach the existing ceiling, not a higher one.
+		p.aiCloseFrac += 0.07
+		tierBait = 0.15
+	}
+	if p.aiCloseFrac < 0.50 {
+		p.aiCloseFrac = 0.50
+	} else if p.aiCloseFrac > 0.95 {
+		p.aiCloseFrac = 0.95
+	}
+	if farmer && p.aiBudgetCap < BotTrailBudgetCap+1 {
+		// botTrailBudget floors the Farmer at BotTrailBudgetCap+1; a cap below
+		// that floor would quietly invert the two and undo the archetype.
+		p.aiBudgetCap = BotTrailBudgetCap + 1
+	}
+
 	// Place the bot inside its archetype band according to the tier, with a
 	// little jitter so same-tier siblings still differ.
 	span := budgetHi - budgetLo
@@ -980,6 +1018,7 @@ func (r *Room) applyBotPersonality(p *Player, tier uint8, arch uint8) {
 		// one that lets the long loop pay off instead of ending in a cut.
 		p.aiBaitSense = 0.70 + 0.30*r.rng.Float32()
 	}
+	p.aiBaitSense += tierBait // R4
 	p.aiRiskiness = 0.20 + 0.65*r.rng.Float32()
 	if p.aiCaution > 0.70 {
 		p.aiBaitSense += 0.12
