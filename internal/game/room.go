@@ -70,6 +70,17 @@ const (
 	MutatorPowerSurge    = 2
 )
 
+// Mutator schedule (R3). Anchors are shares of the match, each window opens
+// somewhere inside +/- mutatorJitterPercent of its anchor. At the default 3000
+// ticks that is 600/1500/2400 give or take 200, i.e. the historical timetable
+// with twenty seconds of slack either way. See rollMutatorSchedule.
+const (
+	MutatorDuration      = 240
+	mutatorJitterPercent = 7
+)
+
+var mutatorAnchorPercent = [3]int{20, 50, 80}
+
 // Кадансы снапшота: как часто клиенту уходит полный кадр вместо дельты и с
 // какого объёма изменений дельта перестаёт быть выгодной. Это политика тика, а
 // не формат, поэтому живёт здесь, а не в protocol.
@@ -447,6 +458,7 @@ func (r *Room) resetMatchLocked() {
 	r.bountyCooldownUntil = 0
 	r.mutatorType = MutatorNone
 	r.mutatorUntil = 0
+	r.rollMutatorSchedule()
 	r.powerUps = r.powerUps[:0]
 	r.nextPowerUpID = 1
 
@@ -675,15 +687,61 @@ func (r *Room) maybeUpdateMutator() {
 	// MatchDuration+Intermission ticks, so a room-relative phase drifted every
 	// match and windows that landed in the intermission were lost entirely.
 	if r.mutatorType == MutatorNone {
-		el := r.matchElapsed()
-		if el == 600 || el == 1500 || el == 2400 {
-			pick := uint8(1 + r.rng.Intn(2))
-			r.mutatorType = pick
-			metrics.MutatorsActivatedTotal.Inc(mutatorLabel(pick))
-			r.mutatorUntil = r.tick + 240
-			r.pushEvent(Event{Kind: EventMutatorStart, D: r.mutatorType, C: r.mutatorUntil})
-			r.metaDirty = true
+		// The first match of a room never goes through resetMatchLocked, so
+		// the schedule is rolled on first use rather than at construction:
+		// that way it is also there for a Room assembled field by field.
+		if r.mutatorAt == ([3]uint32{}) {
+			r.rollMutatorSchedule()
 		}
+		el := r.matchElapsed()
+		for _, at := range r.mutatorAt {
+			if at != 0 && el == at {
+				pick := uint8(1 + r.rng.Intn(2))
+				r.mutatorType = pick
+				metrics.MutatorsActivatedTotal.Inc(mutatorLabel(pick))
+				r.mutatorUntil = r.tick + MutatorDuration
+				r.pushEvent(Event{Kind: EventMutatorStart, D: r.mutatorType, C: r.mutatorUntil})
+				r.metaDirty = true
+				break
+			}
+		}
+	}
+}
+
+// rollMutatorSchedule picks when this match's mutator windows open.
+//
+// R3: the three windows used to be the literals 600/1500/2400 of every match
+// ever played. Which of the two mutators fired was random, when it fired was
+// not, and after an hour of play a player simply knew the timetable. The
+// anchors are now shares of the match — at the default 3000 ticks they still
+// land on 600/1500/2400 — and each is drawn inside a band around its anchor.
+// The number of windows per match does not change, only their timing.
+//
+// Deriving the anchors from MatchDurationTicks also fixes here the bug F4
+// fixed for the phase arc: with a short MATCH_DURATION_TICKS the hardcoded
+// 2400 sat past the end of the match and the third window never opened.
+func (r *Room) rollMutatorSchedule() {
+	jitter := int(MatchDurationTicks) * mutatorJitterPercent / 100
+	// The last tick at which a window may open and still close inside the
+	// match. Everything is clamped to it, so a very short match degrades to
+	// overlapping anchors rather than to windows that never fire.
+	last := int(MatchDurationTicks) - MutatorDuration
+	for i, pct := range mutatorAnchorPercent {
+		at := int(MatchDurationTicks) * pct / 100
+		// A Room assembled field by field may have no rng yet; an unjittered
+		// schedule is the right fallback, a nil deref is not.
+		if jitter > 0 && r.rng != nil {
+			at += r.randInt(-jitter, jitter)
+		}
+		// Never at elapsed 0: matchElapsed() is 0 on the reset tick itself,
+		// and the window would open before anyone has moved.
+		if at < 1 {
+			at = 1
+		}
+		if last >= 1 && at > last {
+			at = last
+		}
+		r.mutatorAt[i] = uint32(at)
 	}
 }
 
