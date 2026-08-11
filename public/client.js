@@ -3102,8 +3102,12 @@ const RIGHT_TEAM_OPEN_KEY = 'rightTeamOpen';
 function initRightDetailsState() {
   // Раньше обе панели по умолчанию открывались одновременно (open = true у
   // обеих) и постоянно съедали место у миникарты — переключателя между ними
-  // (data-tab) не было, а он и не работал. Оставляем открытой по умолчанию
-  // только «Матч»: «Команда» — по явному клику, как и предполагает <details>.
+  // (data-tab) не было, а он и не работал. На десктопе (min-width: 721px,
+  // тот же брейкпоинт, что и в CSS-раскладке сайдбара) места достаточно —
+  // «Матч» и «Игроки» открыты одновременно по умолчанию. На мобильном
+  // раскрытой по умолчанию остаётся только «Матч», «Команда» — по явному
+  // клику, как и раньше.
+  const isDesktop = window.matchMedia('(min-width: 721px)').matches;
   const initOne = (el, key, defaultOpen) => {
     if (!el) return;
     let open = defaultOpen;
@@ -3125,7 +3129,7 @@ function initRightDetailsState() {
   };
 
   initOne(rightMatchDetailsEl, RIGHT_MATCH_OPEN_KEY, true);
-  initOne(rightTeamDetailsEl, RIGHT_TEAM_OPEN_KEY, false);
+  initOne(rightTeamDetailsEl, RIGHT_TEAM_OPEN_KEY, isDesktop);
 }
 
 initRightDetailsState();
@@ -8839,8 +8843,14 @@ function renderMetaHud() {
     return;
   }
 
-  // Раскрытое состояние блока «Подробнее» переживает пересборку.
-  const wasOpen = !!metaHudEl.querySelector('details.metaDetails')?.open;
+  // Раскрытое состояние блока «Подробнее» переживает пересборку. Если
+  // панель ещё ни разу не собиралась в этой сессии — стартуем раскрытой на
+  // десктопе (там серия киллов и дневные задания видны без лишнего клика) и
+  // свёрнутой на мобильном (места мало, как и раньше).
+  const priorMetaDetails = metaHudEl.querySelector('details.metaDetails');
+  const wasOpen = priorMetaDetails
+    ? priorMetaDetails.open
+    : window.matchMedia('(min-width: 721px)').matches;
 
   metaHudEl.style.display = '';
   const frag = document.createDocumentFragment();
