@@ -3,6 +3,20 @@
    поздние правила перекрывают ранние порядком, а не !important,
    поэтому index.html подключает их строго по номеру. */
 
+/* Display-шрифт для крупных чисел и заголовков (KPI итогов, титулы оверлеев,
+   «Змейки» на главном экране) — self-hosted, без рантайм-зависимости от CDN.
+   Exo 2: OFL, поддерживает кириллицу (сайт на ru/en), геометричный технo-рисунок
+   ложится в язык редизайна «неоновый сад» (11-redesign.css). Только 800 —
+   все три места, где применяется --font-display, сами на этом начертании,
+   второй файл никогда не запрашивался. */
+@font-face {
+  font-family: "Exo 2";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("../fonts/exo2-800.woff2") format("woff2");
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -119,6 +133,9 @@ html, body {
    --fs-title: 18px;
    --fs-body: 15px;
    --fs-meta: 13px;
+   /* Акцентный display-шрифт — только для крупных чисел и заголовков,
+      не для всего сайта (см. @font-face выше). */
+   --font-display: "Exo 2", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
    --z-game: 0;
    --z-hud: 10;
    --z-minimap: 10;

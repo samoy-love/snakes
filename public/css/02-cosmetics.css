@@ -733,6 +733,7 @@
 
  /* H7: заголовок оверлея — верхний уровень иерархии */
  .overlayTitle {
+   font-family: var(--font-display);
    font-weight: 800;
    font-size: clamp(32px, 7vw, 56px);
    line-height: 1.05;
@@ -1043,6 +1044,7 @@
  }
 
  .matchKpiValue {
+  font-family: var(--font-display);
   font-size: var(--fs-lead);
   font-weight: 800;
   letter-spacing: 0.2px;
@@ -1080,6 +1082,7 @@
  }
 
  .matchMiniValue {
+  font-family: var(--font-display);
   font-size: var(--fs-body);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
