@@ -503,8 +503,8 @@ func TestGrantDailyRewardsScalesWithStreakAndDoesNotFeedItself(t *testing.T) {
 
 // Ловит: дубли кодов, коды за пределами uint32-маски и потерю правила.
 func TestAchievementRulesAreWellFormed(t *testing.T) {
-	if len(achvRules) != 21 {
-		t.Fatalf("правил ачивок %d, ожидался 21", len(achvRules))
+	if len(achvRules) != 22 {
+		t.Fatalf("правил ачивок %d, ожидался 22", len(achvRules))
 	}
 	seen := map[uint8]bool{}
 	for _, ru := range achvRules {

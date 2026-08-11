@@ -27,6 +27,7 @@ type Profile struct {
 	DayIncomeDay int64  `json:"dayIncomeDay"`
 
 	TotalKills       uint32 `json:"totalKills"`
+	TotalMatches     uint32 `json:"totalMatches"`
 	TotalPickups     uint32 `json:"totalPickups"`
 	TotalCapture     uint32 `json:"totalCapture"`
 	TotalBounty      uint32 `json:"totalBounty"`

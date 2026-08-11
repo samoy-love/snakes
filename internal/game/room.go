@@ -2194,6 +2194,12 @@ func (r *Room) step() {
 				if p == nil {
 					continue
 				}
+				if pr := profiles.ForKeyCreate(p.profileKey); pr != nil {
+					profiles.Mu.Lock()
+					pr.TotalMatches++
+					profiles.Mu.Unlock()
+					profiles.MarkDirty()
+				}
 				switch {
 				case mr.Place == 1:
 					r.addStyle(p, StylePlace1, StyleWin)
