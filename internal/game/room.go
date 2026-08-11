@@ -2607,9 +2607,18 @@ func (r *Room) step() {
 		sharedEventsPD = eventsPD
 	}
 	sendStartedAt := time.Now()
+	bwSampled := false
 	for _, req := range reqs {
 		c := req.c
 		if pd, ok := roiMsgs[c]; ok {
+			// G-bw: byte-счёт снимаем один раз за тик, с первого клиента в
+			// списке (не бота) — ROI у каждого свой (viewport разный), но
+			// порядок величины один и тот же для представления «сколько
+			// реально скачивает один игрок».
+			if !bwSampled {
+				bwSampled = true
+				r.bwROIBytes += int64(len(pd.B))
+			}
 			if len(c.sendCh) < cap(c.sendCh)-2 {
 				if c.sendBinaryPooled(pd, true) {
 					c.mu.Lock()
@@ -2633,6 +2642,36 @@ func (r *Room) step() {
 			incPooledRef(sharedEventsPD)
 			_ = c.sendBinaryPooled(sharedEventsPD, true)
 		}
+	}
+	if minimapPD != nil {
+		r.bwMinimapBytes += int64(len(minimapPD.B))
+	}
+	if sharedEventsPD != nil {
+		r.bwEventsBytes += int64(len(sharedEventsPD.B))
+	}
+	// G-bw: окно ~10с (100 тиков) — достаточно, чтобы усреднить всплески
+	// захватов, и не настолько долго, чтобы ждать полчаса на диагностику.
+	const bwWindowTicks = 100
+	if r.bwWindowStart == 0 {
+		r.bwWindowStart = tickNow
+	} else if tickNow-r.bwWindowStart >= bwWindowTicks {
+		windowSec := float64(tickNow-r.bwWindowStart) * TickMS / 1000
+		if windowSec > 0 && len(clients) > 0 {
+			log.Printf(
+				"bandwidth_breakdown room=%d window_s=%.1f roi_kbps=%.2f minimap_kbps=%.2f events_kbps=%.2f total_kbps=%.2f clients=%d",
+				r.id,
+				windowSec,
+				float64(r.bwROIBytes)/1024/windowSec,
+				float64(r.bwMinimapBytes)/1024/windowSec,
+				float64(r.bwEventsBytes)/1024/windowSec,
+				float64(r.bwROIBytes+r.bwMinimapBytes+r.bwEventsBytes)/1024/windowSec,
+				len(clients),
+			)
+		}
+		r.bwROIBytes = 0
+		r.bwMinimapBytes = 0
+		r.bwEventsBytes = 0
+		r.bwWindowStart = tickNow
 	}
 	sendDur = time.Since(sendStartedAt)
 	if minimapPD != nil {

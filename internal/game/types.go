@@ -72,6 +72,15 @@ type Room struct {
 	// кодер протокола.
 	minimapCur protocol.MinimapCursor
 
+	// G-bw: разбивка исходящего трафика по типам пакетов, на одного условного
+	// клиента (первого человека в комнате на тике) — жалоба «70 КБ/с, откуда
+	// столько» не подтверждалась расчётом по коду без реальных цифр.
+	// Копится bwWindowTicks тиков, затем логируется как КБ/с и обнуляется.
+	bwROIBytes     int64
+	bwMinimapBytes int64
+	bwEventsBytes  int64
+	bwWindowStart  uint32
+
 	events []Event
 
 	metaDirty    bool
