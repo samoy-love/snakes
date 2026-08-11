@@ -235,6 +235,14 @@ html, body {
    z-index: var(--z-toasts-top);
  }
 
+ /* UX32: миникарта — единственный оверлей, который сам занимает весь экран
+    полезной картой; z-toasts-top выше подтягивал тосты заданий поверх неё
+    в нижнем левом углу. Прячем их на время просмотра миникарты, механика
+    тостов не трогается — они просто переживут закрытие оверлея. */
+ body:has(#minimapOverlay:not(.hidden)) #eventToasts {
+   display: none;
+ }
+
  .overlay.hidden {
    display: none;
  }
@@ -481,9 +489,11 @@ html, body {
    display: flex;
    align-items: center;
    justify-content: space-between;
+   flex-wrap: wrap;
    gap: 10px;
    margin-top: 10px;
    margin-bottom: 10px;
+   min-width: 0;
  }
 
  .roomsStats {
@@ -494,14 +504,19 @@ html, body {
  .roomsControls {
    display: flex;
    align-items: center;
+   flex-wrap: wrap;
    gap: 8px;
+   min-width: 0;
+   max-width: 100%;
  }
 
  .roomsSearchWrap {
    position: relative;
    display: flex;
    align-items: center;
+   flex: 1 1 170px;
    min-width: 0;
+   max-width: 100%;
  }
 
  .roomsSearchWrap input {
@@ -525,10 +540,16 @@ html, body {
    color: var(--text);
    outline: none;
    min-height: var(--control-h);
+   min-width: 0;
+   max-width: 100%;
  }
 
  .roomsControls input {
-   width: 170px;
+   width: 100%;
+ }
+
+ .roomsControls select {
+   flex: 1 1 140px;
  }
 
  .roomsControls input:focus-visible,
@@ -699,6 +720,23 @@ html, body {
    color: var(--muted);
    font-variant-numeric: tabular-nums;
    flex: 0 0 auto;
+ }
+
+ .roomRowMeta.isEmpty {
+   display: inline-flex;
+   align-items: center;
+   gap: 0.35em;
+ }
+
+ .roomRowMeta .roomEmptyBadge {
+   font-size: var(--fs-11, 11px);
+   font-variant-numeric: normal;
+   color: var(--muted2);
+   background: rgba(255, 255, 255, 0.06);
+   border: 1px solid rgba(255, 255, 255, 0.1);
+   border-radius: 999px;
+   padding: 0.05em 0.55em;
+   line-height: 1.5;
  }
 
  .roomRowSub {
@@ -1009,5 +1047,25 @@ html, body {
 
  .cosmeticsItemSub.isBlocked {
    color: rgba(255, 140, 200, 0.92);
+ }
+
+ /* C14: подсказка эффекта бонуса на игровом поле — канвас не даёт нативный
+    title, поэтому лейбл рисуется отдельным элементом у курсора. */
+ .powerupTooltip {
+   position: fixed;
+   z-index: var(--z-overlay, 9000);
+   pointer-events: none;
+   padding: 4px 8px;
+   border-radius: 6px;
+   font-size: 12px;
+   font-weight: 600;
+   color: #fff;
+   background: rgba(0, 0, 0, 0.78);
+   border: 1px solid rgba(255, 255, 255, 0.18);
+   white-space: nowrap;
+ }
+
+ .powerupTooltip.hidden {
+   display: none;
  }
 

@@ -408,6 +408,14 @@
   max-height: min(30dvh, 260px);
 }
 
+/* Подсказка, что список игроков длиннее видимой области: тот же fade-приём,
+   что уже есть у ленты предметов магазина (.cosmeticsItems, 09-hud-details.css) —
+   низ плавно затемняется, mask лежит на самом скроллящемся контейнере. */
+#rightInfo > #rightTeamDetails > #teamHud {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
+}
+
 /* Блок событий закреплён: flex-shrink 0 — он не отдаёт высоту таблицам. */
 #rightInfo > #rightEventsDetails,
 #rightInfo > #killfeed {
@@ -415,10 +423,13 @@
 }
 
 /* Килфид рисует максимум 6 строк (client.js), новые — сверху. Ограничиваем
-   высоту четырьмя строками: переполнение срезает самые старые. */
+   высоту четырьмя строками: переполнение срезает самые старые. Тот же
+   fade-хинт снизу, что у списка игроков и ленты предметов магазина. */
 #rightInfo #killfeed {
   max-height: var(--killfeed-max, 152px);
   overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
 }
 
 /* При развёрнутом чате сайдбару оставалось ~260px — килфид ужимается до трёх

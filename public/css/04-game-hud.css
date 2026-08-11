@@ -291,6 +291,23 @@
   text-overflow: ellipsis;
  }
 
+ /* УХ16: таймер матча предупреждает цветом о приближении конца — жёлтый на
+    последних 30 с, красный (с лёгкой пульсацией) на последних 15 с. Класс
+    isUrgent уже выставлялся из client.js, но правила для него не было. */
+ .topHudTime.isUrgent {
+  color: #ffd166;
+ }
+
+ .topHudTime.isCritical {
+  color: #ff4d4d;
+  animation: topHudTimeCritical 1s ease-in-out infinite;
+ }
+
+ @keyframes topHudTimeCritical {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+ }
+
  .topHudKills {
   padding: 2px 8px;
   border-radius: 999px;

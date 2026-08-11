@@ -67,13 +67,15 @@ function evalArith(expr, where) {
     .reduce((a, b) => a + b, 0);
 }
 
-// Регион разбора пакета событий: от `if (msgType === 5) {` до фолбэка на
-// неизвестный тип события.
+// Регион разбора пакета событий: от `function handleEventsMessage(` (сама
+// разборка вынесена из msgType === 5 в public/client_ws_handlers.js, client.js
+// лишь вызывает её на месте своей ветки — как и handlePlayersMessage()/
+// handleMinimapMessage() выше) до фолбэка на неизвестный тип события.
 function eventsRegion() {
-  const start = src.indexOf('if (msgType === 5) {');
-  assert.notEqual(start, -1, 'в client.js не найден разбор пакета событий (msgType === 5)');
+  const start = src.indexOf('function handleEventsMessage(');
+  assert.notEqual(start, -1, 'не найден разбор пакета событий (handleEventsMessage)');
   const fallback = src.indexOf('unknownEventKindSeen.has(kind)', start);
-  assert.notEqual(fallback, -1, 'в client.js не найден фолбэк на неизвестный тип события');
+  assert.notEqual(fallback, -1, 'не найден фолбэк на неизвестный тип события');
   return { start, fallback, text: src.slice(start, fallback) };
 }
 
@@ -108,7 +110,12 @@ function cursorAdvance(body) {
 }
 
 function needValue(body, where) {
-  const m = body.match(/if \(!need\(([^)]*)\)\) return;/);
+  // `return null;` — тот же контракт «прервать разбор без побочных эффектов»,
+  // что и в handlePlayersMessage()/handleMinimapMessage() (public/client_ws_handlers.js):
+  // handleEventsMessage() возвращает null при нехватке байт, а не голый `return;`,
+  // потому что вызывающий код в client.js должен отличить «разбор не завершён»
+  // от «разбор завершён успешно, вот обновлённые поля».
+  const m = body.match(/if \(!need\(([^)]*)\)\) return(?: null)?;/);
   assert.ok(m, `${where}: нет охранной проверки need(...) — обработчик может читать за границей буфера`);
   return evalArith(m[1], where);
 }
@@ -181,7 +188,7 @@ test('client.js: заголовок пакета событий и запись 
 
   // Байт типа сообщения к этому моменту уже прочитан, поэтому охрана заголовка
   // на единицу меньше eventsHeaderBase.
-  const headNeed = head.match(/if \(!need\(([^)]*)\)\) return;/);
+  const headNeed = head.match(/if \(!need\(([^)]*)\)\) return(?: null)?;/);
   assert.ok(headNeed, 'нет охранной проверки заголовка пакета событий');
   assert.equal(
     evalArith(headNeed[1], 'заголовок событий'),
@@ -206,7 +213,7 @@ test('client.js: заголовок пакета событий и запись 
     'раскладка заголовка пакета событий разошлась с сервером'
   );
 
-  const puNeed = text.match(/if \(!need\(puCount \* (\d+) \+ 2\)\) return;/);
+  const puNeed = text.match(/if \(!need\(puCount \* (\d+) \+ 2\)\) return(?: null)?;/);
   assert.ok(puNeed, 'нет охранной проверки списка powerup');
   assert.equal(
     Number(puNeed[1]),
@@ -235,12 +242,30 @@ test('client.js: размер записи игрока в ROI совпадае�
 });
 
 test('client.js: разбор чанков миникарты', () => {
-  const start = src.indexOf('if (msgType === 4) {');
-  assert.notEqual(start, -1, 'в client.js не найден разбор чанков миникарты');
-  const block = src.slice(start, src.indexOf('if (msgType === 5) {', start));
+  // Разбор чанков живёт в handleMinimapMessage() (public/client_ws_handlers.js),
+  // client.js лишь вызывает её на месте своей ветки msgType === 4.
+  const fnStart = src.indexOf('function handleMinimapMessage(');
+  assert.notEqual(fnStart, -1, 'не найден разбор чанков миникарты (handleMinimapMessage)');
+  let depth = 0;
+  let bodyStart = -1;
+  let block = null;
+  for (let i = fnStart; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === '{') {
+      if (depth === 0) bodyStart = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        block = src.slice(bodyStart, i + 1);
+        break;
+      }
+    }
+  }
+  assert.ok(block, 'не нашли конец handleMinimapMessage()');
 
   // Заголовок: tick(4) + cw(1) + ch(1) + count(2) + flags(1); байт типа уже снят.
-  const head = block.match(/if \(o \+ ([\d\s+*]+) > bl\) return;/);
+  const head = block.match(/if \(o \+ ([\d\s+*]+) > bl\) return null;/);
   assert.ok(head, 'нет охранной проверки заголовка миникарты');
   assert.equal(
     evalArith(head[1], 'заголовок миникарты') + 4,

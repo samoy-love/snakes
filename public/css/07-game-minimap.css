@@ -38,6 +38,36 @@
   display: none;
 }
 
+/* УХ33: строки легенды — цветной кружок + подпись, шрифт/цвет наследуются от
+   .minimapLegend, свой список правил не нужен. */
+.minimapLegendRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.minimapLegendSwatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.minimapLegendMe {
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55);
+}
+
+.minimapLegendPlayer {
+  background: var(--brand2);
+}
+
+.minimapLegendBot {
+  background: var(--brand2);
+  opacity: 0.6;
+}
+
 #minimapOverlay {
   z-index: var(--z-modal);
 }

@@ -30,6 +30,8 @@ import { maskNonCode, extractDeclared, unknownIdentifiers } from './helpers/js_s
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_JS = readFileSync(path.join(__dirname, '../public/client.js'), 'utf8');
+const CLIENT_SHOP_UI_JS = readFileSync(path.join(__dirname, '../public/client_shop_ui.js'), 'utf8');
+const CLIENT_DRAW_JS = readFileSync(path.join(__dirname, '../public/client_draw.js'), 'utf8');
 
 function extractFunctionBody(source, name) {
   const start = source.indexOf(`function ${name}(`);
@@ -89,9 +91,11 @@ test('syncCosmeticsUi() не читает идентификаторы, кото
   );
 });
 
-test('renderCosmeticsSkeleton() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client.js', () => {
-  const masked = maskNonCode(CLIENT_JS);
-  const body = extractFunctionBody(masked, 'renderCosmeticsSkeleton');
+// Фаза 4.2: DOM-обвязка магазина (в т.ч. renderCosmeticsSkeletonImpl) переехала
+// в client_shop_ui.js — проверка идёт по её собственному верхнему уровню.
+test('renderCosmeticsSkeletonImpl() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_shop_ui.js', () => {
+  const masked = maskNonCode(CLIENT_SHOP_UI_JS);
+  const body = extractFunctionBody(masked, 'renderCosmeticsSkeletonImpl');
   const topLevel = extractDeclared(masked);
 
   const unknown = unknownIdentifiers(body, [...topLevel]);
@@ -99,7 +103,128 @@ test('renderCosmeticsSkeleton() не читает идентификаторы, 
   assert.deepEqual(
     unknown,
     [],
-    `renderCosmeticsSkeleton() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+    `renderCosmeticsSkeletonImpl() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
+// computeDrawCamera() — вынесена из draw() (§ шаг «Камера/зум/screenBounds»).
+// Живёт в своём файле и не тянет ничего из client.js через замыкание — все
+// значения приходят параметром deps, поэтому её верхний уровень собственный.
+test('computeDrawCamera() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'computeDrawCamera');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `computeDrawCamera() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
+// paintTerrain() — вынесена из draw() (§ шаг «Отрисовка сетки/территорий»).
+// Как и computeDrawCamera(), не тянет ничего из client.js через замыкание —
+// всё приходит параметром deps, поэтому её верхний уровень собственный.
+test('paintTerrain() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'paintTerrain');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `paintTerrain() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
+// paintEntities() — вынесена из draw() (§ шаг «Отрисовка игроков/следов/
+// меток»). Как и computeDrawCamera()/paintTerrain(), не тянет ничего из
+// client.js через замыкание — всё приходит параметром state, поэтому её
+// верхний уровень собственный.
+test('paintEntities() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'paintEntities');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `paintEntities() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
+// paintFieldFx() — вынесена из draw() (§ шаг «Отрисовка FX-частиц/вспышек
+// поверх поля»). Как и computeDrawCamera()/paintTerrain()/paintEntities(), не
+// тянет ничего из client.js через замыкание — всё приходит параметром deps,
+// поэтому её верхний уровень собственный.
+test('paintFieldFx() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'paintFieldFx');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `paintFieldFx() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
+// paintPowerUps() — вынесена из draw() (§ шаг «Отрисовка пауэрапов поля»).
+// Как и остальные paint*() этого файла, не тянет ничего из client.js через
+// замыкание — powerUps/approxNowTick/OFFSCREEN_MARGIN_CELLS приходят deps.
+test('paintPowerUps() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'paintPowerUps');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `paintPowerUps() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
+// paintBursts() — вынесена из draw() (§ шаг «Отрисовка всплесков fxBursts»).
+// Как и остальные paint*() этого файла, не тянет ничего из client.js через
+// замыкание — bursts/цвета/хелперы рисования приходят deps.
+test('paintBursts() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'paintBursts');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `paintBursts() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
+// renderPerfPanel() — вынесена из конца draw() (§ шаг «Панель #perf в конце
+// draw()»). Как и остальные функции этого файла, не тянет ничего из
+// client.js через замыкание — метрики и t() приходят параметрами.
+test('renderPerfPanel() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'renderPerfPanel');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `renderPerfPanel() читает необъявленные идентификаторы: ${unknown.join(', ')}`
   );
 });
 

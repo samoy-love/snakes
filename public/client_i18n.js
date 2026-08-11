@@ -202,10 +202,10 @@ export const I18N = {
 
     'death.reason_prefix': 'Причина',
     'death.killed_by': 'Вас убил',
-    'death.reason.cut': 'перерезал след',
-    'death.reason.headon': 'лобовое',
+    'death.reason.cut': 'враг перерезал ваш след',
+    'death.reason.headon': 'врезались в соперника лбом',
     'death.reason.selftrail': 'врезались в свой след',
-    'death.reason.wall': 'в стену',
+    'death.reason.wall': 'врезались в стену',
 
     'hud.objective': 'Цель',
     'hud.objective_capture': 'захват территории',
@@ -216,6 +216,7 @@ export const I18N = {
     'meta.leaderboard': 'Таблица',
     'meta.fight': 'Бой',
     'meta.tasks': 'Задания',
+    'meta.tasks_hint': 'Ежедневные задания — сбрасываются раз в сутки, прогресс не переносится между днями',
 
     'rooms.invalid_title': 'Некорректное название',
     'rooms.full': 'Комната заполнена',
@@ -225,6 +226,7 @@ export const I18N = {
     'rooms.empty': 'Комнат нет',
     'rooms.list_aria': 'Список комнат',
     'rooms.room': 'Комната',
+    'rooms.badge_empty': 'Пусто',
     'rooms.empty_loading_title': 'Обновляем список…',
     'rooms.empty_loading_desc': 'Пожалуйста, подождите',
     'rooms.empty_error_title': 'Не удалось загрузить комнаты',
@@ -320,6 +322,9 @@ export const I18N = {
 
     'minimap.title': 'Миникарта',
     'minimap.overlay_aria': 'Увеличенная миникарта',
+    'minimap.legend_me': 'Вы',
+    'minimap.legend_bot': 'Бот',
+    'minimap.legend_player': 'Игрок',
 
     'settings.fx_preset': 'Пресет эффектов',
     'settings.fx_preset_hint': 'Управляет тряской, вспышками, частицами и счётчиками. «Спокойно» включается автоматически при системном запрете анимаций.',
@@ -337,7 +342,17 @@ export const I18N = {
     'banner.jackpot': 'ДЖЕКПОТ',
     'banner.jackpot_sub': 'Огромный захват территории',
     'banner.revenge': 'МЕСТЬ',
+    'banner.revenge_sub': 'Убийство в ответ на вашу смерть',
     'banner.streak': 'СЕРИЯ',
+
+    'feed.died': 'погиб',
+    'feed.captured': 'захватил',
+    'feed.zone': 'зоны',
+    'feed.reclaimed': 'вернул',
+    'feed.revenge': 'МЕСТЬ',
+    'name.bot_fallback': 'Бот',
+    'name.item_fallback': 'Предмет',
+    'name.daily_fallback': 'Задание',
 
     'death.hint.cut': 'Твой след пересекли. Пока петля не замкнута, след уязвим — возвращайся в свою зону, чтобы забрать территорию.',
     'death.hint.headon': 'Лобовое столкновение. Не иди в голову чужой змейке — выживает тот, кто свернул.',
@@ -448,7 +463,7 @@ export const I18N = {
     'rooms.search_aria': 'Search rooms',
     'rooms.search_clear_aria': 'Clear search',
     'rooms.sort_aria': 'Sort rooms',
-    'rooms.sort_free': 'Free first',
+    'rooms.sort_free': 'Emptiest first',
     'rooms.sort_fill': 'By fullness',
     'rooms.sort_humans': 'By online',
     'rooms.sort_id': 'By number',
@@ -626,8 +641,8 @@ export const I18N = {
 
     'death.reason_prefix': 'Reason',
     'death.killed_by': 'Killed by',
-    'death.reason.cut': 'cut your trail',
-    'death.reason.headon': 'head-on',
+    'death.reason.cut': 'an opponent cut your trail',
+    'death.reason.headon': 'crashed head-on into an opponent',
     'death.reason.selftrail': 'hit your own trail',
     'death.reason.wall': 'hit a wall',
 
@@ -640,6 +655,7 @@ export const I18N = {
     'meta.leaderboard': 'Standings',
     'meta.fight': 'Fight',
     'meta.tasks': 'Tasks',
+    'meta.tasks_hint': 'Daily tasks — reset once every 24 hours, progress does not carry over between days',
 
     'rooms.invalid_title': 'Invalid title',
     'rooms.full': 'Room is full',
@@ -649,6 +665,7 @@ export const I18N = {
     'rooms.empty': 'No rooms',
     'rooms.list_aria': 'Room list',
     'rooms.room': 'Room',
+    'rooms.badge_empty': 'Empty',
     'rooms.empty_loading_title': 'Refreshing…',
     'rooms.empty_loading_desc': 'Please wait',
     'rooms.empty_error_title': 'Failed to load rooms',
@@ -722,6 +739,9 @@ export const I18N = {
 
     'minimap.title': 'Minimap',
     'minimap.overlay_aria': 'Expanded minimap',
+    'minimap.legend_me': 'You',
+    'minimap.legend_bot': 'Bot',
+    'minimap.legend_player': 'Player',
 
     'settings.fx_preset': 'Effects preset',
     'settings.fx_preset_hint': 'Controls shake, flashes, particles and count-ups. "Calm" turns on automatically when the system asks for reduced motion.',
@@ -739,7 +759,17 @@ export const I18N = {
     'banner.jackpot': 'JACKPOT',
     'banner.jackpot_sub': 'A massive land grab',
     'banner.revenge': 'REVENGE',
+    'banner.revenge_sub': 'A kill in return for your death',
     'banner.streak': 'STREAK',
+
+    'feed.died': 'died',
+    'feed.captured': 'captured',
+    'feed.zone': 'zone',
+    'feed.reclaimed': 'reclaimed',
+    'feed.revenge': 'REVENGE',
+    'name.bot_fallback': 'Bot',
+    'name.item_fallback': 'Item',
+    'name.daily_fallback': 'Daily',
 
     'death.hint.cut': 'Your trail was cut. Until the loop is closed the trail is vulnerable — get back into your own zone to bank the land.',
     'death.hint.headon': 'Head-on collision. Never drive into another head — the one who turns away survives.',

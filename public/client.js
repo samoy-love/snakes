@@ -1,3 +1,11 @@
+import { clientState } from './client_state.js';
+import { computeDrawCamera, paintBursts, paintEntities, paintFieldFx, paintPowerUps, paintTerrain, renderPerfPanel } from './client_draw.js';
+import {
+  ensureLeaderboardDom,
+  resetLeaderboardUi,
+  updateLeaderboard as renderLeaderboard
+} from './client_leaderboard.js';
+import { createChatUi } from './client_chat_ui.js';
 import { installErrorLogging } from './client_errors.js';
 import { createAudioModule } from './client_audio.js';
 import { createFxModule } from './client_fx.js';
@@ -5,10 +13,30 @@ import { createNetModule } from './client_net.js';
 import { BOT_NAMES_EN, BOT_NAMES_RU, EN, I18N, RU } from './client_i18n.js';
 import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
 import { filterAndSortRooms } from './client_rooms.js';
+import { renderRoomsList, renderRoomsEmpty, updateRoomsStats } from './client_rooms_ui.js';
 import { PLAYER_RECORD_SIZES, pickPlayerRecordSize } from './client_protocol.js';
+import { handlePlayersMessage, handleMinimapMessage, handleEventsMessage } from './client_ws_handlers.js';
 import { trailVisualState } from './client_trail_style.js';
 import { DEATH_REASON, deathReasonSuffix } from './client_death.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
+import {
+  obAnnounceShopImpl,
+  obBumpDeaths,
+  obDeathsSeen,
+  obFireEventImpl,
+  obGuideActiveImpl,
+  obResetMatch,
+  obSecondMatchPlus,
+  obTickImpl,
+  obUnlocked
+} from './client_onboarding.js';
+import {
+  renderDeathReasonImpl,
+  renderDeathStatsImpl,
+  renderMatchResultsImpl,
+  showDeathOverlayImpl,
+  updateDeathZoomImpl
+} from './client_death_ui.js';
 import {
   ROI_MARGIN_CELLS,
   VIEW_CELLS_X,
@@ -47,6 +75,17 @@ import {
   ownedCountFromMask
 } from './client_cos_model.js';
 import { buyButtonState, equipButtonState, visibleItems } from './client_cos_ui.js';
+import { renderMenuMetaImpl, showMenuOverlayImpl, updateMenuNameUiImpl } from './client_menu_ui.js';
+import {
+  COS_SCENE,
+  cosmeticsSelectItemImpl,
+  drawCosmeticsScene,
+  drawMiniCosmeticPreview as drawMiniCosmeticPreviewImpl,
+  hideCosmeticsOverlayImpl,
+  scheduleCosmeticsPreviewAnimImpl,
+  showCosmeticsOverlayImpl,
+  syncCosmeticsUiImpl
+} from './client_shop_ui.js';
 import {
   approxTickNow,
   formatClock,
@@ -54,7 +93,6 @@ import {
   formatInt,
   formatNumber as formatNumberIntl,
   formatPct1,
-  formatRate as formatRateOf,
   formatRemainMs,
   numberLocale as localeOf,
   remainMsToTick
@@ -77,6 +115,7 @@ import {
   drawTerrSeam,
   drawTerrTile
 } from './client_cos_draw.js';
+import { drawMinimap as drawMinimapImpl, setMinimapPixel } from './client_minimap.js';
 import {
   EMOJIS,
   clampInt,
@@ -92,167 +131,39 @@ import {
   setSafeEmojiHtml,
   setSafeHtml
 } from './client_util.js';
+import { renderMetaHudImpl, renderTeamHudImpl, renderTopHudImpl } from './client_hud.js';
+import {
+  applyFxPresetImpl,
+  applyHudSettingsImpl,
+  bindSettingsUiImpl,
+  ensureFxPresetControlImpl,
+  ensureSettingsStateImpl,
+  hideSettingsOverlayImpl,
+  resetSettingsStateImpl,
+  saveSettingsStateImpl,
+  showSettingsOverlayImpl
+} from './client_settings.js';
+import {
+  addShakeClassImpl,
+  addShakeImpl,
+  addToastImpl,
+  comboBreakImpl,
+  comboBumpImpl,
+  comboResetImpl,
+  fxFlashScreenImpl,
+  pushEventFeedImpl,
+  renderComboHudImpl,
+  renderKillfeedImpl,
+  showBigBannerImpl,
+  triggerHitstopImpl
+} from './client_fx_ui.js';
 
 installErrorLogging();
 
 const I18N_LANG_KEY = 'lang';
 
-const MINIMAP_ZONE_REFRESH_MIN_MS = 14000;
-const MINIMAP_ZONE_REFRESH_MAX_MS = 24000;
-
-const MINIMAP_TOP1_SWITCH_COOLDOWN_MS = 4500;
-
-const MINIMAP_ZONE_ICON_TOP1 = '👑';
-const MINIMAP_ZONE_ICON_BOUNTY = '🎯';
-
-let minimapTop1Zone = null;
-let minimapBountyZone = null;
-
-let minimapTop1PinnedId = 0;
-let minimapTop1NextSwitchAt = 0;
-let minimapLastBountyTarget = 0;
-
-function minimapZoneRadiusCells() {
-  const base = Math.round(Math.min(W, H) * 0.085);
-  return clampInt(base, 28, 90);
-}
-
-function rndDisk(r) {
-  const a = Math.random() * Math.PI * 2;
-  const rr = Math.sqrt(Math.random()) * r;
-  return { x: Math.cos(a) * rr, y: Math.sin(a) * rr };
-}
-
-function scheduleNextZoneUpdate(now) {
-  const span = MINIMAP_ZONE_REFRESH_MAX_MS - MINIMAP_ZONE_REFRESH_MIN_MS;
-  return now + MINIMAP_ZONE_REFRESH_MIN_MS + Math.random() * Math.max(0, span);
-}
-
-function ensureZoneState(prev, pid, px, py, now) {
-  const r = minimapZoneRadiusCells();
-
-  let needUpdate = !prev || prev.pid !== pid || prev.r !== r;
-  if (!needUpdate) {
-    if (now >= (prev.nextAt || 0)) needUpdate = true;
-  }
-
-  if (!needUpdate) return prev;
-
-  const off = rndDisk(r * 0.85);
-  const cx = clampInt((Number(px) || 0) + off.x, 0, Math.max(0, W - 1));
-  const cy = clampInt((Number(py) || 0) + off.y, 0, Math.max(0, H - 1));
-  return {
-    pid,
-    r,
-    cx,
-    cy,
-    trueX: Number(px) || 0,
-    trueY: Number(py) || 0,
-    nextAt: scheduleNextZoneUpdate(now)
-  };
-}
-
-function drawZoneCircle(cx, cy, r, stroke, fill, icon) {
-  if (cx < 0 || cy < 0 || cx >= W || cy >= H) return;
-
-  mmCtx.save();
-  mmCtx.beginPath();
-  mmCtx.arc(cx + 0.5, cy + 0.5, r, 0, Math.PI * 2);
-  mmCtx.fillStyle = fill;
-  mmCtx.fill();
-  mmCtx.strokeStyle = stroke;
-  mmCtx.lineWidth = 2;
-  mmCtx.stroke();
-
-  if (icon) {
-    mmCtx.font = '8px ui-sans-serif, system-ui, sans-serif';
-    mmCtx.textAlign = 'center';
-    mmCtx.textBaseline = 'middle';
-    mmCtx.fillStyle = 'rgba(0,0,0,0.70)';
-    mmCtx.fillText(icon, cx + 1.0, cy + 1.0);
-    mmCtx.fillStyle = 'rgba(255,255,255,0.92)';
-    mmCtx.fillText(icon, cx + 0.5, cy + 0.5);
-  }
-
-  mmCtx.restore();
-}
-
-function drawMinimapZones() {
-  if (!lastState?.players?.length) return;
-  const now = performance.now();
-
-  const ordered = computeTopSorted(lastState.players);
-  const candidateTop1 = ordered.find((p) => p && p.a) || null;
-  if (!candidateTop1) {
-    minimapTop1PinnedId = 0;
-    minimapTop1NextSwitchAt = 0;
-    minimapTop1Zone = null;
-  } else {
-    if (!minimapTop1PinnedId) {
-      minimapTop1PinnedId = candidateTop1.n;
-      minimapTop1NextSwitchAt = now + MINIMAP_TOP1_SWITCH_COOLDOWN_MS;
-    }
-
-    const pinned = lastState.players.find((p) => p && p.a && p.n === minimapTop1PinnedId) || null;
-    if (!pinned) {
-      minimapTop1PinnedId = candidateTop1.n;
-      minimapTop1NextSwitchAt = now + MINIMAP_TOP1_SWITCH_COOLDOWN_MS;
-      minimapTop1Zone = ensureZoneState(minimapTop1Zone, candidateTop1.n, candidateTop1.x, candidateTop1.y, now);
-    } else if (candidateTop1.n === minimapTop1PinnedId) {
-      minimapTop1Zone = ensureZoneState(minimapTop1Zone, pinned.n, pinned.x, pinned.y, now);
-    } else {
-      if (now >= minimapTop1NextSwitchAt) {
-        minimapTop1PinnedId = candidateTop1.n;
-        minimapTop1NextSwitchAt = now + MINIMAP_TOP1_SWITCH_COOLDOWN_MS;
-        minimapTop1Zone = ensureZoneState(minimapTop1Zone, candidateTop1.n, candidateTop1.x, candidateTop1.y, now);
-      } else {
-        minimapTop1Zone = ensureZoneState(minimapTop1Zone, pinned.n, pinned.x, pinned.y, now);
-      }
-    }
-  }
-
-  const btId = Number(bountyTarget) || 0;
-  if (btId !== (minimapLastBountyTarget || 0)) {
-    minimapLastBountyTarget = btId;
-    minimapBountyZone = null;
-  }
-
-  if (btId) {
-    const bt = lastState.players.find((p) => p && p.n === btId) || null;
-    if (!bt || !bt.a) {
-      minimapBountyZone = null;
-    } else {
-      minimapBountyZone = ensureZoneState(minimapBountyZone, bt.n, bt.x, bt.y, now);
-    }
-  } else {
-    minimapBountyZone = null;
-  }
-
-  if (minimapTop1Zone && minimapBountyZone && minimapTop1Zone.pid === minimapBountyZone.pid) {
-    minimapTop1Zone = null;
-  }
-
-  if (minimapTop1Zone) {
-    drawZoneCircle(
-      minimapTop1Zone.cx,
-      minimapTop1Zone.cy,
-      minimapTop1Zone.r,
-      'rgba(255, 215, 0, 0.35)',
-      'rgba(255, 215, 0, 0.05)',
-      MINIMAP_ZONE_ICON_TOP1
-    );
-  }
-  if (minimapBountyZone) {
-    drawZoneCircle(
-      minimapBountyZone.cx,
-      minimapBountyZone.cy,
-      minimapBountyZone.r,
-      'rgba(255, 59, 48, 0.35)',
-      'rgba(255, 59, 48, 0.06)',
-      MINIMAP_ZONE_ICON_BOUNTY
-    );
-  }
-}
+// Зоны/пины миникарты — в clientState (public/client_state.js), сама логика
+// расчёта зон и отрисовка — в public/client_minimap.js.
 
 const HUD_DENSITY_KEY = 'hudDensity';
 
@@ -388,7 +299,7 @@ function setLang(next) {
     syncMatchOverlayActions();
   } catch {}
   try {
-    ensureFxPresetControl();
+    ensureFxPresetControlImpl(settingsDeps());
   } catch {}
   try {
     updateMatchCountdown();
@@ -420,7 +331,7 @@ function setLang(next) {
     renderTopHud();
   } catch {}
   try {
-    ensureLeaderboardDom();
+    ensureLeaderboardDom(statsEl, t);
   } catch {}
   try {
     updateLeaderboard();
@@ -477,7 +388,7 @@ function gridCellIsCooling(v) {
 
 // Вспышка захвата конкретного игрока — берём из последнего снапшота.
 function cosCaptureFxByPlayer(pid) {
-  const list = lastState?.players;
+  const list = clientState.lastState?.players;
   if (!Array.isArray(list)) return 0;
   for (const p of list) {
     if (p?.n === pid) return Number(p.cosCaptureFx) || 0;
@@ -485,35 +396,7 @@ function cosCaptureFxByPlayer(pid) {
   return 0;
 }
 
-function setMinimapPixel(i) {
-  if (!minimapImage || !minimapGridOwner) return;
-  const raw = minimapGridOwner[i];
-  const cooling = gridCellIsCooling(raw);
-  const o = gridCellOwner(raw);
-  let r = 12;
-  let g = 16;
-  let b = 20;
-  if (o !== 0) {
-    let rgb = minimapOwnerRgbCache.get(o);
-    if (!rgb) {
-      const c = boostHsl(colors.get(o) || 'hsl(210 20% 60%)');
-      const raw2 = hslToRgb(c);
-      rgb = [Math.round(raw2[0] * 0.50), Math.round(raw2[1] * 0.50), Math.round(raw2[2] * 0.50)];
-      minimapOwnerRgbCache.set(o, rgb);
-    }
-    // Остывающая территория на миникарте заметно тусклее «живой».
-    const k = cooling ? 0.42 : 1;
-    r = Math.round(rgb[0] * k) + (cooling ? 10 : 0);
-    g = Math.round(rgb[1] * k) + (cooling ? 10 : 0);
-    b = Math.round(rgb[2] * k) + (cooling ? 10 : 0);
-  }
-  const di = i * 4;
-  const data = minimapImage.data;
-  data[di] = r;
-  data[di + 1] = g;
-  data[di + 2] = b;
-  data[di + 3] = 255;
-}
+// Отрисовка одного пикселя миникарты вынесена в public/client_minimap.js.
 
 /* --- C4. Значок архетипа и тира бота ---------------------------------------
    Архетипы реально различаются по поведению (агрессор убивает в разы чаще
@@ -629,116 +512,9 @@ function playerTitleHtml(titleId) {
   return nm ? `<span class="playerTitle">${escapeHtml(nm)}</span>` : '';
 }
 
-// То же для DOM-пути таблицы лидеров, которая обновляется каждый кадр:
-// пересобираем ячейку только при смене титула или ника.
-function setNameCellWithTitle(td, titleId, name, playerNum) {
-  if (!td) return;
-  const tid = Math.max(0, Number(titleId) || 0);
-  const nm = String(name || '');
-  // C4: значок бота — часть подписи, поэтому входит в ключ кэша, иначе смена
-  // архетипа (переезд бота между слотами) не перерисует ячейку.
-  const bi = botArchInfo(playerNum);
-  const bsig = bi ? `${bi.arch}:${bi.tier}:${lang}` : '';
-  if (td._tid === tid && td._nm === nm && td._bsig === bsig) return;
-  td._tid = tid;
-  td._nm = nm;
-  td._bsig = bsig;
-  const badge = bi ? botArchBadge(playerNum) : null;
-  const tn = cosTitleName(tid);
-  if (!tn) {
-    if (badge) td.replaceChildren(badge, document.createTextNode(nm));
-    else td.textContent = nm;
-    return;
-  }
-  const sp = document.createElement('span');
-  sp.className = 'playerTitle';
-  sp.textContent = tn;
-  if (badge) td.replaceChildren(badge, sp, document.createTextNode(nm));
-  else td.replaceChildren(sp, document.createTextNode(nm));
-}
-
-// Одна функция на категорию, вместо цепочки if (cat === ...). Ключи —
-// COSMETICS_TABS (проверено tests/client_cosmetics_cats_usage.test.mjs):
-// забытая категория провалит тест, а не молча останется пустой иконкой.
-const MINI_COSMETIC_PREVIEW_BY_CAT = {
-  frame(c, { W, id }) {
-    drawFrameRow(c, 2, 8, W - 4, 13, id, 1, '', '', false);
-    drawFrameRow(c, 2, 22, W - 4, 14, id, 2, '', '', true);
-  },
-  // Иконка проигрывает тот же цикл, что и игра, только короче.
-  capturefx(c, { cx, cy, base, id, now }) {
-    const p = ((now % 1400) / 1400);
-    c.save();
-    c.translate(0, 0);
-    drawCaptureFx(c, cx, cy, 13, base, id, p);
-    c.restore();
-  },
-  // Квадратные плитки — ровно как след в игре (раньше рисовалась цепочка кружков).
-  // cell 10, а не 13: с 13 голова оказывалась в x≈47 при ширине канваса 44
-  // и обрезалась правым краем.
-  seg(c, { cy, base, id, now }) {
-    const cell = 10;
-    for (let i = 0; i < 3; i++) {
-      drawSegTile(c, 2 + i * cell, cy - cell / 2, cell, base, id, i, 0.95, now);
-    }
-    drawHead(c, 2 + 3 * cell + cell * 0.55, cy, cell, base, 0, 1, 0, now);
-  },
-  nameplate(c, { cx, cy, base, id, now }) {
-    drawNamePlate(c, 'YOU', cx, cy + 9, base, id, 0.98, 10, now);
-  },
-  head(c, { cx, cy, base, id, now }) {
-    drawHead(c, cx - 3, cy, 34, base, id, 1, 0, now);
-  },
-  // 2×2 клетки территории — тот же узор, что и на поле.
-  terr(c, { W, H, base, id, now }) {
-    const cell = 20;
-    const ox = (W - cell * 2) / 2;
-    const oy = (H - cell * 2) / 2;
-    for (let gy = 0; gy < 2; gy++) {
-      for (let gx = 0; gx < 2; gx++) {
-        drawTerrTile(c, ox + gx * cell, oy + gy * cell, cell, base, id, gx, gy, 0.72, now);
-      }
-    }
-    if (cosClampId(id) === 5) {
-      drawTerrSeam(c, ox, oy, cell * 2, base, 15, 0.9, true);
-    }
-  },
-  // Иконка статична (перерисовывается только при пересборке списка), поэтому
-  // берём фазу середины эффекта — на случайной фазе он был бы уже погасшим.
-  death(c, { cx, cy, base, id }) {
-    drawDeathFx(c, cx, cy, 11, base, id, 0.42);
-  },
-  title(c, { cx, cy, id }) {
-    c.save();
-    c.font = `700 11px ${COS_FONT}`;
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillStyle = 'rgba(255,255,255,0.9)';
-    c.fillText(id === 0 ? '—' : '«»', cx, cy);
-    c.restore();
-  }
-};
-
+/* Мини-превью в карточке списка — DOM-обвязка магазина в client_shop_ui.js. */
 function drawMiniCosmeticPreview(canvasEl, cat, id) {
-  if (!canvasEl) return;
-  const W = 44;
-  const H = 44;
-  const c = cosPrepCanvas(canvasEl, W, H);
-  if (!c) return;
-  c.fillStyle = 'rgba(0,0,0,0.26)';
-  c.fillRect(0, 0, W, H);
-
-  const draw = MINI_COSMETIC_PREVIEW_BY_CAT[cat];
-  if (!draw) return;
-  draw(c, {
-    W,
-    H,
-    cx: W / 2,
-    cy: H / 2,
-    base: boostHsl(colors.get(you) || 'hsl(210 20% 60%)'),
-    now: performance.now(),
-    id
-  });
+  drawMiniCosmeticPreviewImpl(canvasEl, cat, id, shopUiDeps());
 }
 
 function wsSend(type, data) {
@@ -1122,6 +898,9 @@ let mutatorUntil = 0;
 let bountyTarget = 0;
 let bountyUntil = 0;
 let powerUps = new Map();
+// C14: экран-координаты нарисованных бонусов — для подсказки эффекта по
+// наведению мыши (у канвас-объектов нет нативного title). Заполняется в draw().
+let powerUpScreenPos = [];
 
 let youKills = 0;
 let youStreak = 0;
@@ -1204,6 +983,17 @@ function toastBump(el) {
     void el.offsetWidth;
     el.classList.add('bump');
   } catch {}
+}
+
+// UX18: тосты активных модификаторов раунда ("Раунд: ...") теряют смысл,
+// когда игрок уже смотрит на экран смерти/результатов — убираем их вместе
+// с открытием оверлея, сам механизм тостов не трогаем.
+function dismissRoundModToasts() {
+  for (const item of Array.from(toastByKey.values())) {
+    if (String(item.key || '').startsWith('mutator_') && item.el) {
+      toastUnmount(item);
+    }
+  }
 }
 
 function toastMount(item) {
@@ -1418,13 +1208,7 @@ function playBeep(freq, ms, vol) {
 }
 
 function applyHudSettings() {
-  const b = document.body;
-  if (!b) return;
-  try {
-    b.style.setProperty('--hud-brightness', String(hudBrightness));
-    b.style.setProperty('--hud-contrast', String(hudContrast));
-    b.style.setProperty('--hud-panel-alpha', String(hudPanelOpacity));
-  } catch {}
+  applyHudSettingsImpl(settingsDeps());
 }
 
 function getHudDensityDefault() {
@@ -1488,7 +1272,7 @@ function addFxBurst(x, y, kind, extra) {
 }
 
 function addShake(amount, dirX, dirY) {
-  fx.addShake(amount, () => ({ shakeIntensity, addShakeVel }), dirX, dirY);
+  addShakeImpl(amount, dirX, dirY, { fx, shakeIntensity, addShakeVel });
 }
 
 function addShakeVel(dx, dy) {
@@ -1567,29 +1351,20 @@ function fxVolumeScale() {
 
 const HITSTOP_TIME_SCALE = 0.15;
 
-let hitstopFrom = 0;
-let hitstopUntil = 0;
+// { from, until } — общее состояние с triggerHitstopImpl() в client_fx_ui.js
+// (передаётся туда по ссылке, обе стороны читают/пишут одни и те же поля).
+const hitstopState = { from: 0, until: 0 };
 
 function triggerHitstop(ms) {
-  const k = fxHitstopScale();
-  if (k <= 0) return;
-  const dur = Math.max(0, Number(ms) || 0) * k;
-  if (dur <= 0) return;
-  const now = performance.now();
-  if (now < hitstopUntil) {
-    hitstopUntil = Math.max(hitstopUntil, now + dur);
-    return;
-  }
-  hitstopFrom = now;
-  hitstopUntil = now + dur;
+  triggerHitstopImpl(ms, { fxHitstopScale, hitstopState });
 }
 
 // Сколько «съел» hitstop из окна [since, now]. Вычитается из времени
 // интерполяции, поэтому змейки в эти миллисекунды почти стоят.
 function hitstopLostMs(since, now) {
-  if (!hitstopUntil) return 0;
-  const s = Math.max(hitstopFrom, Number(since) || 0);
-  const e = Math.min(now, hitstopUntil);
+  if (!hitstopState.until) return 0;
+  const s = Math.max(hitstopState.from, Number(since) || 0);
+  const e = Math.min(now, hitstopState.until);
   if (e <= s) return 0;
   return (e - s) * (1 - HITSTOP_TIME_SCALE);
 }
@@ -1600,19 +1375,7 @@ function normalizeFxPreset(v) {
 }
 
 function applyFxPreset(next, fromUser) {
-  const v = normalizeFxPreset(next);
-  if (!v) return;
-  fxPreset = v;
-  if (fromUser) fxPresetUserSet = true;
-  try {
-    document.body.dataset.fxPreset = fxPreset;
-  } catch {}
-  const sel = document.getElementById('fxPresetSelect');
-  if (sel) {
-    try {
-      sel.value = fxPreset;
-    } catch {}
-  }
+  applyFxPresetImpl(next, fromUser, settingsDeps());
 }
 
 /* ==========================================================================
@@ -1713,167 +1476,25 @@ function animateNumber(el, from, to, ms, opts) {
  * J9 — полноэкранная вспышка (#fxFlash)
  * ======================================================================== */
 
-const FX_FLASH_MIN_INTERVAL_MS = 400; // не чаще 2.5 Гц
-const FX_FLASH_PEAK_ALPHA = 0.35;
-const FX_FLASH_DUR_MS = 280;
-const FX_FLASH_RISE_MS = 90;
-
-let fxFlashLastAt = 0;
-let fxFlashRaf = 0;
-
-function clampByte(v) {
-  const n = Math.round(Number(v) || 0);
-  return Math.max(0, Math.min(255, n));
-}
-
-// Красный канал не должен мигать изолированно: подтягиваем G/B под R.
-function safeFlashRgb(rgb) {
-  let r = clampByte(rgb?.[0]);
-  let g = clampByte(rgb?.[1]);
-  let b = clampByte(rgb?.[2]);
-  const floor = Math.round(r * 0.45);
-  if (g < floor) g = floor;
-  if (b < floor) b = floor;
-  return [r, g, b];
-}
-
 function fxFlashScreen(rgb, strength) {
-  if (!fxEnabled) return;
-  const scale = fxFlashScale();
-  if (scale <= 0) return;
-  const el = document.getElementById('fxFlash');
-  if (!el) return;
-
-  const now = performance.now();
-  if (now - fxFlashLastAt < FX_FLASH_MIN_INTERVAL_MS) return;
-  fxFlashLastAt = now;
-
-  const [r, g, b] = safeFlashRgb(rgb);
-  const s = Math.max(0, Math.min(1, Number(strength ?? 1)));
-  const peak = Math.min(FX_FLASH_PEAK_ALPHA, FX_FLASH_PEAK_ALPHA * s * scale);
-  if (peak <= 0.005) return;
-
-  try {
-    if (fxFlashRaf) cancelAnimationFrame(fxFlashRaf);
-  } catch {}
-  fxFlashRaf = 0;
-
-  try {
-    el.style.transition = 'none';
-    el.style.background = `radial-gradient(circle at 50% 50%, rgba(${r},${g},${b},0.90) 0%, rgba(${r},${g},${b},0.42) 42%, rgba(${r},${g},${b},0) 72%)`;
-    el.style.opacity = '0';
-    el.classList.add('isOn');
-  } catch {
-    return;
-  }
-
-  const t0 = performance.now();
-  const step = () => {
-    const age = performance.now() - t0;
-    if (age >= FX_FLASH_DUR_MS) {
-      try {
-        el.style.opacity = '0';
-        el.classList.remove('isOn');
-      } catch {}
-      fxFlashRaf = 0;
-      return;
-    }
-    const a =
-      age < FX_FLASH_RISE_MS
-        ? (age / FX_FLASH_RISE_MS) * peak
-        : peak * (1 - (age - FX_FLASH_RISE_MS) / (FX_FLASH_DUR_MS - FX_FLASH_RISE_MS));
-    try {
-      el.style.opacity = Math.max(0, a).toFixed(3);
-    } catch {}
-    fxFlashRaf = requestAnimationFrame(step);
-  };
-  fxFlashRaf = requestAnimationFrame(step);
+  fxFlashScreenImpl(rgb, strength, { fxEnabled, fxFlashScale });
 }
 
 /* ==========================================================================
  * J13 — центральный баннер крупных событий (#bigBanner)
  * ======================================================================== */
 
-const BIG_BANNER_MIN_INTERVAL_MS = 3000;
-const BIG_BANNER_TTL_MS = 2600;
-
-let bigBannerLastAt = 0;
-let bigBannerTimer = 0;
-
 // Возвращает true, если баннер показан. Иначе вызывающий откатывается на тост.
 function showBigBanner(icon, title, sub, mod) {
-  if (!fxBannerEnabled()) return false;
-  const el = document.getElementById('bigBanner');
-  if (!el) return false;
-
-  const now = performance.now();
-  if (now - bigBannerLastAt < BIG_BANNER_MIN_INTERVAL_MS) return false;
-  bigBannerLastAt = now;
-
-  try {
-    if (bigBannerTimer) clearTimeout(bigBannerTimer);
-  } catch {}
-  bigBannerTimer = 0;
-
-  try {
-    el.classList.remove('bannerJackpot', 'bannerDanger');
-    const m = String(mod || '');
-    if (m === 'jackpot') el.classList.add('bannerJackpot');
-    else if (m === 'danger') el.classList.add('bannerDanger');
-
-    const wrap = document.createElement('div');
-    wrap.className = 'bigBannerInner';
-
-    const ic = document.createElement('div');
-    ic.className = 'bigBannerIcon';
-    ic.textContent = String(icon || '★');
-
-    const tt = document.createElement('div');
-    tt.className = 'bigBannerTitle';
-    tt.textContent = String(title || '');
-
-    wrap.appendChild(ic);
-    wrap.appendChild(tt);
-
-    const s = String(sub || '').trim();
-    if (s) {
-      const se = document.createElement('div');
-      se.className = 'bigBannerSub';
-      se.textContent = s;
-      wrap.appendChild(se);
-    }
-
-    el.replaceChildren(wrap);
-    el.setAttribute('role', 'status');
-    el.setAttribute('aria-live', 'polite');
-    // Перезапуск анимации: снимаем класс, форсируем рефлоу, ставим обратно.
-    el.classList.remove('isOn');
-    void el.offsetWidth;
-    el.classList.add('isOn');
-  } catch {
-    return false;
-  }
-
-  bigBannerTimer = setTimeout(() => {
-    bigBannerTimer = 0;
-    try {
-      el.classList.remove('isOn');
-    } catch {}
-  }, BIG_BANNER_TTL_MS);
-  return true;
+  return showBigBannerImpl(icon, title, sub, mod, { fxBannerEnabled });
 }
 
 /* ==========================================================================
  * J14 — классы тряски
  * ======================================================================== */
 
-const SHAKE_CLASSES = { micro: 0.08, small: 0.2, medium: 0.4, large: 0.7 };
-
 function addShakeClass(kind, dirX, dirY) {
-  const amt = SHAKE_CLASSES[String(kind || '')] ?? SHAKE_CLASSES.small;
-  const scaled = amt * fxShakeScale();
-  if (scaled <= 0) return;
-  addShake(scaled, dirX, dirY);
+  addShakeClassImpl(kind, dirX, dirY, { fxShakeScale, fx, shakeIntensity, addShakeVel });
 }
 
 // Вектор «от точки события к моей голове» — толчок в сторону игрока.
@@ -1929,82 +1550,27 @@ function addScorePopup(x, y, value) {
  * J10 — комбо с растущим тоном
  * ======================================================================== */
 
-const COMBO_WINDOW_MS = 3000;
-let comboCount = 0;
-let comboLastAt = 0;
-let comboTimer = 0;
-
-let comboHudSig = '';
+// Геттеры, а не снимок значений: comboBump() планирует comboBreak() через
+// setTimeout, и к моменту срабатывания started/youKills могли измениться —
+// нужны актуальные значения на момент вызова, а не те, что были при постановке.
+function comboDeps() {
+  return { getStarted: () => started, getYouKills: () => youKills, sfx };
+}
 
 function renderComboHud() {
-  const el = document.getElementById('hudCombo');
-  if (!el) return;
-  // renderTopHud вызывается каждый кадр — пересобираем DOM только при изменении.
-  const sig = started ? `${youKills}|${comboCount}` : '';
-  if (sig === comboHudSig) return;
-  comboHudSig = sig;
-
-  const showCombo = comboCount >= 2;
-  if (!started) {
-    el.classList.remove('isOn');
-    el.replaceChildren();
-    return;
-  }
-  try {
-    const kills = document.createElement('span');
-    kills.className = 'hudComboKills';
-    kills.textContent = `⚔ ${youKills}`;
-
-    el.replaceChildren(kills);
-
-    if (showCombo) {
-      const c = document.createElement('span');
-      c.className = 'hudComboValue';
-      c.textContent = `x${comboCount}`;
-      const grow = Math.min(2.0, 1 + (comboCount - 2) * 0.14);
-      c.style.fontSize = `${(100 * grow).toFixed(0)}%`;
-      el.appendChild(c);
-    }
-    el.classList.toggle('isOn', showCombo || youKills > 0);
-  } catch {}
+  renderComboHudImpl(comboDeps());
 }
 
 function comboBump() {
-  const now = performance.now();
-  if (now - comboLastAt > COMBO_WINDOW_MS) comboCount = 0;
-  comboLastAt = now;
-  comboCount++;
-
-  if (comboCount >= 2) {
-    // +2 полутона за шаг цепочки.
-    const semis = Math.min(24, (comboCount - 2) * 2);
-    sfx.comboStep(semis);
-  }
-  renderComboHud();
-
-  try {
-    if (comboTimer) clearTimeout(comboTimer);
-  } catch {}
-  comboTimer = setTimeout(comboBreak, COMBO_WINDOW_MS + 40);
+  comboBumpImpl(comboDeps());
 }
 
 function comboBreak() {
-  comboTimer = 0;
-  const had = comboCount;
-  comboCount = 0;
-  renderComboHud();
-  if (had >= 2) sfx.comboBreak();
+  comboBreakImpl(comboDeps());
 }
 
 function comboReset() {
-  try {
-    if (comboTimer) clearTimeout(comboTimer);
-  } catch {}
-  comboTimer = 0;
-  comboCount = 0;
-  comboLastAt = 0;
-  comboHudSig = '';
-  renderComboHud();
+  comboResetImpl(comboDeps());
 }
 
 /* ==========================================================================
@@ -2222,7 +1788,7 @@ function trackEvent(name) {
   }
 }
 
-let lastState = null;
+// lastState теперь в clientState.lastState (public/client_state.js)
 let gridOwner = null;
 let trailOwner = null;
 
@@ -2263,8 +1829,7 @@ let prevPlayers = new Map();
 let currPlayers = new Map();
 let lastPacketAt = performance.now();
 
-let camX = null;
-let camY = null;
+// camX/camY теперь в clientState (public/client_state.js)
 
 /* VIEW_CELLS_X/Y и ROI_MARGIN_CELLS переехали в client_field_view.js —
    там же вся геометрия вида и тесты на неё. Здесь они только импортируются:
@@ -2275,8 +1840,7 @@ let camY = null;
    остаются нулями, чтобы не разносить эту правку по всему draw(); окно ROI
    сервер тоже центрирует на голове (roiLookahead в protocol.go возвращает 0),
    поэтому вьюпорт лежит внутри окна по построению. */
-let camLeadX = 0;
-let camLeadY = 0;
+// camLeadX/camLeadY теперь в clientState (public/client_state.js)
 /* C1: запас, который вычитается из фактического ROI при подборе масштаба.
    Сервер снапит окно по 8 клеток (main.go ROIStep) и сдвигает его на 12 клеток
    вперёд по направлению движения (ROILookahead), то есть относительно игрока
@@ -2376,8 +1940,6 @@ function scheduleViewportSend(delayMs = 250) {
   }, Math.max(0, delayMs));
 }
 
-// C10: переиспользуемая карта Path2D под пунктир остывающей территории.
-const coolEdgePaths = new Map();
 // C10: градиенты фона кадра зависят только от размеров вьюпорта.
 let bgGradCacheKey = '';
 let bgGradLinear = null;
@@ -2423,7 +1985,7 @@ updateUnreadBadge();
 
 function updateChatLayout() {
   if (!chat || !chatLog) return;
-  const count = chatMessages.length;
+  const count = clientState.chatMessages.length;
   chat.classList.toggle('chatEmpty', count <= 0);
   let max = 320;
   if (count <= 0) max = 80;
@@ -2448,7 +2010,7 @@ const waveScale = 0.55;
 const waveAlpha = 0.10;
 const wavePeriodMs = (Math.PI * 2) / waveSpeed;
 
-const chatMessages = [];
+// chatMessages теперь в clientState.chatMessages (public/client_state.js)
 const nameById = new Map();
 /* C5: сервер шлёт английский вариант имени (nmEn) в nameUpdate и matchResult —
    клиент его никогда не читал, и в EN топ-5 выглядел кириллицей. Единая точка
@@ -2484,7 +2046,7 @@ function botDisplayName(id) {
   const n = Number(id) || 0;
   const seed = (Math.imul(n, 1103515245) + 12345) >>> 0;
   const list = lang === 'en' ? BOT_NAMES_EN : BOT_NAMES_RU;
-  const base = list[seed % list.length] || (lang === 'en' ? 'Bot' : 'Бот');
+  const base = list[seed % list.length] || t('name.bot_fallback');
   return `${base}#${(seed % 99) + 1}`;
 }
 
@@ -2501,7 +2063,58 @@ function refreshBotNames() {
 
 let chatDirty = false;
 
-let chatRenderedCount = 0;
+function notifyChatUnread() {
+  unreadCount = Math.min(999, unreadCount + 1);
+  updateUnreadBadge();
+}
+
+function bumpChatOpenUntilBy(ms) {
+  chatOpenUntil = performance.now() + (Number(ms) || 0);
+}
+
+const chatUi = createChatUi({
+  chat,
+  chatLog,
+  chatInput,
+  emojiBtn,
+  emojiPanel,
+  emojiCloseBtn,
+  emojiRecent,
+  emojiGrid,
+  EMOJIS,
+  setSafeEmojiHtml,
+  displayNameOf,
+  formatTime,
+  getYou: () => you,
+  updateChatLayout,
+  bumpChatVisibility,
+  CHAT_AUTO_OPEN_MS,
+  notifyUnread: notifyChatUnread,
+  setChatCollapsed: (v) => setChatCollapsed(v),
+  bumpChatOpenUntil: bumpChatOpenUntilBy,
+  scheduleChatInputOverlayRender: () => scheduleChatInputOverlayRender()
+});
+
+function buildChatLineElement(m) {
+  return chatUi.buildChatLineElement(m);
+}
+
+function renderChat() {
+  chatUi.renderChat();
+}
+
+function addChatLine(msg) {
+  chatUi.addChatLine(msg);
+}
+
+function onChatInit(history) {
+  chatUi.onChatInit(history);
+  chatDirty = false;
+}
+
+function toggleEmojiPanel(open) {
+  chatUi.toggleEmojiPanel(open);
+}
 
 const minimapLegendEl = document.getElementById('minimapLegend');
 const minimapOverlayEl = document.getElementById('minimapOverlay');
@@ -2511,16 +2124,33 @@ const minimapOverlayCanvas = document.getElementById('minimapOverlayCanvas');
 let minimapOverlayOpen = false;
 let minimapOverlayCtx = null;
 
+/* УХ33: у миникарты не было легенды для точек-иконок — жёлтая рамка топ-1 и
+   красная у баунти читались только методом тыка. Три строки: своя точка,
+   боты, остальные игроки — с теми же значками/цветами, что рисует
+   drawMinimap()/setMinimapPixel(). */
 function updateMinimapLegend() {
   if (!minimapLegendEl) return;
+  const rows = [
+    { swatch: 'minimapLegendMe', label: t('minimap.legend_me') },
+    { swatch: 'minimapLegendPlayer', label: t('minimap.legend_player') },
+    { swatch: 'minimapLegendBot', label: t('minimap.legend_bot') }
+  ];
+  const items = rows.map((r) => {
+    const row = document.createElement('div');
+    row.className = 'minimapLegendRow';
+    const sw = document.createElement('span');
+    sw.className = `minimapLegendSwatch ${r.swatch}`;
+    row.append(sw, document.createTextNode(r.label));
+    return row;
+  });
   try {
-    minimapLegendEl.classList.add('hidden');
+    minimapLegendEl.replaceChildren(...items);
   } catch {}
   try {
-    minimapLegendEl.setAttribute('aria-hidden', 'true');
+    minimapLegendEl.classList.remove('hidden');
   } catch {}
   try {
-    minimapLegendEl.replaceChildren();
+    minimapLegendEl.setAttribute('aria-hidden', 'false');
   } catch {}
 }
 
@@ -2649,20 +2279,12 @@ let downBps = null;
 let upBps = null;
 
 let tickrate = 0;
-let lastStateAt = null;
+// lastStateAt теперь в clientState.lastStateAt (public/client_state.js)
 
 let headIndexByOwner = new Map();
 
-let lastLeaderboardRenderAt = 0;
-
-let leaderboardTable = null;
-let leaderboardTbody = null;
-let leaderboardRowsById = new Map();
-let lastLeaderboardSig = '';
-
-let lbMode = 'top';
-let lbAroundIndex = null;
-let lbAroundIndexAt = 0;
+// Рендер и состояние таблицы лидеров — в public/client_leaderboard.js.
+// leaderboardRowsById остаётся в clientState.leaderboardRowsById (public/client_state.js)
 
 let lastDeathStatsAt = 0;
 
@@ -2675,6 +2297,11 @@ let lastYouStats = null;
 // с разными значениями (±1 у пауэрапов, ±2 у частиц и бурстов) — объект у
 // самого края экрана пропадал/появлялся на клетку раньше, чем остальные.
 const OFFSCREEN_MARGIN_CELLS = 2;
+
+// Момент последнего спавна искр трассы разгона — раньше жил как draw._spAt,
+// теперь передаётся в paintFieldFx() (client_draw.js) как мутируемый ref,
+// чтобы функция не зависела от объекта draw().
+const fxSpawnAtRef = { at: 0 };
 
 /* I2/F18: геометрия «своего» — длина следа и ближайшая своя клетка. */
 const TRAIL_PULSE_FROM = 22;
@@ -2798,26 +2425,7 @@ function syncMenuOnboardingUi() {
 }
 
 function updateMenuNameUi() {
-  if (!menuNameInput) return;
-  const v = normalizeMenuNickInput(menuNameInput.value);
-  // Пустое поле — не ошибка: при старте ник подставляется автоматически.
-  // Иначе новый игрок видит красную ошибку и заблокированный «Играть» ещё
-  // до того, как что-либо сделал.
-  const empty = !v.raw;
-  let errKey = '';
-  if (!empty) {
-    if (v.hasBadChars) errKey = 'menu.nick_error_chars';
-    else if (!v.value) errKey = 'menu.nick_error_required';
-    else if (v.value.length < 2) errKey = 'menu.nick_error_length';
-  }
-
-  const ok = !errKey;
-  // «Играть» блокируется только при реально некорректном вводе, но не пустым полем.
-  if (playBtn) playBtn.disabled = !ok;
-  try {
-    menuNameInput.setAttribute('aria-invalid', ok ? 'false' : 'true');
-  } catch {}
-  if (menuNameError) menuNameError.textContent = ok ? '' : t(errKey);
+  updateMenuNameUiImpl({ menuNameInput, normalizeMenuNickInput, playBtn, menuNameError, t });
 }
 
 // Гарантирует непустой ник перед стартом: пустое поле заполняется случайным.
@@ -3064,8 +2672,12 @@ const RIGHT_TEAM_OPEN_KEY = 'rightTeamOpen';
 function initRightDetailsState() {
   // Раньше обе панели по умолчанию открывались одновременно (open = true у
   // обеих) и постоянно съедали место у миникарты — переключателя между ними
-  // (data-tab) не было, а он и не работал. Оставляем открытой по умолчанию
-  // только «Матч»: «Команда» — по явному клику, как и предполагает <details>.
+  // (data-tab) не было, а он и не работал. На десктопе (min-width: 721px,
+  // тот же брейкпоинт, что и в CSS-раскладке сайдбара) места достаточно —
+  // «Матч» и «Игроки» открыты одновременно по умолчанию. На мобильном
+  // раскрытой по умолчанию остаётся только «Матч», «Команда» — по явному
+  // клику, как и раньше.
+  const isDesktop = window.matchMedia('(min-width: 721px)').matches;
   const initOne = (el, key, defaultOpen) => {
     if (!el) return;
     let open = defaultOpen;
@@ -3087,7 +2699,7 @@ function initRightDetailsState() {
   };
 
   initOne(rightMatchDetailsEl, RIGHT_MATCH_OPEN_KEY, true);
-  initOne(rightTeamDetailsEl, RIGHT_TEAM_OPEN_KEY, false);
+  initOne(rightTeamDetailsEl, RIGHT_TEAM_OPEN_KEY, isDesktop);
 }
 
 initRightDetailsState();
@@ -3156,259 +2768,80 @@ function getRightTabDefault() {
 
 setRightTab(getRightTabDefault(), false);
 
-// I5: отдельный слот баунти в верхнем HUD. Разметку добавляет вёрсточный агент
-// (#topHudBounty); пока её нет — создаём сами, рядом с киллами.
-function ensureTopHudBountyEl() {
-  let el = document.getElementById('topHudBounty');
-  if (el) return el;
-  const host = topHudKillsEl?.parentElement || topHudTimeEl?.parentElement || null;
-  if (!host) return null;
-  try {
-    el = document.createElement('span');
-    el.id = 'topHudBounty';
-    el.className = 'topHudBounty hidden';
-    host.insertBefore(el, topHudKillsEl || null);
-  } catch {
-    return null;
-  }
-  return el;
-}
-
-/* K3: «Место N/M · Очки P» — единственная цифра, по которой игра на самом деле
-   ранжирует, и её в HUD не было вовсе (показывалась «Зона %», по которой не
-   ранжируют). Слот #topHudPlace ждём от вёрсточного агента; пока его нет —
-   создаём сами, слева в правой группе верхнего HUD. */
-// C10: getElementById зваться каждый кадр не должен — держим ссылку.
-let topHudPlaceElCache = null;
-let topHudPhaseElCache = null;
-
-function ensureTopHudPlaceEl() {
-  if (topHudPlaceElCache && topHudPlaceElCache.isConnected) return topHudPlaceElCache;
-  let el = document.getElementById('topHudPlace');
-  if (el) return (topHudPlaceElCache = el);
-  const host = topHudTimeEl?.parentElement || topHudKillsEl?.parentElement || null;
-  if (!host) return null;
-  try {
-    el = document.createElement('span');
-    el.id = 'topHudPlace';
-    // Пока вёрсточный агент не завёл собственный стиль, переиспользуем
-    // существующую «пилюлю» .topHudChip — иначе строка выглядит как сырой текст.
-    el.className = 'topHudPlace topHudChip';
-    host.insertBefore(el, host.firstChild);
-  } catch {
-    return null;
-  }
-  return (topHudPlaceElCache = el);
-}
-
-/* C2: индикатор фазы матча — рядом с таймером. Слот #topHudPhase ждём от
-   вёрсточного агента; пока его нет — создаём сами и переиспользуем .topHudChip. */
-function ensureTopHudPhaseEl() {
-  if (topHudPhaseElCache && topHudPhaseElCache.isConnected) return topHudPhaseElCache;
-  let el = document.getElementById('topHudPhase');
-  if (el) return (topHudPhaseElCache = el);
-  const host = topHudTimeEl?.parentElement || topHudKillsEl?.parentElement || null;
-  if (!host) return null;
-  try {
-    el = document.createElement('span');
-    el.id = 'topHudPhase';
-    el.className = 'topHudPhase topHudChip';
-    if (topHudTimeEl && topHudTimeEl.parentElement === host) {
-      host.insertBefore(el, topHudTimeEl.nextSibling);
-    } else {
-      host.appendChild(el);
-    }
-  } catch {
-    return null;
-  }
-  return (topHudPhaseElCache = el);
+function hudDeps() {
+  return {
+    topHudEl,
+    metaHudEl,
+    teamHudEl,
+    topHudCellsEl,
+    topHudPctEl,
+    topHudKillsEl,
+    topHudTimeEl,
+    topHudContractEl,
+    topHudBarFillEl,
+    cosmeticsBtn,
+    started,
+    clientState,
+    you,
+    mapCells,
+    lastPacketAt,
+    lang,
+    matchPhase,
+    matchEnded,
+    matchFinalMult,
+    matchPhaseUntil,
+    matchEndTick,
+    bountyTarget,
+    bountyUntil,
+    youKills,
+    youContractType,
+    youContractGoal,
+    youContractProgress,
+    youContractUntil,
+    youStreak,
+    youShield,
+    youSpeedUntilTick,
+    lastEventsTick,
+    youSpeedType,
+    youStyle,
+    youDailies,
+    cosTitleByPlayer,
+    PHASE_FINAL,
+    PHASE_CONFLICT,
+    obTick,
+    obUnlocked,
+    obSecondMatchPlus,
+    animateNumber,
+    computeTopSorted,
+    t,
+    phaseIcon,
+    phaseLabel,
+    phaseDesc,
+    tickRemainSeconds,
+    formatTickRemain,
+    renderComboHud,
+    displayNameOf,
+    contractLabel,
+    infoPack,
+    infoName,
+    powerupLabel,
+    dailySlots,
+    dailyLabel,
+    playerTitleHtml,
+    syncRightEmptyStates
+  };
 }
 
 function renderTopHud() {
-  if (!topHudEl) return;
-  if (!started || !lastState) {
-    topHudEl.setAttribute('aria-hidden', 'true');
-    return;
-  }
+  renderTopHudImpl(hudDeps());
+}
 
-  topHudEl.setAttribute('aria-hidden', 'false');
+function renderMetaHud() {
+  renderMetaHudImpl(hudDeps());
+}
 
-  // F17: постепенное раскрытие мета-систем в первом матче.
-  obTick();
-  const obKills = obUnlocked('bounty');
-  const obContract = obUnlocked('contract');
-  // Магазин — со второго матча: в первом тратить ещё нечего и незачем.
-  if (cosmeticsBtn) cosmeticsBtn.classList.toggle('hidden', !obSecondMatchPlus());
-
-  const me = lastState.players?.find((p) => p.n === you);
-  const cells = Number(me?.s) || 0;
-  const pct = mapCells ? (cells / mapCells) * 100 : 0;
-
-  // J6: счётчик клеток догоняется анимацией, а не прыгает.
-  if (topHudCellsEl) {
-    const prevCells = Number(topHudCellsEl.dataset.value);
-    if (!Number.isFinite(prevCells)) {
-      topHudCellsEl.textContent = String(cells);
-    } else if (prevCells !== cells) {
-      animateNumber(topHudCellsEl, prevCells, cells, 420);
-    }
-    topHudCellsEl.dataset.value = String(cells);
-  }
-  if (topHudPctEl) {
-    // C10: запись в DOM только при изменении строки. Сверяемся с самим узлом,
-    // а не с внешним кэшем: тот протух бы, если разметку пересоберут.
-    const pctTxt = `${pct.toFixed(1)}%`;
-    if (topHudPctEl.textContent !== pctTxt) topHudPctEl.textContent = pctTxt;
-  }
-
-  // K3: место и очки — прямо в верхнем HUD.
-  // C10: computeTopSorted() копировала и сортировала массив каждый кадр, а
-  // textContent писался безусловно. Пересчёт — только когда меняется вход.
-  {
-    const placeEl = ensureTopHudPlaceEl();
-    if (placeEl) {
-      // points в подписи остаётся, хотя в текст больше не попадает: их
-      // изменение — признак того, что мог поменяться и порядок в таблице,
-      // то есть само место. Это триггер пересчёта, а не выводимое значение.
-      const points = Number(me?.p) || 0;
-      const sig = `${lastPacketAt}|${points}|${lang}`;
-      if (renderTopHud._placeSig !== sig) {
-        renderTopHud._placeSig = sig;
-        const ordered = computeTopSorted(lastState.players);
-        const idx = ordered.findIndex((p) => p.n === you);
-        /* Очки из полосы убраны: место уже ранжирует игрока, а сами очки
-           стоят колонкой в правой таблице (и в итогах матча). В полосе
-           шириной ~370px «· Очки 0» стоило целой строки переноса. */
-        const txt = idx >= 0 ? `${t('hud.place_short')} ${idx + 1}/${ordered.length}` : '';
-        if (placeEl.textContent !== txt) {
-          placeEl.textContent = txt;
-          placeEl.classList.toggle('hidden', !txt);
-          try {
-            placeEl.title = `${t('death.place')} / ${t('death.points')}`;
-          } catch {}
-        }
-        placeEl.classList.toggle('isLeader', idx === 0);
-      }
-    }
-  }
-
-  /* C2: фаза матча рядом с таймером. Раньше игрок не видел арку вовсе —
-     включая удвоение очков за захват в последней фазе. */
-  {
-    const phaseEl = ensureTopHudPhaseEl();
-    if (phaseEl) {
-      const isFinal = matchPhase === PHASE_FINAL;
-      let txt = matchEnded
-        ? ''
-        : `${phaseIcon(matchPhase)} ${phaseLabel(matchPhase)}${isFinal ? ` ×${matchFinalMult}` : ''}`;
-      // Последние 20 секунд перед финалом — обратный отсчёт до ×N, чтобы игрок
-      // успел придержать крупный захват.
-      if (txt && !isFinal && matchPhase === PHASE_CONFLICT && matchPhaseUntil) {
-        // tickRemainSeconds отдаёт дробное число: без округления в чипе
-        // висело бы «Final in 12.698999999999979», да ещё и с записью в DOM
-        // на каждом кадре.
-        const raw = tickRemainSeconds(matchPhaseUntil);
-        const sec = raw == null ? null : Math.max(0, Math.ceil(raw));
-        if (sec != null && sec <= 20) {
-          txt = `🔥 ${t('phase.final_in')} ${sec}`;
-        }
-      }
-      if (phaseEl.textContent !== txt) {
-        phaseEl.textContent = txt;
-        phaseEl.classList.toggle('hidden', !txt);
-        phaseEl.classList.toggle('isFinal', isFinal);
-        try {
-          phaseEl.title = `${t('phase.label')}: ${phaseDesc(matchPhase)}`;
-        } catch {}
-      }
-    }
-  }
-
-  if (topHudKillsEl) {
-    const killsTxt = obKills ? `⚔ ${youKills}` : '';
-    if (topHudKillsEl.textContent !== killsTxt) {
-      topHudKillsEl.textContent = killsTxt;
-      topHudKillsEl.classList.toggle('hidden', !obKills);
-    }
-  }
-  if (obKills) renderComboHud();
-
-  // I5: таймер матча — отдельный крупный элемент. Только время, без «•»-склейки,
-  // иначе самое важное («сколько до конца») обрезается по ellipsis.
-  if (topHudTimeEl) {
-    const rem = matchEndTick ? formatTickRemain(matchEndTick) : '';
-    if (topHudTimeEl.textContent !== rem) {
-      topHudTimeEl.textContent = rem || '';
-      const sec = matchEndTick ? tickRemainSeconds(matchEndTick) : null;
-      topHudTimeEl.classList.toggle('isUrgent', sec != null && sec <= 30);
-      topHudTimeEl.classList.toggle('hidden', !rem);
-      try {
-        topHudTimeEl.title = t('hud.time_left');
-      } catch {}
-    }
-  }
-
-  // I5: баунти — отдельный элемент, а не часть таймерной строки.
-  const bountyEl = ensureTopHudBountyEl();
-  if (bountyEl) {
-    if (bountyTarget && obKills) {
-      const bn = displayNameOf(bountyTarget);
-      const rem = formatTickRemain(bountyUntil);
-      /* C7: строка писалась в DOM на КАЖДОМ кадре, хотя меняется раз в секунду
-         (обратный отсчёт). Пишем только при изменении — так же, как соседние
-         элементы верхнего HUD. */
-      const bt = rem ? `🎯 ${bn} (${rem})` : `🎯 ${bn}`;
-      if (bountyEl.textContent !== bt) bountyEl.textContent = bt;
-      bountyEl.classList.remove('hidden');
-      bountyEl.classList.toggle('isMe', bountyTarget === you);
-    } else {
-      if (bountyEl.textContent !== '') bountyEl.textContent = '';
-      bountyEl.classList.add('hidden');
-    }
-  }
-
-  /* Строка «Цель: захват территории» отсюда убрана. Цель матча не меняется
-     никогда и ничего не сообщает игроку, который уже в матче, — а место в
-     всегда видимой полосе занимала. Правила объясняет меню (блок «Как
-     играть»), а верхняя полоса оставлена под то, что действительно меняется:
-     место, зона, время, фаза, киллы и контракт. */
-  const ensureContractParts = () => {
-    if (!topHudContractEl) return { chip: null };
-    let chip = topHudContractEl.querySelector('.topHudChip');
-    if (!chip) {
-      topHudContractEl.replaceChildren();
-      chip = document.createElement('span');
-      chip.className = 'topHudChip hidden';
-      topHudContractEl.appendChild(chip);
-    }
-    return { chip };
-  };
-
-  const { chip } = ensureContractParts();
-
-  if (chip) {
-    if (youContractType && obContract) {
-      const cn = contractLabel(youContractType) || infoPack().labels.contract;
-      const goal = Number(youContractGoal) || 0;
-      const prog = Number(youContractProgress) || 0;
-      const rem = formatTickRemain(youContractUntil);
-      // C7: то же самое — раньше безусловная запись на каждом кадре.
-      const chipTxt = `📜 ${cn} ${prog}/${goal}${rem ? ` (${rem})` : ''}`;
-      if (chip.textContent !== chipTxt) chip.textContent = chipTxt;
-      chip.classList.remove('hidden');
-    } else {
-      if (chip.textContent !== '') chip.textContent = '';
-      chip.classList.add('hidden');
-    }
-  }
-
-  if (topHudBarFillEl) {
-    const p = mapCells ? Math.max(0, Math.min(1, cells / mapCells)) : 0;
-    // C7: присваивание в style пересчитывает стиль элемента даже когда значение
-    // не изменилось, а меняется оно только при смене числа клеток.
-    const wTxt = `${(p * 100).toFixed(1)}%`;
-    if (topHudBarFillEl.style.width !== wTxt) topHudBarFillEl.style.width = wTxt;
-  }
+function renderTeamHud() {
+  renderTeamHudImpl(hudDeps());
 }
 
 net = createNetModule({
@@ -3667,48 +3100,51 @@ function releaseDeathZoom() {
    текущий множитель клетки и долю [0..1], на которую камера должна
    сместиться от обычной цели к точке гибели. */
 function updateDeathZoom(now) {
-  if (prefersReducedMotion() || fxHitstopScale() <= 0) {
-    deathZoomActive = false;
-    deathZoomCurrent = 1;
-    return { zoom: 1, mixToAnchor: 0 };
-  }
-  if (deathZoomActive) {
-    const t = easeOutCubic((now - deathZoomStartAt) / DEATH_ZOOM_IN_MS);
-    deathZoomCurrent = 1 + (DEATH_ZOOM_MAX - 1) * t;
-  } else if (deathZoomCurrent > 1) {
-    const t = easeOutCubic((now - deathZoomReleaseAt) / DEATH_ZOOM_OUT_MS);
-    deathZoomCurrent = deathZoomAtRelease + (1 - deathZoomAtRelease) * t;
-    if (deathZoomCurrent <= 1.001) deathZoomCurrent = 1;
-  } else {
-    deathZoomCurrent = 1;
-  }
-  const mixToAnchor = (deathZoomCurrent - 1) / (DEATH_ZOOM_MAX - 1);
-  return { zoom: deathZoomCurrent, mixToAnchor };
+  return updateDeathZoomImpl(now, {
+    prefersReducedMotion,
+    fxHitstopScale,
+    easeOutCubic,
+    DEATH_ZOOM_MAX,
+    DEATH_ZOOM_IN_MS,
+    DEATH_ZOOM_OUT_MS,
+    getActive: () => deathZoomActive,
+    setActive: (v) => {
+      deathZoomActive = v;
+    },
+    getCurrent: () => deathZoomCurrent,
+    setCurrent: (v) => {
+      deathZoomCurrent = v;
+    },
+    getStartAt: () => deathZoomStartAt,
+    getReleaseAt: () => deathZoomReleaseAt,
+    getAtRelease: () => deathZoomAtRelease
+  });
 }
 
 function showDeathOverlay() {
-  if (deathOverlay) deathOverlay.classList.remove('hidden');
-  overlayManager.open('death');
-  syncOverlayUiState();
-  setChatCollapsed(true);
-  toggleEmojiPanel(false);
-  deathBestShown = null;
-  renderDeathStats();
-  lastDeathStatsAt = 0;
-
-  // J16: собственная смерть была беззвучной.
-  sfx.death();
-  comboBreak();
-
-  // F16b: человеческое объяснение только на первых трёх смертях — дальше
-  // ветеран читает сухую причину быстрее, чем абзац текста.
-  // K4: сколько смертей было НА МОМЕНТ показа — запоминаем, чтобы блок можно
-  // было пересобрать при смене языка с тем же составом строк.
-  deathReasonDeathsSeen = obDeathsSeen();
-  obBumpDeaths();
-  renderDeathReason();
-
-  overlayManager.focusDefault('death');
+  showDeathOverlayImpl({
+    deathOverlay,
+    overlayManager,
+    dismissRoundModToasts,
+    syncOverlayUiState,
+    setChatCollapsed,
+    toggleEmojiPanel,
+    setDeathBestShown: (v) => {
+      deathBestShown = v;
+    },
+    renderDeathStats,
+    setLastDeathStatsAt: (v) => {
+      lastDeathStatsAt = v;
+    },
+    sfx,
+    comboBreak,
+    obDeathsSeen,
+    obBumpDeaths,
+    setDeathReasonDeathsSeen: (v) => {
+      deathReasonDeathsSeen = v;
+    },
+    renderDeathReason
+  });
 }
 
 /* K4: раньше подсказка в оверлее смерти собиралась только внутри
@@ -3718,42 +3154,16 @@ function showDeathOverlay() {
 let deathReasonDeathsSeen = 99;
 
 function renderDeathReason() {
-  if (deathReasonEl) {
-    const deathsSeen = deathReasonDeathsSeen;
-    const reasonText = deathReasonText(lastDeathInfo);
-    const hintText = deathsSeen < 3 ? deathReasonHint(lastDeathInfo) : '';
-    // F5 «Реклейм»: механика нигде не объяснена, показываем её на первой смерти.
-    // Секунды подставляются из reclaimTicks, пришедшего в hello: раньше «20»
-    // было вписано в саму строку словаря и пережило G22, где окно урезали до
-    // 15 секунд. Единственный раз, когда игрок читает эту подсказку, она врала
-    // на треть — и врала в ту сторону, которая стоит ему земли.
-    const reclaimText = deathsSeen < 1 ? tfmt('reclaim.hint', { sec: reclaimWindowSec() }) : '';
-    try {
-      const frag = document.createDocumentFragment();
-      if (reasonText) {
-        const r = document.createElement('div');
-        r.className = 'deathReasonMain';
-        r.textContent = reasonText;
-        frag.appendChild(r);
-      }
-      if (hintText) {
-        const h = document.createElement('div');
-        h.className = 'deathReasonHint';
-        h.textContent = hintText;
-        frag.appendChild(h);
-      }
-      if (reclaimText) {
-        const rc = document.createElement('div');
-        rc.className = 'deathReasonHint';
-        rc.textContent = `♻ ${reclaimText}`;
-        frag.appendChild(rc);
-      }
-      deathReasonEl.replaceChildren(frag);
-    } catch {
-      deathReasonEl.textContent = reasonText || hintText;
-    }
-    deathReasonEl.style.display = reasonText || hintText || reclaimText ? '' : 'none';
-  }
+  renderDeathReasonImpl({
+    deathReasonEl,
+    getDeathReasonDeathsSeen: () => deathReasonDeathsSeen,
+    lastDeathInfo,
+    deathReasonText,
+    deathReasonHint,
+    tfmt,
+    reclaimWindowSec,
+    document
+  });
 }
 
 function syncOverlayUiState() {
@@ -3845,177 +3255,24 @@ function bumpMatchesPlayed() {
   } catch {}
 }
 
-/* ==========================================================================
- * F15/F17 — мягкая первая сессия
- *
- * Новичок видит шесть мета-систем одновременно поверх непонятой базовой
- * механики. В первом матче они открываются по одной, а путь домой
- * подсвечивается стрелкой, пока игрок ни разу не замкнул петлю.
- * ======================================================================== */
+/* F15/F17 — мягкая первая сессия. Логика вынесена в client_onboarding.js;
+   здесь только тонкие обёртки, передающие deps (addToast/t/hasFirstCapture/
+   started), как и showDeathOverlay/renderDeathReason для client_death_ui.js. */
 
-const OB_DEATHS_KEY = 'snakes_deaths_seen_v1';
-const OB_STAGE_KEY = 'snakes_onboarding_stages_v1';
-
-// Пороги подобраны так, чтобы первый захват (15-20 с) успел случиться раньше
-// любой мета-системы: сначала правило игры, потом надстройки над ним.
-/* K5: ступени онбординга висели на секундомере ПЕРВОГО матча (105/135/165 с),
-   а `obUnlocked()` открывал всё сразу после двух сыгранных матчей. Новичок,
-   умерший дважды за первые две минуты (типичный сценарий), не видел ни одной
-   ступени и на второй жизни получал сразу весь HUD.
-   Теперь ступень привязана к событию — к моменту, когда механика впервые
-   становится осмысленной. Таймер остался только страховкой для игрока, который
-   за все эти секунды так ничего и не сделал. */
-const OB_STAGES = [
-  // Захватил первый участок — теперь имеет смысл рассказать, что по дороге
-  // домой валяются бонусы.
-  { id: 'bonus', at: 105000, on: 'capture', icon: '🎁', title: 'onb.bonus_title', desc: 'onb.bonus_desc' },
-  // Первое убийство — игрок понял, что за действия платят; контракт как раз про это.
-  { id: 'contract', at: 135000, on: 'kill', icon: '📜', title: 'onb.contract_title', desc: 'onb.contract_desc' },
-  // Первая смерть — теперь ясно, что охотятся и на него; здесь и про баунти.
-  { id: 'bounty', at: 165000, on: 'death', icon: '🎯', title: 'onb.bounty_title', desc: 'onb.bounty_desc' }
-];
-
-let obMatchStartAt = 0;
-let obStagesShown = null;
-
-function obLoadStages() {
-  if (obStagesShown) return obStagesShown;
-  obStagesShown = new Set();
-  try {
-    const raw = localStorage.getItem(OB_STAGE_KEY);
-    if (raw) for (const s of String(raw).split(',')) if (s) obStagesShown.add(s);
-  } catch {}
-  return obStagesShown;
-}
-
-function obMarkStageShown(id) {
-  const set = obLoadStages();
-  if (set.has(id)) return;
-  set.add(id);
-  try {
-    localStorage.setItem(OB_STAGE_KEY, Array.from(set).join(','));
-  } catch {}
-}
-
-// Первый матч в жизни игрока: только в нём мета-системы придерживаются.
-function obFirstMatch() {
-  return obMatchesEntered() <= 1;
-}
-
-// Второй и дальше — ежедневки и магазин уже показываем.
-function obSecondMatchPlus() {
-  return obMatchesEntered() >= 2;
-}
-
-function obDeathsSeen() {
-  try {
-    return Math.max(0, Number(localStorage.getItem(OB_DEATHS_KEY)) || 0);
-  } catch {}
-  return 99;
-}
-
-function obBumpDeaths() {
-  try {
-    localStorage.setItem(OB_DEATHS_KEY, String(obDeathsSeen() + 1));
-  } catch {}
-}
-
-function obMatchElapsed() {
-  if (!obMatchStartAt) return 0;
-  return performance.now() - obMatchStartAt;
-}
-
-/* Отдельный счётчик «сколько матчей игрок начал». FIRST_MATCH_KEY растёт только
-   в onMatchEnd, а тот приходит не всегда (умер и досидел до конца в оверлее
-   смерти — экран итогов не показывается). Онбординг на таком счётчике завис бы
-   в режиме «первый матч» навсегда, поэтому у него свой, по входам. */
-const OB_ENTERED_KEY = 'snakes_ob_matches_v1';
-
-/* C10: значение читалось из localStorage по 3-4 раза за кадр (obTick +
-   obUnlocked + obSecondMatchPlus в renderTopHud) — ~180 синхронных чтений в
-   секунду. Кэшируем в памяти: писать в ключ может только этот же модуль. */
-let obEnteredCache = null;
-
-function obMatchesEntered() {
-  if (obEnteredCache != null) return obEnteredCache;
-  try {
-    obEnteredCache = Math.max(0, Number(localStorage.getItem(OB_ENTERED_KEY)) || 0);
-    return obEnteredCache;
-  } catch {}
-  return 99;
-}
-
-function obBumpMatchesEntered() {
-  const next = obMatchesEntered() + 1;
-  obEnteredCache = next;
-  try {
-    localStorage.setItem(OB_ENTERED_KEY, String(next));
-  } catch {}
-}
-
-// Разблокирована ли мета-система. Вне первого матча — всё открыто.
-function obUnlocked(id) {
-  if (!obFirstMatch()) return true;
-  const st = OB_STAGES.find((s) => s.id === id);
-  if (!st) return true;
-  // K5: ступень, уже показанная по событию, остаётся открытой — в том числе
-  // после смерти и респавна в том же матче.
-  if (obLoadStages().has(st.id)) return true;
-  return obMatchElapsed() >= st.at;
-}
-
-// K5: показать ступень (один раз за всю жизнь профиля).
-function obShowStage(st) {
-  if (!st) return;
-  const set = obLoadStages();
-  if (set.has(st.id)) return;
-  obMarkStageShown(st.id);
-  addToast(st.icon, t(st.title), 'big', t(st.desc), { key: `onb_${st.id}`, prio: 'important' });
-}
-
-/* K5: событийный триггер. kind — 'capture' | 'kill' | 'death'.
-   Молчит у ветеранов (больше трёх входов в матч) — им объяснять нечего. */
 function obFireEvent(kind) {
-  if (obMatchesEntered() > 3) return;
-  for (const st of OB_STAGES) {
-    if (st.on !== kind) continue;
-    obShowStage(st);
-  }
+  obFireEventImpl(kind, { addToast, t });
 }
 
-// F15: стрелка домой живёт, пока игрок ни разу не замкнул петлю.
 function obGuideActive() {
-  return !hasFirstCapture() && obMatchesEntered() <= 2;
+  return obGuideActiveImpl({ hasFirstCapture });
 }
 
-/* C9: возврат после обрыва связи — не «новый матч». Раньше два разрыва Wi-Fi
-   у новичка досрочно выключали весь онбординг. */
-function obResetMatch(countEntry = true) {
-  obMatchStartAt = performance.now();
-  if (countEntry) obBumpMatchesEntered();
-}
-
-// Вызывается из renderTopHud (каждый кадр), поэтому дешёвая: сравнение чисел.
 function obTick() {
-  if (!started || !obMatchStartAt || obMatchesEntered() > 2) return;
-  const el = obMatchElapsed();
-  for (const st of OB_STAGES) {
-    // K5: таймер теперь только страховка — событие обычно срабатывает раньше.
-    if (el < st.at) continue;
-    obShowStage(st);
-  }
+  obTickImpl({ started, addToast, t });
 }
 
-// Магазин и ежедневки — со второго матча, одним тостом и один раз.
 function obAnnounceShop() {
-  if (!obSecondMatchPlus()) return;
-  if (obMatchesEntered() > 3) return;
-  const set = obLoadStages();
-  if (set.has('shop')) return;
-  obMarkStageShown('shop');
-  setTimeout(() => {
-    addToast('🎨', t('onb.shop_title'), 'big', t('onb.shop_desc'), { key: 'onb_shop', prio: 'important' });
-  }, 2500);
+  obAnnounceShopImpl({ addToast, t });
 }
 
 // F16: крючок «до первого скина N ✨» на экране результатов первого матча.
@@ -4069,184 +3326,35 @@ function runMatchResultsCascade() {
 }
 
 function renderMatchResults(results) {
-  if (!matchResultsEl) return;
-  const rows = Array.isArray(results) ? results : [];
-  if (!rows.length) {
-    setSafeHtml(matchResultsEl, `<div class="matchSub">${escapeHtml(t('match.results_unavailable'))}</div>`);
-    return;
-  }
-  const meIndex = rows.findIndex((r) => (Number(r?.n) || 0) === you);
-  const me = meIndex >= 0 ? rows[meIndex] : null;
-  const mePoints = Number(me?.p) || 0;
-  // Мгновенный снимок зоны бесполезен: умерший на последней секунде видел 0.
-  // Сервер шлёт пик (Pk), среднюю (Avg) и смерти (D) — показываем их.
-  const meCells = resultPeak(me);
-  const meAvg = resultAvg(me);
-  const meDeaths = resultDeaths(me);
-  const meKills = Number(me?.k) || 0;
-  const mePlace = Number(me?.place) || (meIndex >= 0 ? meIndex + 1 : 0);
-  const meCt = Number(me?.ct) || 0;
-  const meCp = Number(me?.cp) || 0;
-  const meCg = Number(me?.cg) || 0;
-  const meSe = Number(me?.se) || 0;
-  const meSb = Array.isArray(me?.sb) ? me.sb : null;
-  const mePb = Array.isArray(me?.pb) ? me.pb : null;
-  const meCd = Array.isArray(me?.cd) ? me.cd : null;
-  const totalPlayers = rows.length;
-  const isWin = meIndex === 0;
-
-  let nextGapText = '';
-  if (meIndex > 0 && me) {
-    const next = rows[meIndex - 1];
-    const dp = (Number(next?.p) || 0) - mePoints;
-    const dc = (Number(next?.cells) || 0) - meCells;
-    const dk = (Number(next?.k) || 0) - meKills;
-    const parts = [];
-    if (dp > 0) parts.push(`${fmtInt(dp)} ${t('match.next_gap_points')}`);
-    else if (dc > 0) parts.push(`${fmtInt(dc)} ${t('match.next_gap_cells')}`);
-    else if (dk > 0) parts.push(`${fmtInt(dk)} ${t('match.next_gap_kills')}`);
-    if (parts.length) nextGapText = `${t('match.next_gap')}: ${parts.join(' ')}`;
-  }
-
-  const trs = rows
-    .slice(0, 32)
-    .map((r, i) => {
-      const n = Number(r?.n) || 0;
-      // C5: итоги матча приходят с nmEn — в EN показываем его.
-      const nm = String(displayNameFrom(r, n, n || '—'));
-      const p = Number(r?.p) || 0;
-      const peak = resultPeak(r);
-      const k = Number(r?.k) || 0;
-      const d = resultDeaths(r);
-      const isMe = n === you;
-      const fr = Number(r?.fr) || 0;
-      const frClass = `frame${cosClampId(fr)}`;
-      return `
-        <tr class="${isMe ? 'matchRowMe' : ''} ${frClass}">
-          <td class="num">${i + 1}</td>
-          <td class="name">${playerTitleHtml(cosTitleByPlayer.get(n) || 0)}${escapeHtml(nm)}</td>
-          <td class="num">${fmtInt(p)}</td>
-          <td class="num">${fmtInt(peak)}</td>
-          <td class="num">${fmtInt(k)}</td>
-          <td class="num">${fmtInt(d)}</td>
-        </tr>
-      `;
-    })
-    .join('');
-
-  setSafeHtml(
+  renderMatchResultsImpl({
+    results,
     matchResultsEl,
-    `
-    <div class="matchSummary" aria-label="${escapeHtml(t('match.summary'))}">
-      <div class="matchSummaryTop">
-        <div class="matchResultPill ${isWin ? 'matchResultWin' : 'matchResultLose'}">${escapeHtml(isWin ? t('match.victory') : t('match.defeat'))}</div>
-      </div>
-
-      <div class="matchKpiGrid">
-        <div class="matchKpi">
-          <div class="matchKpiLabel">${escapeHtml(t('match.place'))}</div>
-          <div class="matchKpiValue"><span data-count="place" data-to="${mePlace || 0}">${mePlace ? fmtInt(mePlace) : '—'}</span><span class="matchKpiOf"> ${escapeHtml(t('match.out_of'))} ${fmtInt(totalPlayers)}</span></div>
-        </div>
-        <div class="matchKpi">
-          <div class="matchKpiLabel">${escapeHtml(t('match.points'))}</div>
-          <div class="matchKpiValue" data-count="points" data-to="${mePoints}">${me ? fmtInt(mePoints) : '—'}</div>
-        </div>
-      </div>
-
-      <div class="matchMiniGrid">
-        <div class="matchMini">
-          <div class="matchMiniLabel">${escapeHtml(t('match.peak'))}</div>
-          <div class="matchMiniValue" data-count="zone" data-to="${meCells}">${me ? fmtInt(meCells) : '—'}</div>
-        </div>
-        <div class="matchMini">
-          <div class="matchMiniLabel">${escapeHtml(t('match.avg'))}</div>
-          <div class="matchMiniValue">${me ? fmtInt(meAvg) : '—'}</div>
-        </div>
-        <div class="matchMini">
-          <div class="matchMiniLabel">${escapeHtml(t('match.kills'))}</div>
-          <div class="matchMiniValue" data-count="kills" data-to="${meKills}">${me ? fmtInt(meKills) : '—'}</div>
-        </div>
-        <div class="matchMini">
-          <div class="matchMiniLabel">${escapeHtml(t('match.deaths'))}</div>
-          <div class="matchMiniValue">${me ? fmtInt(meDeaths) : '—'}</div>
-        </div>
-        ${meSe > 0 ? `<div class="matchMini matchMiniReward"><div class="matchMiniLabel">${escapeHtml(t('match.reward'))}</div><div class="matchMiniValue"><span data-count="reward" data-to="${meSe}" data-prefix="✨ +">✨ +${fmtInt(meSe)}</span> ${escapeHtml(t('cosmetics.style_points'))}</div></div>` : ''}
-      </div>
-
-      ${firstSkinHookHtml()}
-
-      ${me && meCt ? `<div class="matchNextGap">${escapeHtml(t('match.contract'))}: ${escapeHtml(contractLabel(meCt) || String(meCt))} ${fmtInt(meCp)}/${fmtInt(meCg)}</div>` : ''}
-
-      ${meCd ? `<div class="matchNextGap">${escapeHtml(t('match.contract_done'))}: ${escapeHtml(contractLabel(1) || '1')} ${fmtInt(Number(meCd[1]) || 0)} · ${escapeHtml(contractLabel(2) || '2')} ${fmtInt(Number(meCd[2]) || 0)} · ${escapeHtml(contractLabel(3) || '3')} ${fmtInt(Number(meCd[3]) || 0)}</div>` : ''}
-
-      ${(meSb || mePb) ? `<div class="matchNextGap">${escapeHtml(t('match.breakdown'))}</div>` : ''}
-      ${mePb ? `<div class="matchMiniGrid">
-        <div class="matchMini"><div class="matchMiniLabel">${escapeHtml(t('match.points_breakdown'))}</div><div class="matchMiniValue">${escapeHtml(pointsBreakdownText(mePb))}</div></div>
-      </div>` : ''}
-      ${meSb ? `<div class="matchMiniGrid">
-        <div class="matchMini"><div class="matchMiniLabel">${escapeHtml(t('match.style_breakdown'))}</div><div class="matchMiniValue">${escapeHtml(styleBreakdownText(meSb))}</div></div>
-      </div>` : ''}
-
-      ${nextGapText ? `<div class="matchNextGap">${escapeHtml(nextGapText)}</div>` : ''}
-
-      <div class="matchNextActions" aria-label="${escapeHtml(t('match.summary'))}">
-        <button id="matchQuickBtn" class="btnPrimary" type="button">${escapeHtml(t('match.play_on'))}</button>
-        <button id="matchRoomsBtn" class="btnSecondary" type="button">${escapeHtml(t('match.rooms'))}</button>
-        <button id="matchCosmeticsBtn" class="btnGhost" type="button">${escapeHtml(t('match.cosmetics'))}</button>
-      </div>
-
-      <label class="matchNextGap" style="display:flex; gap:10px; align-items:center;">
-        <input id="matchAutoJoin" type="checkbox" ${matchAutoJoin ? 'checked' : ''} />
-        <span>${escapeHtml(t('match.autojoin'))}</span>
-      </label>
-    </div>
-
-    <div class="matchTableWrap" role="region" aria-label="${escapeHtml(t('match.player'))}">
-      <table class="matchTable">
-        <thead>
-          <tr>
-            <th class="num">#</th>
-            <th>${escapeHtml(t('match.player'))}</th>
-            <th class="num">${escapeHtml(t('match.points'))}</th>
-            <th class="num">${escapeHtml(t('match.peak'))}</th>
-            <th class="num">${escapeHtml(t('match.kills'))}</th>
-            <th class="num">${escapeHtml(t('match.deaths'))}</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${trs}
-        </tbody>
-      </table>
-    </div>
-  `
-  );
-
-  const quickBtn = matchResultsEl.querySelector('#matchQuickBtn');
-  quickBtn?.addEventListener('click', (e) => {
-    e?.preventDefault?.();
-    matchContinueBtn?.click();
+    you,
+    escapeHtml,
+    setSafeHtml,
+    t,
+    fmtInt,
+    resultPeak,
+    resultAvg,
+    resultDeaths,
+    displayNameFrom,
+    cosClampId,
+    playerTitleHtml,
+    cosTitleByPlayer,
+    contractLabel,
+    pointsBreakdownText,
+    styleBreakdownText,
+    firstSkinHookHtml,
+    matchAutoJoin,
+    matchContinueBtn,
+    matchMenuBtn,
+    hideMatchOverlay,
+    showCosmeticsOverlay,
+    setMatchAutoJoin: (v) => {
+      matchAutoJoin = v;
+    },
+    localStorage
   });
-
-  const roomsBtn = matchResultsEl.querySelector('#matchRoomsBtn');
-  roomsBtn?.addEventListener('click', (e) => {
-    e?.preventDefault?.();
-    matchMenuBtn?.click();
-  });
-
-  const cosBtn = matchResultsEl.querySelector('#matchCosmeticsBtn');
-  cosBtn?.addEventListener('click', (e) => {
-    e?.preventDefault?.();
-    hideMatchOverlay();
-    showCosmeticsOverlay();
-  });
-
-  const autoJoinEl = matchResultsEl.querySelector('#matchAutoJoin');
-  if (autoJoinEl) {
-    autoJoinEl.addEventListener('change', () => {
-      matchAutoJoin = !!autoJoinEl.checked;
-      localStorage.setItem('matchAutoJoin', matchAutoJoin ? '1' : '0');
-    });
-  }
 }
 
 function pointsBreakdownText(pb) {
@@ -4371,18 +3479,18 @@ function resetClientForNewMatch() {
   // C8: DOM киллфида очищен вручную — подпись обязана протухнуть.
   renderKillfeed._sig = null;
   // C7: у мета-панели теперь такая же подпись — сбрасываем по той же причине.
-  renderMetaHud._sig = null;
-  renderTopHud._placeSig = null;
+  renderMetaHudImpl._sig = null;
+  renderTopHudImpl._placeSig = null;
 
-  lastState = null;
+  clientState.lastState = null;
   prevPlayers = new Map();
   currPlayers = new Map();
   headIndexByOwner = new Map();
   lastPacketAt = performance.now();
-  camX = null;
-  camY = null;
-  camLeadX = 0;
-  camLeadY = 0;
+  clientState.camX = null;
+  clientState.camY = null;
+  clientState.camLeadX = 0;
+  clientState.camLeadY = 0;
 
   shakeX = 0;
   shakeY = 0;
@@ -4393,13 +3501,7 @@ function resetClientForNewMatch() {
   minimapHadChunkUpdate = false;
   lastMinimapDrawAt = 0;
 
-  lastLeaderboardSig = '';
-  lbAroundIndex = null;
-  lbAroundIndexAt = 0;
-  leaderboardRowsById = new Map();
-  try {
-    leaderboardTbody?.replaceChildren?.();
-  } catch {}
+  resetLeaderboardUi();
 
   renderKillfeed();
   renderMetaHud();
@@ -4517,35 +3619,43 @@ deathMenuBtn?.addEventListener('click', () => {
 });
 
 function showMenuOverlay() {
-  cancelDeathSlowMo();
-  if (menuOverlay) menuOverlay.classList.remove('hidden');
-  if (deathOverlay) deathOverlay.classList.add('hidden');
-  overlayManager.close('death');
-  overlayManager.open('menu');
-  started = false;
-  youAlive = false;
-  try {
-    document.body.classList.remove('inGame');
-  } catch {}
-  updateMenuNameUi();
-  syncMenuOnboardingUi();
-  createRoomPending = false;
-  updateRoomsCreateUi();
-  lastYouStats = null;
-  if (roomsLoadTimeout) {
-    clearTimeout(roomsLoadTimeout);
-    roomsLoadTimeout = 0;
-  }
-  if (roomsLoading && (!Array.isArray(lastRooms) || lastRooms.length === 0)) {
-    roomsLoading = false;
-  }
-  overlayManager.focusDefault('menu');
-  if (topHudEl) topHudEl.setAttribute('aria-hidden', 'true');
-  youStreak = 0;
-  syncOverlayUiState();
-  // C3: панель «Ваш облик» — рисуем сразу, как только меню показано.
-  scheduleMenuSkinPreview();
-  renderMenuMeta();
+  showMenuOverlayImpl({
+    cancelDeathSlowMo,
+    menuOverlay,
+    deathOverlay,
+    overlayManager,
+    setStarted: (v) => {
+      started = v;
+    },
+    setYouAlive: (v) => {
+      youAlive = v;
+    },
+    updateMenuNameUi,
+    syncMenuOnboardingUi,
+    setCreateRoomPending: (v) => {
+      createRoomPending = v;
+    },
+    updateRoomsCreateUi,
+    setLastYouStats: (v) => {
+      lastYouStats = v;
+    },
+    getRoomsLoadTimeout: () => roomsLoadTimeout,
+    setRoomsLoadTimeout: (v) => {
+      roomsLoadTimeout = v;
+    },
+    getRoomsLoading: () => roomsLoading,
+    setRoomsLoading: (v) => {
+      roomsLoading = v;
+    },
+    getLastRooms: () => lastRooms,
+    topHudEl,
+    setYouStreak: (v) => {
+      youStreak = v;
+    },
+    syncOverlayUiState,
+    scheduleMenuSkinPreview,
+    renderMenuMeta
+  });
 }
 
 function hideMenuOverlay() {
@@ -4561,44 +3671,22 @@ function hideMenuOverlay() {
 const menuMetaEl = document.getElementById('menuMeta');
 
 function renderMenuMeta() {
-  if (!menuMetaEl) return;
-  if (menuOverlay?.classList.contains('hidden')) return;
-
-  const rows = [];
-
-  for (const slot of dailySlots()) {
-    const it = youDailies.get(slot);
-    if (!it || !it.type || it.goal <= 0) continue;
-    const prog = Math.max(0, Math.min(it.goal, Number(it.prog) || 0));
-    const done = prog >= it.goal;
-    const pct = (prog / it.goal) * 100;
-    rows.push(`
-      <div class="menuMetaRow${done ? ' isDone' : ''}">
-        <span class="menuMetaIcon" aria-hidden="true">${done ? '🏁' : '📅'}</span>
-        <span class="menuMetaText">${escapeHtml(dailyLabel(it.type))}</span>
-        <span class="menuMetaValue">${fmtInt(prog)}/${fmtInt(it.goal)}</span>
-        <span class="menuMetaBar"><span class="menuMetaBarFill" style="width:${pct.toFixed(1)}%"></span></span>
-      </div>`);
-  }
-
-  // Прогресс до первого скина — только пока он действительно первый.
-  let ownedExtra = 0;
-  for (const cat of COSMETICS_CATS) ownedExtra += Math.max(0, cosmeticsOwnedCount(cat) - 1);
-  const price = cosmeticsCheapestPrice();
-  if (ownedExtra === 0 && price > 0) {
-    const have = Math.max(0, Math.floor(Number(youStyle) || 0));
-    const left = missingFor(price, have);
-    const pct = Math.max(0, Math.min(100, (have / price) * 100));
-    rows.push(`
-      <div class="menuMetaRow${left === 0 ? ' isDone' : ''}">
-        <span class="menuMetaIcon" aria-hidden="true">✨</span>
-        <span class="menuMetaText">${escapeHtml(t('match.first_skin'))}</span>
-        <span class="menuMetaValue">${left > 0 ? `${fmtInt(have)}/${fmtInt(price)}` : escapeHtml(t('cosmetics.buy'))}</span>
-        <span class="menuMetaBar"><span class="menuMetaBarFill" style="width:${pct.toFixed(1)}%"></span></span>
-      </div>`);
-  }
-
-  setSafeHtml(menuMetaEl, rows.join(''));
+  renderMenuMetaImpl({
+    menuMetaEl,
+    menuOverlay,
+    dailySlots,
+    youDailies,
+    dailyLabel,
+    escapeHtml,
+    t,
+    fmtInt,
+    COSMETICS_CATS,
+    cosmeticsOwnedCount,
+    cosmeticsCheapestPrice,
+    missingFor,
+    getYouStyle: () => youStyle,
+    setSafeHtml
+  });
 }
 
 leaveBtn?.addEventListener('click', () => {
@@ -4613,236 +3701,45 @@ leaveBtn?.addEventListener('click', () => {
   showMenuOverlay();
 });
 
-function renderRoomsList(rooms, emptyMessage) {
-  if (!roomsListEl) return;
-  roomsListEl.textContent = '';
-  if (!Array.isArray(rooms) || rooms.length === 0) {
-    roomsListEl.textContent = emptyMessage || t('rooms.empty');
-    return;
-  }
-
-  const wrap = document.createElement('div');
-  wrap.setAttribute('role', 'listbox');
-  wrap.setAttribute('aria-label', t('rooms.list_aria'));
-  for (const r of rooms) {
-    const row = document.createElement('div');
-    const rid = r?.id;
-    const titleText = String(r?.title || '').trim();
-    const humans = Number(r?.humans) || 0;
-    const limit = Number(r?.limit) || 0;
-    const names = Array.isArray(r?.names) ? r.names : [];
-    const nameCount = Number(r?.nameCount) || names.length;
-    const namesTruncated = !!r?.namesTruncated;
-
-    const title = document.createElement('div');
-    title.className = 'roomRowTitle';
-    if (titleText) title.textContent = `${titleText} (#${rid})`;
-    else title.textContent = `${t('rooms.room')} ${rid}`;
-
-    const meta = document.createElement('div');
-    meta.className = 'roomRowMeta';
-    meta.textContent = `${humans}/${limit}`;
-
-    const list = document.createElement('div');
-    list.className = 'roomRowSub';
-    const hidden = Math.max(0, nameCount - names.length);
-    const suffix = (namesTruncated || hidden > 0) && hidden > 0 ? ` (+${hidden})` : '';
-    list.textContent = (names.length ? names.join(', ') : '—') + suffix;
-
-    const join = document.createElement('button');
-    join.className = 'btnGhost roomRowJoin';
-    join.type = 'button';
-    join.textContent = t('rooms.join');
-    join.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      attemptJoinRoom(rid);
-    });
-
-    row.classList.add('roomRow');
-    row.dataset.rid = String(rid);
-    row.setAttribute('role', 'option');
-    if (selectedRoomId != null && Number(rid) === Number(selectedRoomId)) {
-      row.classList.add('selected');
-      row.setAttribute('aria-selected', 'true');
-    } else {
-      row.setAttribute('aria-selected', 'false');
-    }
-    row.tabIndex = 0;
-
-    const applySelection = (target) => {
+function renderRoomsListLocal(rooms, emptyMessage) {
+  renderRoomsList(roomsListEl, rooms, {
+    t,
+    selectedRoomId,
+    emptyMessage,
+    onSelect: (rid) => {
       selectedRoomId = rid;
       if (joinRoomBtn) joinRoomBtn.disabled = selectedRoomId == null;
-      const parent = target?.parentElement;
-      if (parent) {
-        for (const el of parent.children) {
-          try {
-            el.classList.remove('selected');
-            el.setAttribute('aria-selected', 'false');
-          } catch {}
-        }
-      }
-      try {
-        target.classList.add('selected');
-        target.setAttribute('aria-selected', 'true');
-      } catch {}
-    };
-
-    row.addEventListener('click', () => {
-      applySelection(row);
-      updateRoomsStats(lastRooms);
-    });
-    row.addEventListener('dblclick', () => {
-      applySelection(row);
-      attemptJoinRoom(rid);
-    });
-    row.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
-        e.preventDefault();
-        applySelection(row);
-        return;
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        applySelection(row);
-        attemptJoinRoom(rid);
-        return;
-      }
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        const parent = row.parentElement;
-        if (!parent) return;
-        const items = Array.from(parent.children);
-        const idx = items.indexOf(row);
-        const next = e.key === 'ArrowDown' ? items[idx + 1] : items[idx - 1];
-        const nextRid = next?.dataset?.rid;
-        if (!next || nextRid == null) return;
-        try {
-          next.focus();
-        } catch {}
-        selectedRoomId = Number(nextRid);
-        if (joinRoomBtn) joinRoomBtn.disabled = selectedRoomId == null;
-        for (const el of items) {
-          try {
-            el.classList.remove('selected');
-            el.setAttribute('aria-selected', 'false');
-          } catch {}
-        }
-        try {
-          next.classList.add('selected');
-          next.setAttribute('aria-selected', 'true');
-        } catch {}
-      }
-    });
-
-    const top = document.createElement('div');
-    top.className = 'roomRowTop';
-    const left = document.createElement('div');
-    left.className = 'roomRowLeft';
-    left.appendChild(title);
-    left.appendChild(meta);
-    top.appendChild(left);
-    top.appendChild(join);
-
-    row.appendChild(top);
-    row.appendChild(list);
-    wrap.appendChild(row);
-  }
-  roomsListEl.appendChild(wrap);
+      updateRoomsStatsLocal(lastRooms);
+    },
+    onJoin: (rid) => attemptJoinRoom(rid)
+  });
 }
 
-function renderRoomsEmpty(kind, message) {
-  if (!roomsListEl) return;
-  roomsListEl.textContent = '';
-
-  const wrap = document.createElement('div');
-  wrap.className = 'roomsEmpty';
-
-  const title = document.createElement('div');
-  title.className = 'roomsEmptyTitle';
-
-  const desc = document.createElement('div');
-  desc.className = 'roomsEmptyDesc';
-
-  const actions = document.createElement('div');
-  actions.className = 'roomsEmptyActions';
-
-  const k = String(kind || 'empty');
-  if (k === 'loading') {
-    title.textContent = t('rooms.empty_loading_title');
-    desc.textContent = t('rooms.empty_loading_desc');
-  } else if (k === 'error') {
-    title.textContent = t('rooms.empty_error_title');
-    desc.textContent = String(message || t('rooms.empty_error_desc'));
-    const retry = document.createElement('button');
-    retry.className = 'btnGhost';
-    retry.textContent = t('rooms.retry');
-    retry.addEventListener('click', () => refreshRoomsBtn?.click());
-    const create = document.createElement('button');
-    create.className = 'btnPrimary';
-    create.textContent = t('rooms.create_room');
-    create.addEventListener('click', () => setRoomsCreateOpen(true));
-    actions.appendChild(retry);
-    actions.appendChild(create);
-  } else if (k === 'noMatch') {
-    title.textContent = t('rooms.empty_no_match_title');
-    desc.textContent = t('rooms.empty_no_match_desc');
-    const reset = document.createElement('button');
-    reset.className = 'btnGhost';
-    reset.textContent = t('rooms.reset_search');
-    reset.addEventListener('click', () => {
+function renderRoomsEmptyLocal(kind, message) {
+  renderRoomsEmpty(roomsListEl, kind, message, {
+    t,
+    onRetry: () => refreshRoomsBtn?.click(),
+    onCreateRoom: () => setRoomsCreateOpen(true),
+    onResetSearch: () => {
       if (roomsSearchInput) roomsSearchInput.value = '';
       updateRoomsUi();
       try {
         roomsSearchInput?.focus();
       } catch {}
-    });
-    const create = document.createElement('button');
-    create.className = 'btnPrimary';
-    create.textContent = t('rooms.create_room');
-    create.addEventListener('click', () => {
-      setRoomsCreateOpen(true);
-    });
-    actions.appendChild(reset);
-    actions.appendChild(create);
-  } else {
-    title.textContent = t('rooms.empty_none_title');
-    desc.textContent = t('rooms.empty_none_desc');
-    const create = document.createElement('button');
-    create.className = 'btnPrimary';
-    create.textContent = t('rooms.create_room');
-    create.addEventListener('click', () => {
-      setRoomsCreateOpen(true);
-    });
-    actions.appendChild(create);
-  }
-
-  wrap.appendChild(title);
-  wrap.appendChild(desc);
-  if (actions.childNodes.length) wrap.appendChild(actions);
-  roomsListEl.appendChild(wrap);
+    }
+  });
 }
 
-function updateRoomsStats(rawRooms) {
-  const rooms = Array.isArray(rawRooms) ? rawRooms : [];
-  const totalHumans = rooms.reduce((acc, r) => acc + (Number(r?.humans) || 0), 0);
-
-  // Счётчик онлайна в шапке меню: самая ценная для конверсии цифра, раньше она
-  // была спрятана в служебную строку внутри свёрнутой панели комнат.
-  try {
-    const onlineEl = document.getElementById('menuOnlineCount');
-    if (onlineEl) onlineEl.textContent = formatNumber(totalHumans);
-    // K7: в поле `humans` сервер считает только людей, поэтому в пустой момент
-    // бейдж честно писал «0 сейчас играют» — при 13 живых ботах на карте это
-    // худшая из возможных первых цифр. Ботов в списке комнат нет, посчитать их
-    // клиент не может, поэтому нулевой бейдж просто прячем.
-    const badgeEl = document.getElementById('menuOnlineBadge');
-    if (badgeEl) badgeEl.classList.toggle('hidden', !(totalHumans > 0));
-  } catch {}
-
-  if (!roomsStatsEl) return;
-  const status = roomsLoading ? ` • ${t('rooms.loading')}` : roomsLoadError ? ` • ${roomsLoadError}` : '';
-  roomsStatsEl.textContent = `${t('rooms.stats_prefix')}: ${formatNumber(rooms.length)} • ${t('rooms.stats_online')}: ${formatNumber(totalHumans)}${wsStatusSuffix()}${status}`;
+function updateRoomsStatsLocal(rawRooms) {
+  updateRoomsStats(
+    rawRooms,
+    {
+      statsEl: roomsStatsEl,
+      onlineEl: document.getElementById('menuOnlineCount'),
+      badgeEl: document.getElementById('menuOnlineBadge')
+    },
+    { t, formatNumber, wsStatusSuffix, loading: roomsLoading, error: roomsLoadError }
+  );
 }
 
 /* Порядок и отбор комнат переехали в client_rooms.js — вместе с тестами.
@@ -4866,27 +3763,27 @@ function updateRoomsUi() {
   if (joinRoomBtn) {
     joinRoomBtn.disabled = selectedRoomId == null;
   }
-  updateRoomsStats(lastRooms);
+  updateRoomsStatsLocal(lastRooms);
   const raw = Array.isArray(lastRooms) ? lastRooms : [];
   const filtered = applyRoomsFilterSort();
 
   if (roomsLoading && raw.length === 0) {
-    renderRoomsEmpty('loading');
+    renderRoomsEmptyLocal('loading');
     return;
   }
   if (roomsLoadError && raw.length === 0) {
-    renderRoomsEmpty('error', roomsLoadError);
+    renderRoomsEmptyLocal('error', roomsLoadError);
     return;
   }
   if (raw.length === 0) {
-    renderRoomsEmpty('empty');
+    renderRoomsEmptyLocal('empty');
     return;
   }
   if (filtered.length === 0) {
-    renderRoomsEmpty('noMatch');
+    renderRoomsEmptyLocal('noMatch');
     return;
   }
-  renderRoomsList(filtered);
+  renderRoomsListLocal(filtered);
 }
 
 playBtn?.addEventListener('click', () => {
@@ -5009,60 +3906,6 @@ function updateRoomInfo() {
   } catch {}
 }
 
-function ensureLeaderboardDom() {
-  if (!statsEl) return;
-  if (leaderboardTable && leaderboardTbody) return;
-
-  leaderboardTable = document.createElement('table');
-  const thead = document.createElement('thead');
-  const trh = document.createElement('tr');
-  const thRank = document.createElement('th');
-  thRank.textContent = '#';
-  thRank.className = 'rank';
-  const thName = document.createElement('th');
-  thName.textContent = t('leaderboard.player');
-  const thCells = document.createElement('th');
-  thCells.textContent = t('leaderboard.cells');
-  thCells.style.textAlign = 'right';
-  const thPct = document.createElement('th');
-  thPct.textContent = t('leaderboard.share');
-  thPct.style.textAlign = 'right';
-  trh.appendChild(thRank);
-  trh.appendChild(thName);
-  trh.appendChild(thCells);
-  trh.appendChild(thPct);
-  thead.appendChild(trh);
-  leaderboardTable.appendChild(thead);
-
-  leaderboardTbody = document.createElement('tbody');
-  leaderboardTable.appendChild(leaderboardTbody);
-
-  statsEl.replaceChildren(leaderboardTable);
-}
-
-function createLeaderboardRow(p) {
-  const tr = document.createElement('tr');
-  tr.dataset.pid = String(p.n);
-  tr.classList.add('lb-enter');
-
-  const tdRank = document.createElement('td');
-  tdRank.className = 'rank';
-  const tdName = document.createElement('td');
-  tdName.className = 'name';
-  const tdCells = document.createElement('td');
-  tdCells.className = 'num';
-  const tdPct = document.createElement('td');
-  tdPct.className = 'num';
-
-  tr.appendChild(tdRank);
-  tr.appendChild(tdName);
-  tr.appendChild(tdCells);
-  tr.appendChild(tdPct);
-
-  tr._lb = { tdRank, tdName, tdCells, tdPct };
-  return tr;
-}
-
 function computeTopSorted(players) {
   return sortPlayersByScore(players);
 }
@@ -5074,308 +3917,58 @@ function commitBestPct(pct) {
 }
 
 function renderDeathStats() {
-  if (!deathStatsEl) return;
-  if (!lastState) {
-    deathStatsEl.textContent = '';
-    return;
-  }
-  const ordered = computeTopSorted(lastState.players);
-  const meIndex = ordered.findIndex((p) => p.n === you);
-  const me = meIndex >= 0 ? ordered[meIndex] : null;
-
-  const snap = lastYouStats;
-  const cells = Number(snap?.cells ?? me?.s) || 0;
-  const pct = Number(snap?.pct ?? (mapCells ? (cells / mapCells) * 100 : 0)) || 0;
-  const place =
-    String(snap?.place || '').trim() || (meIndex >= 0 ? `${meIndex + 1}/${ordered.length}` : '—');
-
-  const points = Number(snap?.points ?? me?.p) || 0;
-
-  let contractText = '';
-  if (youContractType) {
-    const cn = contractLabel(youContractType) || infoPack().labels.contract;
-    contractText = `${cn}: ${youContractProgress}/${youContractGoal}`;
-  }
-
-  const top = ordered.slice(0, 5);
-  const rows = top
-    .map((p, i) => {
-      const pid = String(p.n);
-      const nm = p.nm || String(p.n);
-      const isMe = p.n === you;
-      return `
-        <tr class="${isMe ? 'matchRowMe' : ''} frame${cosClampId(p.cosFrame)}" data-pid="${pid}">
-          <td class="num">${i + 1}</td>
-          <td class="name">${playerTitleHtml(cosTitleByPlayer.get(p.n) || 0)}${escapeHtml(nm)}</td>
-          <td class="num">${Number(p.p) || 0}</td>
-        </tr>
-      `;
-    })
-    .join('');
-
-  // Рекорд считаем один раз на показ оверлея: renderDeathStats зовётся и на
-  // обновлениях состояния, поэтому «новый рекорд» сохраняется в deathBestShown.
-  const bestInfo = deathBestShown || commitBestPct(pct);
-  deathBestShown = bestInfo;
-
-  const isTop1 = place && place !== '—' && place.startsWith('1/');
-
-  setSafeHtml(
+  renderDeathStatsImpl({
     deathStatsEl,
-    `
-    <div class="matchSummary" aria-label="${escapeHtml(t('death.your_result'))}">
-      <div class="matchKpiGrid">
-        <div class="matchKpi">
-          <div class="matchKpiLabel">${escapeHtml(t('death.place'))}</div>
-          <div class="matchKpiValue">${escapeHtml(place)}</div>
-        </div>
-        <div class="matchKpi">
-          <div class="matchKpiLabel">${escapeHtml(t('death.points'))}</div>
-          <div class="matchKpiValue">${fmtInt(points)}</div>
-        </div>
-      </div>
-
-      <div class="matchMiniGrid">
-        <div class="matchMini">
-          <div class="matchMiniLabel">${escapeHtml(t('death.zone'))}</div>
-          <div class="matchMiniValue">${fmtInt(cells)} • ${fmtPct1(pct)}</div>
-        </div>
-        <div class="matchMini">
-          <div class="matchMiniLabel">${escapeHtml(t('death.kills'))}</div>
-          <div class="matchMiniValue">${fmtInt(youKills)}</div>
-        </div>
-        ${
-          // До первого осмысленного забега рекорда нет, и «Рекорд зоны 0,0%» —
-          // не мотиватор, а насмешка. Карточка появляется вместе с рекордом.
-          bestInfo.best > 0
-            ? `
-        <div class="matchMini${bestInfo.isRecord ? ' deathRecord' : ''}">
-          <div class="matchMiniLabel">${escapeHtml(bestInfo.isRecord ? t('death.new_record') : t('death.best_zone'))}</div>
-          <div class="matchMiniValue">${fmtPct1(bestInfo.best)}</div>
-        </div>`
-            : ''
-        }
-        ${
-          contractText
-            ? `
-        <div class="matchMini">
-          <div class="matchMiniLabel">${escapeHtml(t('death.contract'))}</div>
-          <div class="matchMiniValue">${escapeHtml(contractText)}</div>
-        </div>`
-            : ''
-        }
-      </div>
-
-      <div class="matchNextGap">${isTop1 ? escapeHtml(t('death.top1')) : escapeHtml(t('death.try_again'))}</div>
-    </div>
-
-    <div class="matchTableWrap" role="region" aria-label="${escapeHtml(t('death.top'))}">
-      <table class="matchTable">
-        <thead>
-          <tr>
-            <th class="num">#</th>
-            <th>${escapeHtml(t('match.player'))}</th>
-            <th class="num">${escapeHtml(t('death.points'))}</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows}
-        </tbody>
-      </table>
-    </div>
-  `
-  );
-
-  try {
-    const now = performance.now();
-    if (rightTeamDetailsEl && !rightTeamDetailsEl.open) {
-      if (!renderTeamHud._u || now - renderTeamHud._u > 1600) {
-        renderTeamHud._u = now;
-        teamUnreadCount = Math.min(999, teamUnreadCount + 1);
-        setBadgeCount(rightTeamBadgeEl, teamUnreadCount);
-      }
-    }
-  } catch {}
-  try {
-    syncRightEmptyStates();
-  } catch {}
+    clientState,
+    you,
+    lastYouStats,
+    mapCells,
+    youContractType,
+    youContractProgress,
+    youContractGoal,
+    contractLabel,
+    infoPack,
+    computeTopSorted,
+    cosClampId,
+    playerTitleHtml,
+    cosTitleByPlayer,
+    escapeHtml,
+    getDeathBestShown: () => deathBestShown,
+    setDeathBestShown: (v) => {
+      deathBestShown = v;
+    },
+    commitBestPct,
+    setSafeHtml,
+    t,
+    fmtInt,
+    fmtPct1,
+    youKills,
+    rightTeamDetailsEl,
+    renderTeamHudState: renderTeamHud,
+    teamUnreadCount: () => teamUnreadCount,
+    setTeamUnreadCount: (v) => {
+      teamUnreadCount = v;
+    },
+    setBadgeCount,
+    rightTeamBadgeEl,
+    syncRightEmptyStates
+  });
 }
 
 renderTeamHud._u = 0;
 renderTeamHud._at = 0;
 
 function updateLeaderboard() {
-  if (!lastState) return;
-  ensureLeaderboardDom();
-  if (!leaderboardTbody) return;
-
-  const now = performance.now();
-  lastLeaderboardRenderAt = now;
-
-  const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-  const small = window.innerWidth <= 720;
-  const maxRows = small ? 8 : 10;
-  const topCount = 5;
-  const ordered = computeTopSorted(lastState.players);
-  const meIndex = ordered.findIndex((p) => p.n === you);
-
-  // Hysteresis for switching between "Top" and "Around me" mode.
-  // This prevents the leaderboard from constantly changing its set of rows near the boundary.
-  if (meIndex < 0) {
-    lbMode = 'top';
-  } else if (lbMode === 'top') {
-    if (meIndex >= topCount + 1) {
-      lbMode = 'around';
-      lbAroundIndex = meIndex;
-      lbAroundIndexAt = now;
-    }
-  } else {
-    if (meIndex <= topCount - 2) {
-      lbMode = 'top';
-    }
-  }
-
-  const pick = [];
-  const picked = new Set();
-  const pushAt = (i) => {
-    if (i < 0 || i >= ordered.length) return;
-    const p = ordered[i];
-    const pid = String(p.n);
-    if (picked.has(pid)) return;
-    picked.add(pid);
-    pick.push({ p, rank: i + 1 });
-  };
-
-  for (let i = 0; i < topCount; i++) pushAt(i);
-  if (lbMode === 'around' && meIndex >= topCount) {
-    if (lbAroundIndex == null) {
-      lbAroundIndex = meIndex;
-      lbAroundIndexAt = now;
-    } else {
-      const diff = Math.abs(meIndex - lbAroundIndex);
-      // Update the around-me anchor only on meaningful movement or after a short cooldown.
-      if (diff >= 2 || (diff >= 1 && now - lbAroundIndexAt > 2500)) {
-        lbAroundIndex = meIndex;
-        lbAroundIndexAt = now;
-      }
-    }
-    for (let i = lbAroundIndex - 2; i <= lbAroundIndex + 2; i++) pushAt(i);
-  }
-  if (pick.length > maxRows) pick.length = maxRows;
-
-  const nearIds = new Set();
-  if (meIndex >= 0) {
-    for (let i = meIndex - 1; i <= meIndex + 1; i++) {
-      if (i < 0 || i >= ordered.length) continue;
-      nearIds.add(String(ordered[i].n));
-    }
-  }
-
-  const firstTops = new Map();
-  if (!reduceMotion) {
-    for (const tr of leaderboardTbody.children) {
-      const pid = tr?.dataset?.pid;
-      if (!pid) continue;
-      firstTops.set(pid, tr.getBoundingClientRect().top);
-    }
-  }
-
-  const nextIds = new Set();
-  for (const it of pick) {
-    const p = it.p;
-    const pid = String(p.n);
-    nextIds.add(pid);
-
-    let tr = leaderboardRowsById.get(pid);
-    if (!tr) {
-      tr = createLeaderboardRow(p);
-      leaderboardRowsById.set(pid, tr);
-    }
-
-    if (p.n === you) tr.classList.add('me');
-    else tr.classList.remove('me');
-    // Рамка — CSS-класс .frame0..7 на строке таблицы лидеров.
-    const frCls = `frame${cosClampId(p.cosFrame)}`;
-    if (tr._frCls !== frCls) {
-      if (tr._frCls) tr.classList.remove(tr._frCls);
-      tr.classList.add(frCls);
-      tr._frCls = frCls;
-    }
-    if (p.n !== you && nearIds.has(pid)) tr.classList.add('lbNear');
-    else tr.classList.remove('lbNear');
-
-    const lb = tr._lb;
-    if (lb) {
-      if (lb.tdRank) lb.tdRank.textContent = String(it.rank);
-      // Титул перед ником — как в плашке над головой и в итогах матча.
-      setNameCellWithTitle(lb.tdName, cosTitleByPlayer.get(p.n) || 0, p.nm || String(p.n), p.n);
-      lb.tdCells.textContent = `${p.p || 0} • ${p.s || 0}`;
-      const pct = mapCells ? ((p.s || 0) / mapCells) * 100 : 0;
-      lb.tdPct.textContent = pct.toFixed(1);
-    }
-  }
-
-  // Signature must be stable and preserve order; Set iteration order can be misleading.
-  const sig = pick.map((it) => String(it.p.n)).join(',');
-  if (sig === lastLeaderboardSig) {
-    // Только обновляем данные/классы — без перестановок DOM и без FLIP.
-    return;
-  }
-  lastLeaderboardSig = sig;
-
-  for (const it of pick) {
-    const pid = String(it.p.n);
-    const tr = leaderboardRowsById.get(pid);
-    if (!tr) continue;
-    leaderboardTbody.appendChild(tr);
-  }
-
-  for (const [pid, tr] of leaderboardRowsById) {
-    if (nextIds.has(pid)) continue;
-    if (!tr || tr.classList.contains('lb-leave')) {
-      leaderboardRowsById.delete(pid);
-      continue;
-    }
-    tr.classList.remove('lb-enter');
-    tr.classList.add('lb-leave');
-    setTimeout(() => {
-      tr.remove();
-    }, 260);
-    leaderboardRowsById.delete(pid);
-  }
-
-  const moved = [];
-  if (!reduceMotion) {
-    for (const pid of nextIds) {
-      const tr = leaderboardRowsById.get(pid);
-      if (!tr) continue;
-      const firstTop = firstTops.get(pid);
-      if (firstTop == null) continue;
-      const lastTop = tr.getBoundingClientRect().top;
-      const dy = firstTop - lastTop;
-      if (!dy) continue;
-      tr.style.transition = 'none';
-      tr.style.transform = `translateY(${dy}px)`;
-      moved.push(tr);
-    }
-
-    // Force layout so the browser applies the inverted transforms before we start transitions.
-    leaderboardTbody.getBoundingClientRect();
-  }
-
-  requestAnimationFrame(() => {
-    for (const pid of nextIds) {
-      const tr = leaderboardRowsById.get(pid);
-      if (!tr) continue;
-      if (tr.classList.contains('lb-enter')) tr.classList.remove('lb-enter');
-    }
-
-    if (reduceMotion) return;
-
-    for (const tr of moved) {
-      tr.style.transition = '';
-      tr.style.transform = '';
-    }
+  renderLeaderboard(clientState.lastState, {
+    you,
+    mapCells,
+    statsEl,
+    t,
+    cosTitleByPlayer,
+    botArchInfo,
+    botArchBadge,
+    cosTitleName,
+    lang
   });
 }
 
@@ -5425,96 +4018,6 @@ chatInput?.addEventListener('keydown', (e) => {
       chatForm?.dispatchEvent?.(new Event('submit', { cancelable: true }));
     } catch {}
   }
-});
-
-function toggleEmojiPanel(open) {
-  const shouldOpen = open ?? !emojiPanel.classList.contains('open');
-  emojiPanel.classList.toggle('open', shouldOpen);
-  if (shouldOpen) chatOpenUntil = performance.now() + 12000;
-  if (shouldOpen) {
-    renderEmojiRecent();
-  } else {
-    renderEmojiGrid(EMOJIS);
-  }
-}
-
-emojiBtn.addEventListener('click', () => {
-  if (chat.classList.contains('collapsed')) setChatCollapsed(false);
-  toggleEmojiPanel();
-});
-
-const RECENT_KEY = 'recentEmojis';
-let recentEmojis = [];
-
-function getEmojiCode(e) {
-  const cps = Array.from(String(e)).map((ch) => ch.codePointAt(0).toString(16));
-  return cps.join('-').toLowerCase().replace(/-fe0f/g, '');
-}
-
-function loadRecentEmojis() {
-  try {
-    const v = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
-    if (Array.isArray(v)) return v.filter((x) => typeof x === 'string').slice(0, 24);
-  } catch {
-    // ignore
-  }
-  return [];
-}
-
-function saveRecentEmojis() {
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(recentEmojis.slice(0, 24)));
-  } catch {
-    // ignore
-  }
-}
-
-function pushRecentEmoji(e) {
-  const s = String(e);
-  recentEmojis = [s, ...recentEmojis.filter((x) => x !== s)].slice(0, 24);
-  saveRecentEmojis();
-}
-
-function createEmojiButton(e) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  setSafeEmojiHtml(b, e);
-  b.addEventListener('click', () => {
-    insertAtCursor(chatInput, e);
-    pushRecentEmoji(e);
-    renderEmojiRecent();
-    chatOpenUntil = performance.now() + 12000;
-  });
-  return b;
-}
-
-function renderEmojiGrid(list) {
-  if (!emojiGrid) return;
-  const frag = document.createDocumentFragment();
-  for (const e of list) frag.appendChild(createEmojiButton(e));
-  emojiGrid.replaceChildren(frag);
-}
-
-function renderEmojiRecent() {
-  if (!emojiRecent) return;
-  if (!recentEmojis.length) {
-    emojiRecent.classList.add('hidden');
-    emojiRecent.replaceChildren();
-    return;
-  }
-  emojiRecent.classList.remove('hidden');
-  const frag = document.createDocumentFragment();
-  for (const e of recentEmojis) frag.appendChild(createEmojiButton(e));
-  emojiRecent.replaceChildren(frag);
-}
-
-recentEmojis = loadRecentEmojis();
-renderEmojiGrid(EMOJIS);
-
-setSafeEmojiHtml(emojiBtn, '\u{1F600}');
-
-emojiCloseBtn?.addEventListener('click', () => {
-  toggleEmojiPanel(false);
 });
 
 function setChatCollapsed(v) {
@@ -5721,86 +4224,6 @@ nameInput.addEventListener('keydown', (e) => {
 
 function formatTime(t) {
   return formatClock(t);
-}
-
-function addChatLine(msg) {
-  chatMessages.push(msg);
-  let shifted = false;
-  while (chatMessages.length > 200) {
-    chatMessages.shift();
-    shifted = true;
-  }
-  if (chat.classList.contains('collapsed')) {
-    bumpChatVisibility(CHAT_AUTO_OPEN_MS, false);
-  }
-
-  try {
-    const ae = document.activeElement;
-    const focused = !!(ae && chat.contains(ae));
-    if (!focused) {
-      unreadCount = Math.min(999, unreadCount + 1);
-      updateUnreadBadge();
-    }
-  } catch {}
-
-  if (shifted) {
-    renderChat();
-    bumpChatVisibility(CHAT_AUTO_OPEN_MS, false);
-    return;
-  }
-
-  if (chatRenderedCount === chatMessages.length - 1) {
-    const atBottom = chatLog.scrollTop + chatLog.clientHeight >= chatLog.scrollHeight - 24;
-    chatLog.appendChild(buildChatLineElement(msg));
-    chatRenderedCount = chatMessages.length;
-    if (atBottom) chatLog.scrollTop = chatLog.scrollHeight;
-  } else {
-    renderChat();
-  }
-  bumpChatVisibility(CHAT_AUTO_OPEN_MS, false);
-  updateChatLayout();
-}
-
-function buildChatLineElement(m) {
-  const line = document.createElement('div');
-  line.className = 'chatLine';
-  if (m?.n === you) line.classList.add('me');
-
-  const meta = document.createElement('div');
-  meta.className = 'chatMeta';
-
-  const nameEl = document.createElement('div');
-  nameEl.className = 'chatName';
-  nameEl.textContent = displayNameOf(m?.n);
-
-  const timeEl = document.createElement('div');
-  timeEl.className = 'chatTime';
-  timeEl.textContent = formatTime(m?.t);
-
-  meta.appendChild(nameEl);
-  meta.appendChild(timeEl);
-
-  const textEl = document.createElement('div');
-  textEl.className = 'chatText';
-  setSafeEmojiHtml(textEl, String(m?.text ?? ''));
-
-  line.appendChild(meta);
-  line.appendChild(textEl);
-  return line;
-}
-
-function renderChat() {
-  const atBottom = chatLog.scrollTop + chatLog.clientHeight >= chatLog.scrollHeight - 24;
-
-  const frag = document.createDocumentFragment();
-  for (const m of chatMessages) {
-    frag.appendChild(buildChatLineElement(m));
-  }
-
-  chatLog.replaceChildren(frag);
-  chatRenderedCount = chatMessages.length;
-  if (atBottom) chatLog.scrollTop = chatLog.scrollHeight;
-  updateChatLayout();
 }
 
 chatInput?.addEventListener('input', () => {
@@ -6218,6 +4641,51 @@ function endSwipe(e) {
 canvas.addEventListener('pointerup', endSwipe);
 canvas.addEventListener('pointercancel', endSwipe);
 
+// C14: у бонусов на канвасе нет нативного title — маленькая подсказка рядом
+// с курсором при наведении на иконку подсказывает эффект без лишней вёрстки.
+let powerUpTooltipEl = null;
+function powerUpTooltip() {
+  if (!powerUpTooltipEl) {
+    powerUpTooltipEl = document.createElement('div');
+    powerUpTooltipEl.className = 'powerupTooltip hidden';
+    document.body.appendChild(powerUpTooltipEl);
+  }
+  return powerUpTooltipEl;
+}
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'touch') return;
+  if (!powerUpScreenPos.length) {
+    if (powerUpTooltipEl) powerUpTooltipEl.classList.add('hidden');
+    return;
+  }
+  const mx = e.clientX;
+  const my = e.clientY;
+  let hit = null;
+  let bestD = Infinity;
+  for (const p of powerUpScreenPos) {
+    const dx = mx - p.cx;
+    const dy = my - p.cy;
+    const d = dx * dx + dy * dy;
+    const rr = (p.r * 1.6) * (p.r * 1.6);
+    if (d <= rr && d < bestD) {
+      bestD = d;
+      hit = p;
+    }
+  }
+  const el = powerUpTooltip();
+  if (!hit) {
+    el.classList.add('hidden');
+    return;
+  }
+  el.textContent = powerupLabel(hit.type);
+  el.style.left = `${mx + 14}px`;
+  el.style.top = `${my + 14}px`;
+  el.classList.remove('hidden');
+});
+canvas.addEventListener('pointerleave', () => {
+  if (powerUpTooltipEl) powerUpTooltipEl.classList.add('hidden');
+});
+
 // Zoom disabled: fixed visible area regardless of screen size
 
 /* G-lag: диагностика жалобы «поле рисуется, а движение долго не начинается».
@@ -6607,67 +5075,17 @@ function cosmeticsOpIsPending(cat, id) {
   return pendingCosmeticsOp.cat === cat && Number(pendingCosmeticsOp.id) === Number(id);
 }
 
+/* Показ/скрытие/анимация оверлея — DOM-обвязка магазина в client_shop_ui.js. */
 function showCosmeticsOverlay() {
-  if (!cosmeticsOverlay) return;
-  if (!cosmeticsLoaded) {
-    cosmeticsEnsureLocalReady();
-  }
-  cosmeticsOpen = true;
-  cosmeticsOverlay.classList.remove('hidden');
-  overlayManager.open('cosmetics');
-  cosmeticsOpClear();
-  /* C13: открываем превью на том предмете, который реально надет.
-     Титулы — не покупаемая категория, и раньше их выбор проваливался в
-     ветку по умолчанию цепочки if и указывал на id надетой РАМКИ. Теперь
-     неизвестная категория даёт 0, но у титулов есть своё «надетое», и его
-     надо взять явно — ровно так же, как это делает переключение вкладок. */
-  const eq0 = cosmeticsCat === 'title' ? youTitleId : cosmeticsEqForCat(cosmeticsCat);
-  cosmeticsSelId = Number.isFinite(Number(eq0)) ? Number(eq0) : 0;
-  setCosmeticsStatus('', '');
-  if (!wsIsConnected()) setCosmeticsStatus(() => t('cosmetics.no_connection'), 'info');
-  else if (cosmeticsSource !== 'server') setCosmeticsStatus(() => t('cosmetics.unconfirmed_hint'), 'info');
-  syncOverlayUiState();
-  syncCosmeticsUi();
-  overlayManager.focusDefault('cosmetics');
+  showCosmeticsOverlayImpl(shopUiDeps());
 }
 
 function hideCosmeticsOverlay() {
-  // Возврат в меню: панель «Ваш облик» снова видна — будим её отрисовку.
-  // showMenuOverlay() здесь не вызывается, поэтому сама она бы не ожила.
-  try {
-    setTimeout(() => scheduleMenuSkinPreview(), 0);
-  } catch {}
-  if (!cosmeticsOverlay) return;
-  cosmeticsOpen = false;
-  cosmeticsOverlay.classList.add('hidden');
-  overlayManager.close('cosmetics');
-  cosmeticsOpClear();
-  setCosmeticsStatus('', '');
-  syncOverlayUiState();
-  if (cosmeticsPreviewRaf) {
-    try {
-      cancelAnimationFrame(cosmeticsPreviewRaf);
-    } catch {}
-    cosmeticsPreviewRaf = 0;
-  }
+  hideCosmeticsOverlayImpl(shopUiDeps());
 }
 
 function scheduleCosmeticsPreviewAnim() {
-  if (cosmeticsPreviewRaf) return;
-  const tick = () => {
-    cosmeticsPreviewRaf = 0;
-    if (!cosmeticsOverlay || cosmeticsOverlay.classList.contains('hidden')) return;
-    const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-    if (!reduceMotion) {
-      const now = performance.now();
-      if (!cosmeticsPreviewLastAt || now - cosmeticsPreviewLastAt > 33) {
-        cosmeticsPreviewLastAt = now;
-        renderCosmeticsPreview();
-      }
-      cosmeticsPreviewRaf = requestAnimationFrame(tick);
-    }
-  };
-  cosmeticsPreviewRaf = requestAnimationFrame(tick);
+  scheduleCosmeticsPreviewAnimImpl(shopUiDeps());
 }
 
 /* COSMETICS_MAX_ID, COSMETICS_CATS, запасной прайс, bitHas и лестница тиров
@@ -7090,693 +5508,6 @@ function cosmeticsEquipLocal(cat, id) {
   syncCosmeticsUi();
 }
 
-// Заглушка магазина на время локальной загрузки: три полосы в блоке
-// «как заработать», пять пустых вкладок, пять пустых карточек предмета.
-// Числа заглушек (5 вкладок, 5 карточек) декоративные и не обязаны совпадать
-// с реальным числом категорий/предметов — это скелетон, а не превью данных.
-function renderCosmeticsSkeleton() {
-  try {
-    if (cosmeticsEarnStyleEl) {
-      const wrap = document.createElement('div');
-      wrap.style.display = 'grid';
-      wrap.style.gap = '8px';
-      const l1 = document.createElement('div');
-      l1.className = 'skeletonLine';
-      l1.style.width = '62%';
-      const l2 = document.createElement('div');
-      l2.className = 'skeletonLine';
-      l2.style.width = '92%';
-      const l3 = document.createElement('div');
-      l3.className = 'skeletonLine';
-      l3.style.width = '86%';
-      wrap.appendChild(l1);
-      wrap.appendChild(l2);
-      wrap.appendChild(l3);
-      cosmeticsEarnStyleEl.replaceChildren(wrap);
-    }
-
-    if (cosmeticsTabsEl) {
-      const btns = Array.from({ length: 5 }).map(() => {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'cosmeticsTabBtn';
-        b.disabled = true;
-        const sk = document.createElement('div');
-        sk.className = 'skeletonLine';
-        sk.style.width = '86px';
-        sk.style.height = '10px';
-        b.appendChild(sk);
-        return b;
-      });
-      cosmeticsTabsEl.replaceChildren(...btns);
-    }
-
-    if (cosmeticsItemsEl) {
-      const items = Array.from({ length: 5 }).map(() => {
-        const card = document.createElement('div');
-        card.className = 'cosmeticsItem';
-
-        const prev = document.createElement('div');
-        prev.className = 'cosmeticsItemPreview skeletonBlock';
-
-        const left = document.createElement('div');
-        left.className = 'cosmeticsItemLeft';
-        const t1 = document.createElement('div');
-        t1.className = 'skeletonLine';
-        t1.style.width = '220px';
-        const t2 = document.createElement('div');
-        t2.className = 'skeletonLine';
-        t2.style.width = '140px';
-        left.appendChild(t1);
-        left.appendChild(t2);
-
-        const right = document.createElement('div');
-        right.className = 'cosmeticsItemRight';
-        const b = document.createElement('div');
-        b.className = 'skeletonBlock';
-        b.style.width = '92px';
-        b.style.height = '34px';
-        b.style.borderRadius = '12px';
-        right.appendChild(b);
-
-        card.appendChild(left);
-        card.appendChild(right);
-        card.insertBefore(prev, left);
-        return card;
-      });
-      cosmeticsItemsEl.replaceChildren(...items);
-    }
-
-    if (cosmeticsHintEl) cosmeticsHintEl.textContent = '';
-  } catch {}
-}
-
-function syncCosmeticsUi() {
-  if (!cosmeticsOverlay || cosmeticsOverlay.classList.contains('hidden')) return;
-
-  if (!cosmeticsLoaded) {
-    cosmeticsEnsureLocalReady();
-  }
-
-  if (!cosmeticsLoaded) {
-    if (cosmeticsStyleEl) cosmeticsStyleEl.textContent = '—';
-    renderCosmeticsSkeleton();
-    return;
-  }
-
-  if (cosmeticsStyleEl) cosmeticsStyleEl.textContent = String(Math.floor(youStyle || 0));
-
-  if (cosmeticsFilterAllBtn) cosmeticsFilterAllBtn.classList.toggle('isActive', cosmeticsFilter === 'all');
-  if (cosmeticsFilterOwnedBtn) cosmeticsFilterOwnedBtn.classList.toggle('isActive', cosmeticsFilter === 'owned');
-  if (cosmeticsFilterAvailableBtn) cosmeticsFilterAvailableBtn.classList.toggle('isActive', cosmeticsFilter === 'available');
-
-  if (cosmeticsEarnStyleEl) {
-    if (!cosmeticsEarnExpanded) {
-      const hint = `<div>${escapeHtml(t('cosmetics.style_hint'))}</div>`;
-      const off = cosmeticsSource === 'cache' ? `<div style="margin-top:6px">${escapeHtml(t('cosmetics.offline_hint'))}</div>` : '';
-      setSafeHtml(cosmeticsEarnStyleEl, hint + off);
-    } else {
-      setSafeHtml(
-        cosmeticsEarnStyleEl,
-        `
-        <div><b>${escapeHtml(t('cosmetics.earn_title'))}</b></div>
-        <div class="row"><span class="k">${escapeHtml(t('cosmetics.earn_kills'))}</span><span>${escapeHtml(t('cosmetics.earn_kills_desc'))}</span></div>
-        <div class="row"><span class="k">${escapeHtml(t('cosmetics.earn_revenge'))}</span><span>${escapeHtml(t('cosmetics.earn_revenge_desc'))}</span></div>
-        <div class="row"><span class="k">${escapeHtml(t('cosmetics.earn_contracts'))}</span><span>${escapeHtml(t('cosmetics.earn_contracts_desc'))}</span></div>
-        <div class="row"><span class="k">${escapeHtml(t('cosmetics.earn_dailies'))}</span><span>${escapeHtml(t('cosmetics.earn_dailies_desc'))}</span></div>
-        <div class="row"><span class="k">${escapeHtml(t('cosmetics.earn_bounty'))}</span><span>${escapeHtml(t('cosmetics.earn_bounty_desc'))}</span></div>
-        `
-      );
-    }
-  }
-
-  if (cosmeticsTabsEl) {
-    const btns = COSMETICS_TABS.map((cid) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      // .isTitles — вкладка титулов оформлена золотом: это награда за достижения,
-      // а не товар, и визуально не должна читаться как магазин.
-      b.className = cid === 'title' ? 'cosmeticsTabBtn isTitles' : 'cosmeticsTabBtn';
-      // D11: счётчик владения прямо в табе — «Рамки 2/8».
-      const total = cid === 'title' ? COS_TITLE_MAX : COSMETICS_MAX_ID + 1;
-      const have = cid === 'title' ? cosTitlesUnlockedCount() : cosmeticsOwnedCount(cid);
-      const fullLabel = `${cosmeticsLabel(cid)} ${have}/${total}`;
-      // Полная подпись видна ассистивным технологиям и как тултип — на
-      // экране только иконка категории и счётчик, восемь вкладок в ряд.
-      const icon = document.createElement('span');
-      icon.className = 'cosmeticsTabIcon';
-      icon.setAttribute('aria-hidden', 'true');
-      icon.textContent = COSMETICS_TAB_ICON_BY_CAT[cid] || '❔';
-      const count = document.createElement('span');
-      count.className = 'cosmeticsTabCount';
-      count.setAttribute('aria-hidden', 'true');
-      count.textContent = `${have}/${total}`;
-      b.append(icon, count);
-      b.title = fullLabel;
-      b.setAttribute('aria-label', fullLabel);
-      b.setAttribute('role', 'tab');
-      b.setAttribute('aria-selected', cid === cosmeticsCat ? 'true' : 'false');
-      b.addEventListener('click', () => {
-        cosmeticsCat = cid;
-        cosmeticsSelId = cid === 'title' ? Math.max(0, Number(youTitleId) || 0) : (Number(cosmeticsEqForCat(cid)) || 0);
-        syncCosmeticsUi();
-      });
-      return b;
-    });
-    cosmeticsTabsEl.replaceChildren(...btns);
-    // Вкладок восемь и лента скроллится: активная вкладка после смены категории
-    // может оказаться за краем. scroll-margin для неё уже задан в CSS.
-    if (cosmeticsTabsScrolledCat !== cosmeticsCat) {
-      cosmeticsTabsScrolledCat = cosmeticsCat;
-      try {
-        const active = btns.find((b) => b.getAttribute('aria-selected') === 'true');
-        active?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
-      } catch {}
-    }
-  }
-
-  /* C4: запись «где это видно» стояла НИЖЕ ветки титулов, поэтому на вкладке
-     «Титулы» элемент сохранял описание предыдущей категории — в EN там
-     оставалась русская строка посреди английского магазина. Пишем до ветки,
-     для любой категории, включая титулы.
-     «Где это видно» — свойство КАТЕГОРИИ, а не предмета: показываем один раз
-     под вкладками; пустая строка скрывается стилями через :empty. */
-  try {
-    if (cosmeticsWhereEl) cosmeticsWhereEl.textContent = t(`cosmetics.where_${cosmeticsCat}`) || '';
-  } catch {}
-
-  if (cosmeticsItemsEl && cosmeticsCat === 'title') {
-    renderCosmeticsTitles();
-    renderCosmeticsPreview();
-    scheduleCosmeticsPreviewAnim();
-    return;
-  }
-
-  if (cosmeticsItemsEl) {
-    cosmeticsItemsEl.classList.remove('isTitles');
-    const mask = cosmeticsMaskForCat(cosmeticsCat);
-    const eq = cosmeticsEqForCat(cosmeticsCat);
-    // C9: until the server confirms the inventory, everything we show is provisional.
-    const confirmed = cosmeticsSource === 'server';
-    const online = wsIsConnected();
-    const items = [];
-    const balance = Math.max(0, Math.floor(Number(youStyle) || 0));
-
-    // D11: порядок по цене, а не по id — при поштучных ценах порядок по id
-    // ломает восприятие лестницы редкости.
-    const order = visibleItems(cosmeticsCat, cosmeticsFilter, balance, mask, eq, cosmeticsPrices, COSMETICS_MAX_ID);
-
-    let lastTier = '';
-    for (const entry of order) {
-      const id = entry.id;
-      const price = entry.price;
-      const owned = entry.owned;
-      const equipped = entry.equipped;
-      const missing = entry.missing;
-
-      const variant = cosmeticsVariantName(cosmeticsCat, id);
-      const tier = entry.tier;
-
-      // D11: разделители между группами тиров.
-      if (tier !== lastTier) {
-        lastTier = tier;
-        const sep = document.createElement('div');
-        sep.className = `cosmeticsTierSep ${tierClass(tier)}`;
-        sep.textContent = cosmeticsTierLabel(tier);
-        items.push(sep);
-      }
-
-      const card = document.createElement('div');
-      /* Модификатор тира на самой карточке. Его не было вовсе: класс вешался
-         только на разделитель групп, поэтому вся лестница редкости в CSS была
-         мёртвой — полоса тира, цвет цены, свечение legendary и анимированная
-         рамка mythic не рисовались ни разу, хотя правила для них написаны
-         (style.css, блок D11) и комментарий там это прямо обещает. */
-      card.className = `cosmeticsItem ${tierClass(tier)}` + (cosmeticsSelId === id ? ' isSelected' : '');
-      // K7: выбор предмета раньше пересобирал весь список, и фокус улетал в
-      // <body>. Теперь у карточки есть стабильный id, а выбор только
-      // переключает класс на уже существующих карточках.
-      card.dataset.cosid = String(id);
-      card.classList.toggle('isOwned', owned);
-      card.classList.toggle('isEquipped', owned && equipped);
-      card.classList.toggle('isLocked', !owned && balance < price);
-      card.tabIndex = 0;
-      card.addEventListener('click', () => {
-        cosmeticsSelectItem(id);
-      });
-      // Фокус с клавиатуры равен выбору: Tab по списку сразу меняет превью.
-      card.addEventListener('focus', () => cosmeticsSelectItem(id));
-      card.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          cosmeticsSelectItem(id);
-        }
-      });
-
-      const prev = document.createElement('div');
-      prev.className = 'cosmeticsItemPreview';
-      const cvs = document.createElement('canvas');
-      prev.appendChild(cvs);
-      drawMiniCosmeticPreview(cvs, cosmeticsCat, id);
-
-      const left = document.createElement('div');
-      left.className = 'cosmeticsItemLeft';
-      const titleEl = document.createElement('div');
-      titleEl.className = 'cosmeticsItemTitle';
-      // C11: префикс «Территория:» повторялся на всех восьми названиях внутри
-      // одной вкладки — категория уже написана на самой вкладке.
-      titleEl.textContent = variant;
-
-      /* C11: три узла на карточку создавались и прятались CSS-ом —
-         .tierBadge (редкость уже названа разделителем группы),
-         .cosmeticsItemWhere (то же самое стоит один раз в шапке категории,
-         #cosmeticsWhere) и .cosmeticsItemSub.isBlocked («до покупки N» дублирует
-         ценник и подпись кнопки). Больше их не создаём вовсе. */
-      let sub = null;
-      if (!owned && missing > 0) {
-        // текста нет: он целиком в ценнике и на кнопке
-      } else if (owned && !confirmed) {
-        sub = document.createElement('div');
-        sub.className = 'cosmeticsItemSub isUnconfirmed';
-        sub.textContent = t('cosmetics.item_owned_unconfirmed');
-      } else if (!equipped) {
-        // C11: «Экипировано» стояло и в подписи, и на кнопке — оставляем кнопку.
-        sub = document.createElement('div');
-        sub.className = 'cosmeticsItemSub';
-        sub.textContent = owned ? t('cosmetics.item_owned') : t('cosmetics.item_not_owned');
-      }
-      left.appendChild(titleEl);
-      if (sub) left.appendChild(sub);
-
-      // D11: прогресс-бар накопления на заблокированном товаре.
-      if (!owned && price > 0 && missing > 0) {
-        const bar = document.createElement('div');
-        bar.className = 'cosmeticsItemProgress';
-        const fill = document.createElement('div');
-        fill.className = 'cosmeticsItemProgressFill';
-        fill.style.width = `${Math.max(0, Math.min(100, (balance / price) * 100)).toFixed(1)}%`;
-        bar.appendChild(fill);
-        bar.setAttribute('role', 'progressbar');
-        bar.setAttribute('aria-valuemin', '0');
-        bar.setAttribute('aria-valuemax', String(price));
-        bar.setAttribute('aria-valuenow', String(Math.min(balance, price)));
-        bar.setAttribute('aria-label', `${t('cosmetics.missing_prefix')} ${fmtInt(missing)}`);
-        left.appendChild(bar);
-      }
-
-      const right = document.createElement('div');
-      right.className = 'cosmeticsItemRight';
-      if (!owned) {
-        const pr = document.createElement('div');
-        pr.className = 'cosmeticsPrice';
-        setSafeHtml(pr, cosmeticsFormatCost(price));
-        right.appendChild(pr);
-
-        const cat = cosmeticsCat;
-        const pending = cosmeticsOpIsPending(cat, id);
-        const poor = balance < price;
-
-        /* C2/C9: buying needs a live socket and server-confirmed state.
-           C12: нехватка валюты БОЛЬШЕ не делает кнопку disabled — раньше клик
-           не давал вообще ничего. Кнопка живая, клик объясняет, сколько не
-           хватает, и раскрывает блок «Как заработать». */
-        const state = buyButtonState({ pending, online, confirmed, pendingOtherOp: pendingCosmeticsOp, poor });
-
-        const buy = document.createElement('button');
-        buy.type = 'button';
-        buy.disabled = state.disabled;
-        buy.className = state.className;
-        if (state.poor) buy.classList.add('isPoor');
-        // C14: show exactly how much is missing.
-        buy.textContent = state.poor ? `${t('cosmetics.not_enough_short')} ${fmtInt(missing)} ✨` : t('cosmetics.buy');
-        if (state.pending) buy.classList.add('isLoading');
-        if (state.titleKind === 'no_connection') buy.title = t('cosmetics.no_connection');
-        else if (state.titleKind === 'unconfirmed_hint') buy.title = t('cosmetics.unconfirmed_hint');
-        else if (state.titleKind === 'need_more') buy.title = `${t('cosmetics.need_more')} ${fmtInt(missing)} ✨`;
-
-        buy.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (pendingCosmeticsOp) return;
-          if (poor) {
-            // C12: сообщение + подсказка, где взять, + раскрытие «Как заработать».
-            setCosmeticsStatus(
-              () => `${t('cosmetics.need_more')} ${fmtInt(missing)} ✨ — ${t('cosmetics.need_more_hint')}`,
-              'error'
-            );
-            if (!cosmeticsEarnExpanded) cosmeticsEarnExpanded = true;
-            syncCosmeticsUi();
-            try {
-              cosmeticsEarnStyleEl?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
-            } catch {}
-            return;
-          }
-          if (!cosmeticsServerReady()) {
-            setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'error');
-            cosmeticsBuyLocal(cat, id);
-            return;
-          }
-          // C4: lock the button until the server answers (or we time out).
-          buy.disabled = true;
-          buy.classList.add('isLoading');
-          cosmeticsOpBegin(cat, id);
-          setCosmeticsStatus(() => t('cosmetics.op_pending'), 'info');
-          // C5: a silently dropped send must not leave a dead spinner.
-          if (!wsSend('cosmeticsBuy', { cat, id })) {
-            cosmeticsOpClear();
-            setCosmeticsStatus(() => t('cosmetics.no_connection'), 'error');
-            syncCosmeticsUi();
-          }
-        });
-        right.appendChild(buy);
-      } else {
-        const eqBtn = document.createElement('button');
-        eqBtn.type = 'button';
-        const cat = cosmeticsCat;
-        const doEquip = (wantId) => {
-          if (!cosmeticsServerReady()) {
-            cosmeticsEquipLocal(cat, wantId);
-            setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'info');
-            return;
-          }
-          // C5: react to a dropped send instead of pretending it worked.
-          if (!wsSend('cosmeticsEquip', { cat, id: wantId })) {
-            cosmeticsEquipLocal(cat, wantId);
-            setCosmeticsStatus(() => t('cosmetics.no_connection'), 'error');
-          } else {
-            cosmeticsSetDesiredEq(cat, wantId);
-          }
-        };
-
-        const eqState = equipButtonState({ equipped, id });
-        eqBtn.className = eqState.className;
-        eqBtn.disabled = eqState.disabled;
-        if (eqState.kind === 'remove') {
-          eqBtn.textContent = t('cosmetics.remove');
-          eqBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            doEquip(0);
-          });
-        } else {
-          eqBtn.textContent = eqState.kind === 'equipped' ? t('cosmetics.item_equipped') : t('cosmetics.wear');
-          eqBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            doEquip(id);
-          });
-        }
-        right.appendChild(eqBtn);
-      }
-
-      card.appendChild(left);
-      card.appendChild(right);
-      card.insertBefore(prev, left);
-      items.push(card);
-    }
-
-    if (!items.length) {
-      setSafeHtml(
-        cosmeticsItemsEl,
-        `
-        <div class="roomsEmpty">
-          <div class="roomsEmptyTitle">${escapeHtml(t('cosmetics.empty_title'))}</div>
-          <div class="roomsEmptyDesc">${escapeHtml(t('cosmetics.empty_desc'))}</div>
-        </div>
-        `
-      );
-    } else {
-      cosmeticsItemsEl.replaceChildren(...items);
-    }
-  }
-
-  renderCosmeticsPreview();
-  scheduleCosmeticsPreviewAnim();
-}
-
-/* --------------------------------------------------------------------------
-   Большое превью магазина. Ни одной собственной функции отрисовки предметов:
-   всё рисуют drawSegTile / drawHead / drawNamePlate / drawCaptureFx / drawFrameRow,
-   то есть ровно то же, что и игровой цикл.
-   -------------------------------------------------------------------------- */
-
-// Какой id показывать: наведённая карточка важнее выбранной, при уходе курсора
-// превью возвращается к выбранному варианту.
-/* K7: сменить выделение без пересборки списка. Возврат к полному
-   syncCosmeticsUi() — только если карточек с data-cosid в DOM нет (список ещё
-   не строился или отрисован пустой заглушкой). */
-function cosmeticsSelectItem(id) {
-  const next = Number(id) || 0;
-  if (cosmeticsSelId === next) {
-    renderCosmeticsPreview();
-    return;
-  }
-  cosmeticsSelId = next;
-  let patched = false;
-  try {
-    const cards = cosmeticsItemsEl?.querySelectorAll?.('.cosmeticsItem[data-cosid], .titleItem[data-cosid]');
-    if (cards && cards.length) {
-      for (const c of cards) c.classList.toggle('isSelected', Number(c.dataset.cosid) === next);
-      patched = true;
-    }
-  } catch {}
-  if (patched) renderCosmeticsPreview();
-  else syncCosmeticsUi();
-}
-
-function cosmeticsPreviewId() {
-  // У титулов свой потолок id (их 16, а не 8), поэтому клампим по категории.
-  const clamp = cosmeticsCat === 'title'
-    ? (v) => Math.max(0, Math.min(COS_TITLE_MAX, Number(v) || 0))
-    : cosClampId;
-  return clamp(cosmeticsSelId);
-}
-
-/* ==========================================================================
-   ЕДИНАЯ СЦЕНА ПРЕДПРОСМОТРА.
-
-   Было: каждая категория рисовала свою композицию в своём масштабе. У
-   территории зона занимала 62% ширины и 80% высоты — плоский прямоугольник
-   почти во весь кадр, а змейка выдавливалась к самому краю. Игрок видел не
-   «свой облик», а набор фигур. В меню жила третья, ещё одна композиция.
-
-   Стало: одна сцена на всё — кусок игрового поля. Слева своя территория
-   (фон), из неё вправо выезжает змейка нормального размера, над головой
-   плашка с ником. Это буквально то, что игрок видит в матче, и то, чему учит
-   меню: «выйди за свою зону, оставь след». Меняется ровно та деталь, которую
-   игрок сейчас смотрит, остальное берётся из экипированного.
-
-   Масштаб фиксирован относительно кадра, поэтому предмет выглядит одинаково
-   в магазине и в меню. */
-
-/* Пропорции сцены. Территория намеренно НЕ больше половины кадра: она фон,
-   а не главный объект. */
-const COS_SCENE = {
-  pad: 0.07,
-  zoneX: 0.05,
-  zoneY: 0.20,
-  zoneW: 0.46,
-  zoneH: 0.58,
-  cellK: 0.13,
-  cellMin: 14,
-  cellMax: 34,
-  // Панель меню и предпросмотр магазина имеют одинаковую пропорцию, но
-  // разную абсолютную ширину — если считать scell от их собственных fw/fh,
-  // клетки в них получаются разного размера, и одна и та же сцена выглядит
-  // по-разному. Размер клетки — от общего эталона, а не от конкретной
-  // панели, чтобы «меню» и «магазин» рисовали облик в одном масштабе.
-  cellRefMin: 186
-};
-
-function drawCosmeticsScene(ctx2, rect, opts) {
-  const { x: fx, y: fy, w: fw, h: fh } = rect;
-  const {
-    cat = '',
-    label = '',
-    now = 0,
-    reduceMotion = false,
-    highlight = false,
-    ids = {}
-  } = opts || {};
-
-  const baseC = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
-  const scell = Math.max(
-    COS_SCENE.cellMin,
-    Math.min(COS_SCENE.cellMax, Math.round(COS_SCENE.cellRefMin * COS_SCENE.cellK))
-  );
-
-  /* Зона считается ПЕРВОЙ и выравнивается по целому числу клеток: сетка фона
-     рисуется от её origin с тем же шагом, поэтому линии проходят ровно по
-     границам плиток, как на поле. Раньше шаг сетки считался отдельно и
-     не совпадал с клетками — кадр не читался как кусок игры. */
-  const zone = {
-    x: Math.round(fx + fw * COS_SCENE.zoneX),
-    y: Math.round(fy + fh * COS_SCENE.zoneY),
-    w: Math.max(scell * 2, Math.round((fw * COS_SCENE.zoneW) / scell) * scell),
-    h: Math.max(scell * 2, Math.round((fh * COS_SCENE.zoneH) / scell) * scell)
-  };
-
-  drawCosmeticsFieldBackdrop(ctx2, fx, fy, fw, fh, scell, zone.x, zone.y);
-
-  // Сцена не имеет права рисовать за пределами поля: хвост раньше вылезал на
-  // рамку и читался как мусор.
-  ctx2.save();
-  ctx2.beginPath();
-  ctx2.rect(fx, fy, fw, fh);
-  ctx2.clip();
-
-  const plateFont = Math.max(11, Math.round(scell * 0.62));
-  // Голова стоит сразу за кромкой зоны — змейка «только что вышла из дома»,
-  // а хвост ещё внутри. Ровно эта картинка и есть механика игры. Отступ и
-  // ряд — целое число клеток от zone.x/zone.y: это та же сетка, по которой
-  // рисуются фон (drawCosmeticsFieldBackdrop) и территория (drawCosmeticsZone),
-  // дробный отступ раньше уводил голову с растра, и она «плавала» отдельно.
-  const headRow = Math.max(0, Math.floor(zone.h / scell / 2));
-  const headX = Math.round(zone.x + zone.w + scell * 2.5);
-  const headY = Math.round(zone.y + headRow * scell + scell / 2);
-
-  const period = 2400;
-  const p = reduceMotion ? 0.55 : (now % period) / period;
-
-  // --- гибель: змейка едет, потом взрывается ---
-  if (cat === 'death') {
-    drawCosmeticsZone(ctx2, zone, you, 0.55, ids.terr, scell);
-    const dieStart = 0.45;
-    const dieP = p < dieStart ? -1 : Math.min(1, (p - dieStart) / (COS_DEATH_MS / period));
-    if (dieP < 0) {
-      drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, 6, zone);
-      drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
-    } else {
-      drawDeathFx(ctx2, headX, headY, Math.max(16, Math.round(scell * 1.25)), baseC, ids.death, dieP);
-    }
-    ctx2.restore();
-    return { scell, zone, headX, headY };
-  }
-
-  drawCosmeticsZone(ctx2, zone, you, 0.55, ids.terr, scell);
-  drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, cat === 'seg' ? 8 : 6, zone);
-  drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
-
-  /* Захват: вспышка над своей зоной в том же цикле, что и сцена.
-     Фаза считается от фазы сцены, а не от performance.now(): иначе к моменту
-     показа вспышка успевала догореть и покупатель видел пустое поле. */
-  const burstStart = 0.58;
-  const burstP = p < burstStart ? -1 : (p - burstStart) / (650 / period);
-  if (burstP >= 0 && burstP <= 1) {
-    drawCaptureFx(
-      ctx2,
-      zone.x + zone.w * 0.5,
-      zone.y + zone.h * 0.5,
-      Math.max(18, Math.round(scell * 1.35)),
-      baseC,
-      ids.capturefx,
-      burstP
-    );
-  }
-
-  // Пунктир вокруг того, что меняет выбранный предмет.
-  if (highlight) {
-    ctx2.save();
-    ctx2.strokeStyle = 'rgba(46, 230, 160, 0.60)';
-    ctx2.setLineDash([5, 4]);
-    ctx2.lineWidth = 2;
-    if (cat === 'head') {
-      ctx2.beginPath();
-      ctx2.arc(headX, headY, scell * 0.82, 0, Math.PI * 2);
-      ctx2.stroke();
-    } else if (cat === 'nameplate' || cat === 'title') {
-      const ph = Math.round(plateFont * 1.5);
-      ctx2.strokeRect(headX - scell * 2.4, headY - scell * 0.95 - ph - 4, scell * 4.8, ph + 8);
-    } else if (cat === 'seg') {
-      // Раньше бокс был зашит под старую геометрию хвоста (8 тайлов подряд от
-      // headX). Теперь тайлы, ушедшие под территорию, не рисуются вовсе
-      // (см. drawCosmeticsSnake) — обводка обязана останавливаться там же,
-      // где на самом деле кончается видимый хвост, а не залезать на зону.
-      const segRight = headX - scell / 2;
-      const segLeft = Math.max(zone.x + zone.w, segRight - scell * 8);
-      ctx2.strokeRect(segLeft, headY - scell * 0.62, segRight - segLeft, scell * 1.24);
-    } else if (cat === 'terr') {
-      ctx2.strokeRect(zone.x + 1, zone.y + 1, zone.w - 2, zone.h - 2);
-    }
-    ctx2.restore();
-  }
-
-  ctx2.restore();
-  return { scell, zone, headX, headY };
-}
-
-function renderCosmeticsPreview() {
-  if (!cosmeticsPreview) return;
-  const cssW = Math.max(200, Math.round(cosmeticsPreview.clientWidth || 420));
-  const cssH = Math.max(140, Math.round(cosmeticsPreview.clientHeight || 260));
-  const ctx2 = cosPrepCanvas(cosmeticsPreview, cssW, cssH);
-  if (!ctx2) return;
-
-  const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-  const now = reduceMotion ? 0 : performance.now();
-  const selId = cosmeticsPreviewId();
-
-  const setHint = () => {
-    if (!cosmeticsHintEl) return;
-    cosmeticsHintEl.textContent = `${cosmeticsLabel(cosmeticsCat)}: ${cosmeticsVariantName(cosmeticsCat, selId)}`;
-  };
-
-  // Рамка профиля — украшение строки таблицы, а не часть поля: у неё своя сцена.
-  if (cosmeticsCat === 'frame') {
-    drawCosmeticsFramesScene(ctx2, cssW, cssH, selId);
-    setHint();
-    return;
-  }
-
-  const pick = (cat, equipped) => (cosmeticsCat === cat ? selId : equipped);
-  const titleId = pick('title', youTitleId);
-
-  const pad = Math.round(Math.min(cssW, cssH) * COS_SCENE.pad);
-  drawCosmeticsScene(
-    ctx2,
-    { x: pad, y: pad, w: cssW - pad * 2, h: cssH - pad * 2 },
-    {
-      cat: cosmeticsCat,
-      label: `${cosTitlePrefix(titleId)}${t('cosmetics.balance_you')}`,
-      now,
-      reduceMotion,
-      highlight: true,
-      ids: {
-        head: pick('head', youCos.eq.head),
-        seg: pick('seg', youCos.eq.seg),
-        nameplate: pick('nameplate', youCos.eq.nameplate),
-        capturefx: pick('capturefx', youCos.eq.capturefx),
-        terr: pick('terr', youCos.eq.terr),
-        death: pick('death', youCos.eq.death)
-      }
-    }
-  );
-
-  setHint();
-}
-
-function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, headColor, tileCount, zone) {
-  const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
-  const c = headColor || base;
-  const scell = Math.max(14, Math.round(cell));
-  const now = performance.now();
-  const tiles = Math.max(3, Math.min(12, Number(tileCount) || 6));
-  // Хвост кладём строго по той же сетке (шаг scell от headX), что и фон/
-  // территория — раньше стартовая точка была сдвинута на 0.85 клетки, и
-  // тайлы следа не совпадали с растром, из-за чего змейка «плавала».
-  const headLeft = headX - scell / 2;
-  const zoneRight = zone ? zone.x + zone.w : headLeft;
-  for (let i = 0; i < tiles; i++) {
-    const tileLeft = headLeft - (i + 1) * scell;
-    // Тайл целиком лёг на уже занятую территорию — цветом следа его не
-    // красим: след существует только на ещё не захваченной земле, дальше
-    // хвост просто «уходит» под уже нарисованную зону.
-    if (tileLeft + scell <= zoneRight) continue;
-    drawSegTile(ctx2, tileLeft, headY - scell / 2, scell, base, segId, i + 17, 0.88, now);
-  }
-  drawHead(ctx2, headX, headY, scell, c, headId, 1, 0, now);
-}
-
 /* C3 — #menuSkinPreview -----------------------------------------------------
    Панель «Ваш облик» в меню висела пустым канвасом: имя элемента не
    встречалось в JS ни разу, 0 непрозрачных пикселей. Рисуем экипированный
@@ -7830,7 +5561,8 @@ function renderMenuSkinPreview() {
         terr: youCos.eq.terr,
         death: youCos.eq.death
       }
-    }
+    },
+    shopUiDeps()
   );
 }
 
@@ -7883,162 +5615,6 @@ if (menuSkinPreviewEl && typeof ResizeObserver === 'function') {
   } catch {}
 }
 
-function cosmeticsFrameSampleName(i) {
-  return i === 1 ? t('cosmetics.balance_you') : `${t('leaderboard.player')} ${i + 2}`;
-}
-
-function drawCosmeticsFramesScene(ctx2, w, h, frameId) {
-  const pad = Math.round(Math.min(w, h) * 0.09);
-  const th = Math.max(22, Math.round(h * 0.12));
-  const rowH = Math.max(22, Math.round(h * 0.12));
-  const rows = 4;
-  const tw = w - pad * 2;
-  const tx = pad;
-  const ty = Math.round((h - (th + rows * rowH)) / 2);
-
-  ctx2.save();
-  ctx2.fillStyle = 'rgba(0,0,0,0.26)';
-  ctx2.fillRect(tx, ty, tw, th + rows * rowH);
-  ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
-  ctx2.lineWidth = 1;
-  ctx2.strokeRect(tx + 0.5, ty + 0.5, tw - 1, th + rows * rowH - 1);
-
-  ctx2.fillStyle = 'rgba(0,0,0,0.34)';
-  ctx2.fillRect(tx, ty, tw, th);
-  ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
-  ctx2.beginPath();
-  ctx2.moveTo(tx, ty + th + 0.5);
-  ctx2.lineTo(tx + tw, ty + th + 0.5);
-  ctx2.stroke();
-
-  ctx2.font = `12px ${COS_FONT}`;
-  ctx2.fillStyle = 'rgba(255,255,255,0.86)';
-  ctx2.textBaseline = 'middle';
-  ctx2.textAlign = 'left';
-  ctx2.fillText('#', tx + 12, ty + th / 2);
-  ctx2.fillText(t('leaderboard.player'), tx + 34, ty + th / 2);
-  ctx2.textAlign = 'right';
-  ctx2.fillText(t('leaderboard.cells'), tx + tw - 12, ty + th / 2);
-  ctx2.restore();
-
-  const youRow = 1;
-  for (let i = 0; i < rows; i++) {
-    drawFrameRow(
-      ctx2,
-      tx,
-      ty + th + i * rowH,
-      tw,
-      rowH,
-      frameId,
-      i + 1,
-      cosmeticsFrameSampleName(i),
-      fmtInt(1200 - i * 180),
-      i === youRow
-    );
-  }
-}
-
-/* Подложка поля. step приходит снаружи и равен размеру клетки сцены: в игре
-   сетка — это и есть решётка клеток, а здесь шаг считался отдельно
-   (16..28px против клетки 14..34px), линии не совпадали с плитками
-   территории, и кадр переставал читаться как кусок поля.
-   Начало отсчёта тоже передаётся, чтобы линии проходили ПО границам клеток,
-   а не наискось через них. */
-function drawCosmeticsFieldBackdrop(ctx2, x, y, w, h, step, originX, originY) {
-  ctx2.save();
-  const bg = ctx2.createLinearGradient(x, y, x + w, y + h);
-  bg.addColorStop(0, '#05100f');
-  bg.addColorStop(0.55, '#060a12');
-  bg.addColorStop(1, '#0a0714');
-  ctx2.fillStyle = bg;
-  ctx2.fillRect(x, y, w, h);
-
-  const cell = Math.max(8, Math.round(Number(step) || 18));
-  const ox = Number.isFinite(originX) ? originX : x;
-  const oy = Number.isFinite(originY) ? originY : y;
-
-  ctx2.strokeStyle = 'rgba(120,220,190,0.055)';
-  ctx2.lineWidth = 1;
-  for (let px = ox - Math.ceil((ox - x) / cell) * cell; px < x + w; px += cell) {
-    if (px <= x) continue;
-    ctx2.beginPath();
-    ctx2.moveTo(Math.round(px) + 0.5, y);
-    ctx2.lineTo(Math.round(px) + 0.5, y + h);
-    ctx2.stroke();
-  }
-  for (let py = oy - Math.ceil((oy - y) / cell) * cell; py < y + h; py += cell) {
-    if (py <= y) continue;
-    ctx2.beginPath();
-    ctx2.moveTo(x, Math.round(py) + 0.5);
-    ctx2.lineTo(x + w, Math.round(py) + 0.5);
-    ctx2.stroke();
-  }
-
-  // Виньетка — как на поле: края кадра глуше центра.
-  const vg = ctx2.createRadialGradient(
-    x + w * 0.5, y + h * 0.5, Math.min(w, h) * 0.20,
-    x + w * 0.5, y + h * 0.5, Math.max(w, h) * 0.72
-  );
-  vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(0,0,0,0.45)');
-  ctx2.fillStyle = vg;
-  ctx2.fillRect(x, y, w, h);
-
-  ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
-  ctx2.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  ctx2.restore();
-}
-
-function drawCosmeticsZone(ctx2, rect, ownerId, alpha, terrId, cellHint) {
-  const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
-  const id = cosClampId(terrId);
-  const a = Math.max(0, Math.min(1, alpha));
-  const now = performance.now();
-  // Территория рисуется теми же плитками, что и в игре: узор выбранного
-  // стиля обязан выглядеть в магазине ровно так же, как на поле.
-  const cell = Math.max(8, Math.round(Number(cellHint) || 16));
-  const cols = Math.max(1, Math.ceil(rect.w / cell));
-  const rows = Math.max(1, Math.ceil(rect.h / cell));
-  ctx2.save();
-  ctx2.beginPath();
-  ctx2.rect(rect.x, rect.y, rect.w, rect.h);
-  ctx2.clip();
-  for (let gy = 0; gy < rows; gy++) {
-    for (let gx = 0; gx < cols; gx++) {
-      drawTerrTile(ctx2, rect.x + gx * cell, rect.y + gy * cell, cell, base, id, gx, gy, a, now);
-    }
-  }
-  /* Блик внутри клетки — как в игре: поверх заливки идёт чуть более яркий
-     вложенный квадрат. Без него база (сплошная заливка) выглядела плоской
-     плитой, а не территорией. */
-  const rgbB = hslToRgb(base);
-  ctx2.globalAlpha = Math.min(0.5, a * 0.42);
-  ctx2.fillStyle = `rgb(${rgbB[0]},${rgbB[1]},${rgbB[2]})`;
-  const inset = Math.max(1, (cell * 0.18) | 0);
-  for (let gy = 0; gy < rows; gy++) {
-    for (let gx = 0; gx < cols; gx++) {
-      ctx2.fillRect(rect.x + gx * cell + inset, rect.y + gy * cell + inset, cell - inset * 2, cell - inset * 2);
-    }
-  }
-  ctx2.globalAlpha = 1;
-  ctx2.restore();
-
-  /* Границы владения в игре не обводятся — территория просто заканчивается
-     там, где кончаются клетки. Прежняя чёрная рамка выдавала «картинку в
-     рамке» вместо куска поля. Исключение — витраж: у него светящийся шов
-     по границе есть и в игре. */
-  if (id === 5) {
-    ctx2.save();
-    const rgb = hslToRgb(base);
-    ctx2.strokeStyle = 'rgba(255,255,255,0.85)';
-    ctx2.shadowColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-    ctx2.shadowBlur = 14;
-    ctx2.lineWidth = 3;
-    ctx2.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
-    ctx2.restore();
-  }
-}
-
 const DIR_NAMES = ['up', 'down', 'left', 'right'];
 
 function infoName(map, type, fallback) {
@@ -8053,7 +5629,7 @@ function infoDesc(map, type, fallback) {
 
 function powerupLabel(type) {
   const p = infoPack();
-  return infoName(p.powerups, type, lang === 'en' ? 'Item' : 'Предмет');
+  return infoName(p.powerups, type, t('name.item_fallback'));
 }
 
 function mutatorLabel(type) {
@@ -8068,7 +5644,7 @@ function contractLabel(type) {
 
 function dailyLabel(type) {
   const p = infoPack();
-  return infoName(p.dailies, type, lang === 'en' ? 'Daily' : 'Задание');
+  return infoName(p.dailies, type, t('name.daily_fallback'));
 }
 
 function achvLabel(type) {
@@ -8115,284 +5691,216 @@ function tickRemainSeconds(untilTick) {
 }
 
 function ensureSettingsState() {
-  try {
-    const raw = localStorage.getItem('snakes_settings_v1');
-    if (raw) {
-      const s = JSON.parse(raw);
-      fxEnabled = s.fxEnabled ?? fxEnabled;
-      fxIntensity = s.fxIntensity ?? fxIntensity;
-      shakeIntensity = s.shakeIntensity ?? shakeIntensity;
-      perfEnabled = s.perfEnabled ?? perfEnabled;
-      perfCompact = s.perfCompact ?? perfCompact;
-      soundEnabled = s.soundEnabled ?? soundEnabled;
-      soundVolume = s.soundVolume ?? soundVolume;
-      muteOnBlur = s.muteOnBlur ?? muteOnBlur;
-      hapticsEnabled = s.hapticsEnabled ?? hapticsEnabled;
-      hudBrightness = s.hudBrightness ?? hudBrightness;
-      hudContrast = s.hudContrast ?? hudContrast;
-      hudPanelOpacity = s.hudPanelOpacity ?? hudPanelOpacity;
-      const p = normalizeFxPreset(s.fxPreset);
-      if (p) {
-        fxPreset = p;
-        fxPresetUserSet = !!s.fxPresetUserSet;
-      }
-    }
-  } catch {}
-
-  // J22: без явного выбора пользователя уважаем системный запрет анимаций.
-  if (!fxPresetUserSet && prefersReducedMotion()) fxPreset = 'calm';
-  applyFxPreset(fxPreset, false);
-
-  if (fxEnabledInput) fxEnabledInput.checked = !!fxEnabled;
-  if (fxIntensityInput) fxIntensityInput.value = String(fxIntensity);
-  if (shakeIntensityInput) shakeIntensityInput.value = String(shakeIntensity);
-  if (perfEnabledInput) perfEnabledInput.checked = !!perfEnabled;
-  if (perfCompactInput) perfCompactInput.checked = !!perfCompact;
-  if (soundEnabledInput) soundEnabledInput.checked = !!soundEnabled;
-  if (soundVolumeInput) soundVolumeInput.value = String(soundVolume);
-  if (muteOnBlurInput) muteOnBlurInput.checked = !!muteOnBlur;
-  if (hapticsInput) hapticsInput.checked = !!hapticsEnabled;
-  if (hudBrightnessInput) hudBrightnessInput.value = String(hudBrightness);
-  if (hudContrastInput) hudContrastInput.value = String(hudContrast);
-  if (hudPanelOpacityInput) hudPanelOpacityInput.value = String(hudPanelOpacity);
-
-  syncHapticsRowUi();
-
-  if (perfEl) perfEl.style.display = perfEnabled ? '' : 'none';
-  applyPerfUi();
-  applyHudSettings();
-
-  applyHudDensity(getHudDensityDefault());
+  ensureSettingsStateImpl(settingsDeps());
 }
 
 function saveSettingsState() {
-  try {
-    localStorage.setItem(
-      'snakes_settings_v1',
-      JSON.stringify({
-        fxEnabled,
-        fxIntensity,
-        shakeIntensity,
-        perfEnabled,
-        perfCompact,
-        soundEnabled,
-        soundVolume,
-        muteOnBlur,
-        hapticsEnabled,
-        hudBrightness,
-        hudContrast,
-        hudPanelOpacity,
-        fxPreset,
-        fxPresetUserSet
-      })
-    );
-  } catch {}
+  saveSettingsStateImpl(settingsDeps());
 }
 
 function resetSettingsState() {
-  fxEnabled = true;
-  fxIntensity = 0.85;
-  shakeIntensity = 0.55;
-  perfEnabled = false;
-  perfCompact = false;
-  soundEnabled = true;
-  soundVolume = 0.7;
-  muteOnBlur = true;
-  hapticsEnabled = true;
-  hudBrightness = 1;
-  hudContrast = 1;
-  hudPanelOpacity = 0.82;
-  soundMutedByBlur = false;
-  fxPresetUserSet = false;
-  applyFxPreset(prefersReducedMotion() ? 'calm' : 'normal', false);
-
-  if (fxEnabledInput) fxEnabledInput.checked = !!fxEnabled;
-  if (fxIntensityInput) fxIntensityInput.value = String(fxIntensity);
-  if (shakeIntensityInput) shakeIntensityInput.value = String(shakeIntensity);
-  if (perfEnabledInput) perfEnabledInput.checked = !!perfEnabled;
-  if (perfCompactInput) perfCompactInput.checked = !!perfCompact;
-  if (soundEnabledInput) soundEnabledInput.checked = !!soundEnabled;
-  if (soundVolumeInput) soundVolumeInput.value = String(soundVolume);
-  if (muteOnBlurInput) muteOnBlurInput.checked = !!muteOnBlur;
-  if (hapticsInput) hapticsInput.checked = !!hapticsEnabled;
-  if (hudBrightnessInput) hudBrightnessInput.value = String(hudBrightness);
-  if (hudContrastInput) hudContrastInput.value = String(hudContrast);
-  if (hudPanelOpacityInput) hudPanelOpacityInput.value = String(hudPanelOpacity);
-
-  if (perfEl) perfEl.style.display = perfEnabled ? '' : 'none';
-  applyPerfUi();
-  applyHudSettings();
-  saveSettingsState();
+  resetSettingsStateImpl(settingsDeps());
 }
 
 function showSettingsOverlay() {
-  if (settingsOverlay) settingsOverlay.classList.remove('hidden');
-  overlayManager.open('settings');
-  syncOverlayUiState();
-  overlayManager.focusDefault('settings');
+  showSettingsOverlayImpl(settingsDeps());
 }
 
 function hideSettingsOverlay() {
-  if (settingsOverlay) settingsOverlay.classList.add('hidden');
-  overlayManager.close('settings');
-  syncOverlayUiState();
+  hideSettingsOverlayImpl(settingsDeps());
 }
 
-// J22: тумблер пресета. Разметку добавляет вёрсточный агент (#fxPresetSelect);
-// пока её нет — создаём поле сами, чтобы настройка была доступна.
-function ensureFxPresetControl() {
-  let sel = document.getElementById('fxPresetSelect');
-  if (!sel) {
-    const anchor = fxEnabledInput?.closest?.('.fieldInline') || null;
-    const host = anchor?.parentElement || null;
-    if (!host) return null;
-    try {
-      const label = document.createElement('label');
-      label.className = 'fieldInline';
-      const span = document.createElement('span');
-      span.className = 'fieldLabel';
-      span.setAttribute('data-i18n', 'settings.fx_preset');
-      span.textContent = t('settings.fx_preset');
-      sel = document.createElement('select');
-      sel.id = 'fxPresetSelect';
-      label.appendChild(span);
-      label.appendChild(sel);
-
-      const hint = document.createElement('div');
-      hint.className = 'fieldHint';
-      hint.setAttribute('data-i18n', 'settings.fx_preset_hint');
-      hint.textContent = t('settings.fx_preset_hint');
-
-      host.insertBefore(label, anchor);
-      host.insertBefore(hint, anchor);
-    } catch {
-      return null;
-    }
-  }
-
-  try {
-    const opts = [
-      ['calm', t('settings.fx_preset_calm')],
-      ['normal', t('settings.fx_preset_normal')],
-      ['casino', t('settings.fx_preset_casino')]
-    ];
-    const need = sel.options?.length !== opts.length;
-    if (need) sel.replaceChildren();
-    for (let i = 0; i < opts.length; i++) {
-      let op = sel.options?.[i];
-      if (!op) {
-        op = document.createElement('option');
-        sel.appendChild(op);
-      }
-      op.value = opts[i][0];
-      op.textContent = opts[i][1];
-    }
-    sel.value = fxPreset;
-  } catch {}
-  return sel;
+/* Общий набор геттеров/сеттеров и ссылок для DOM-функций настроек в
+   client_settings.js. Построен как функция (не как объект один раз), потому
+   что часть переменных состояния (fxEnabled, hudBrightness и т.д.)
+   переприсваивается — деп должен читать/писать их актуальные значения. */
+function settingsDeps() {
+  return {
+    // DOM-узлы
+    perfEl,
+    settingsBtn,
+    settingsOverlay,
+    closeSettingsBtn,
+    fxEnabledInput,
+    fxIntensityInput,
+    shakeIntensityInput,
+    perfEnabledInput,
+    perfCompactInput,
+    soundEnabledInput,
+    soundVolumeInput,
+    muteOnBlurInput,
+    hapticsInput,
+    testBeepBtn,
+    resetSettingsBtn,
+    hudBrightnessInput,
+    hudContrastInput,
+    hudPanelOpacityInput,
+    // Геттеры/сеттеры изменяемого состояния client.js
+    getFxEnabled: () => fxEnabled,
+    setFxEnabled: (v) => { fxEnabled = v; },
+    getFxIntensity: () => fxIntensity,
+    setFxIntensity: (v) => { fxIntensity = v; },
+    getShakeIntensity: () => shakeIntensity,
+    setShakeIntensity: (v) => { shakeIntensity = v; },
+    getPerfEnabled: () => perfEnabled,
+    setPerfEnabled: (v) => { perfEnabled = v; },
+    getPerfCompact: () => perfCompact,
+    setPerfCompact: (v) => { perfCompact = v; },
+    getSoundEnabled: () => soundEnabled,
+    setSoundEnabled: (v) => { soundEnabled = v; },
+    getSoundVolume: () => soundVolume,
+    setSoundVolume: (v) => { soundVolume = v; },
+    getMuteOnBlur: () => muteOnBlur,
+    setMuteOnBlur: (v) => { muteOnBlur = v; },
+    getHapticsEnabled: () => hapticsEnabled,
+    setHapticsEnabled: (v) => { hapticsEnabled = v; },
+    getHudBrightness: () => hudBrightness,
+    setHudBrightness: (v) => { hudBrightness = v; },
+    getHudContrast: () => hudContrast,
+    setHudContrast: (v) => { hudContrast = v; },
+    getHudPanelOpacity: () => hudPanelOpacity,
+    setHudPanelOpacity: (v) => { hudPanelOpacity = v; },
+    getSoundMutedByBlur: () => soundMutedByBlur,
+    setSoundMutedByBlur: (v) => { soundMutedByBlur = v; },
+    getFxPreset: () => fxPreset,
+    setFxPreset: (v) => { fxPreset = v; },
+    getFxPresetUserSet: () => fxPresetUserSet,
+    setFxPresetUserSet: (v) => { fxPresetUserSet = v; },
+    // Функции/таблицы, общие с остальным client.js
+    normalizeFxPreset,
+    prefersReducedMotion,
+    applyFxPreset,
+    applyHudSettings,
+    applyPerfUi,
+    applyHudDensity,
+    getHudDensityDefault,
+    syncHapticsRowUi,
+    ensureSettingsState,
+    saveSettingsState,
+    resetSettingsState,
+    showSettingsOverlay,
+    hideSettingsOverlay,
+    overlayManager,
+    syncOverlayUiState,
+    sfx,
+    t,
+    playBeep,
+    vibrate
+  };
 }
 
 function bindSettingsUi() {
-  ensureSettingsState();
+  bindSettingsUiImpl(settingsDeps());
+}
 
-  const fxPresetSelect = ensureFxPresetControl();
-  fxPresetSelect?.addEventListener('change', () => {
-    applyFxPreset(fxPresetSelect.value, true);
-    saveSettingsState();
-    sfx.ui();
-  });
+/* Общий набор геттеров/сеттеров и ссылок для DOM-функций магазина в
+   client_shop_ui.js. Построен как функция (не как объект один раз), потому
+   что часть переменных состояния (cosmeticsCat, cosmeticsSelId и т.д.)
+   переприсваивается — деп должен читать/писать их актуальные значения. */
+function shopUiDeps() {
+  return {
+    // DOM-узлы
+    cosmeticsOverlay,
+    cosmeticsEarnStyleEl,
+    cosmeticsTabsEl,
+    cosmeticsItemsEl,
+    cosmeticsHintEl,
+    cosmeticsWhereEl,
+    cosmeticsPreview,
+    cosmeticsStyleEl,
+    cosmeticsFilterAllBtn,
+    cosmeticsFilterOwnedBtn,
+    cosmeticsFilterAvailableBtn,
+    overlayManager,
+    // Геттеры/сеттеры изменяемого состояния client.js
+    getCosmeticsLoaded: () => cosmeticsLoaded,
+    getCosmeticsSource: () => cosmeticsSource,
+    getCosmeticsOpen: () => cosmeticsOpen,
+    setCosmeticsOpen: (v) => { cosmeticsOpen = v; },
+    getCosmeticsCat: () => cosmeticsCat,
+    setCosmeticsCat: (v) => { cosmeticsCat = v; },
+    getCosmeticsSelId: () => cosmeticsSelId,
+    setCosmeticsSelId: (v) => { cosmeticsSelId = v; },
+    getCosmeticsFilter: () => cosmeticsFilter,
+    getCosmeticsEarnExpanded: () => cosmeticsEarnExpanded,
+    setCosmeticsEarnExpanded: (v) => { cosmeticsEarnExpanded = v; },
+    getCosmeticsTabsScrolledCat: () => cosmeticsTabsScrolledCat,
+    setCosmeticsTabsScrolledCat: (v) => { cosmeticsTabsScrolledCat = v; },
+    getCosmeticsPreviewRaf: () => cosmeticsPreviewRaf,
+    setCosmeticsPreviewRaf: (v) => { cosmeticsPreviewRaf = v; },
+    getCosmeticsPreviewLastAt: () => cosmeticsPreviewLastAt,
+    setCosmeticsPreviewLastAt: (v) => { cosmeticsPreviewLastAt = v; },
+    getYouStyle: () => youStyle,
+    getYouTitleId: () => youTitleId,
+    getPendingCosmeticsOp: () => pendingCosmeticsOp,
+    youCos,
+    // Функции/таблицы, общие с остальным client.js
+    t,
+    tfmt,
+    fmtInt,
+    escapeHtml,
+    setSafeHtml,
+    cosTitlePrefix,
+    cosmeticsEnsureLocalReady,
+    cosmeticsServerReady,
+    cosmeticsBuyLocal,
+    cosmeticsEquipLocal,
+    cosmeticsSetDesiredEq,
+    cosmeticsOpBegin,
+    cosmeticsOpClear,
+    cosmeticsOpIsPending,
+    setCosmeticsStatus,
+    wsIsConnected,
+    wsSend,
+    syncOverlayUiState,
+    scheduleMenuSkinPreview,
+    cosmeticsMaskForCat,
+    cosmeticsEqForCat,
+    cosmeticsLabel,
+    cosmeticsVariantName,
+    cosmeticsTierLabel,
+    cosmeticsFormatCost,
+    cosmeticsOwnedCount,
+    renderCosmeticsTitles,
+    cosTitlesUnlockedCount,
+    tierClass,
+    visibleItems,
+    cosmeticsPrices,
+    buyButtonState,
+    equipButtonState,
+    COSMETICS_TABS,
+    COSMETICS_TAB_ICON_BY_CAT,
+    COSMETICS_MAX_ID,
+    COS_TITLE_MAX,
+    cosClampId,
+    colors,
+    boostHsl,
+    hslToRgb,
+    you,
+    drawTerrTile,
+    drawTerrSeam,
+    drawSegTile,
+    drawHead,
+    drawNamePlate,
+    drawCaptureFx,
+    drawDeathFx,
+    drawFrameRow,
+    COS_DEATH_MS,
+    COS_FONT,
+    cosPrepCanvas,
+    syncCosmeticsUi,
+    drawMiniCosmeticPreview: drawMiniCosmeticPreviewImpl
+  };
+}
 
-  settingsBtn?.addEventListener('click', () => {
-    showSettingsOverlay();
-  });
-  closeSettingsBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    hideSettingsOverlay();
-  });
+/* Синхронизация списка/шапки/превью магазина и выбор предмета — DOM-обвязка
+   в client_shop_ui.js. */
+function syncCosmeticsUi() {
+  syncCosmeticsUiImpl(shopUiDeps());
+}
 
-  settingsOverlay?.addEventListener('click', (e) => {
-    if (e.target === settingsOverlay) {
-      hideSettingsOverlay();
-    }
-  });
-
-  fxEnabledInput?.addEventListener('change', () => {
-    fxEnabled = !!fxEnabledInput.checked;
-    saveSettingsState();
-  });
-  fxIntensityInput?.addEventListener('input', () => {
-    fxIntensity = Math.max(0, Math.min(1, Number(fxIntensityInput.value) || 0));
-    saveSettingsState();
-  });
-  shakeIntensityInput?.addEventListener('input', () => {
-    shakeIntensity = Math.max(0, Math.min(1, Number(shakeIntensityInput.value) || 0));
-    saveSettingsState();
-  });
-  perfEnabledInput?.addEventListener('change', () => {
-    perfEnabled = !!perfEnabledInput.checked;
-    if (perfEl) perfEl.style.display = perfEnabled ? '' : 'none';
-    saveSettingsState();
-  });
-  perfCompactInput?.addEventListener('change', () => {
-    perfCompact = !!perfCompactInput.checked;
-    applyPerfUi();
-    saveSettingsState();
-  });
-  soundEnabledInput?.addEventListener('change', () => {
-    soundEnabled = !!soundEnabledInput.checked;
-    saveSettingsState();
-  });
-  soundVolumeInput?.addEventListener('input', () => {
-    soundVolume = Math.max(0, Math.min(1, Number(soundVolumeInput.value) || 0));
-    saveSettingsState();
-  });
-
-  muteOnBlurInput?.addEventListener('change', () => {
-    muteOnBlur = !!muteOnBlurInput.checked;
-    if (!muteOnBlur) soundMutedByBlur = false;
-    saveSettingsState();
-  });
-
-  hapticsInput?.addEventListener('change', () => {
-    hapticsEnabled = !!hapticsInput.checked;
-    saveSettingsState();
-    // Отклик на сам переключатель: игрок сразу чувствует, что именно включил.
-    if (hapticsEnabled) vibrate(30);
-  });
-
-  hudBrightnessInput?.addEventListener('input', () => {
-    hudBrightness = Math.max(0.5, Math.min(2, Number(hudBrightnessInput.value) || 1));
-    applyHudSettings();
-    saveSettingsState();
-  });
-  hudContrastInput?.addEventListener('input', () => {
-    hudContrast = Math.max(0.5, Math.min(2, Number(hudContrastInput.value) || 1));
-    applyHudSettings();
-    saveSettingsState();
-  });
-  hudPanelOpacityInput?.addEventListener('input', () => {
-    hudPanelOpacity = Math.max(0.3, Math.min(1, Number(hudPanelOpacityInput.value) || 0.82));
-    applyHudSettings();
-    saveSettingsState();
-  });
-
-  testBeepBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    playBeep(660, 120, 1);
-  });
-
-  resetSettingsBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    resetSettingsState();
-  });
-
-  window.addEventListener('blur', () => {
-    if (!muteOnBlur) return;
-    soundMutedByBlur = true;
-  });
-  window.addEventListener('focus', () => {
-    soundMutedByBlur = false;
-  });
+function cosmeticsSelectItem(id) {
+  cosmeticsSelectItemImpl(id, shopUiDeps());
 }
 
 function bindCosmeticsUi() {
@@ -8426,83 +5934,18 @@ function bindCosmeticsUi() {
 }
 
 function addToast(icon, text, variant, subtext, action) {
-  if (!eventToastsEl) return;
-  const now = performance.now();
-  let v = String(variant || '');
-  if (v === 'big' && now < bigToastCooldownUntil) v = '';
-
-  let st = subtext;
-  let act = action;
-  if (!act && st && typeof st === 'object') {
-    act = st;
-    st = '';
-  }
-
-  // J20: ключ не включает вариант. Раньше `v` даунгрейдился с 'big' на '' при
-  // активном кулдауне, из-за чего одно событие получало два разных ключа и
-  // вместо счётчика «x2» появлялся второй тост.
-  const key = String(act?.key || `${String(icon || '')}|${String(text || '')}|${String(st || '')}`);
-  const prio = String(act?.prio || (String(variant || '') === 'big' ? 'important' : 'minor'));
-
-  const prev = toastByKey.get(key);
-  if (prev && prev.el) {
-    prev.at = now;
-    prev.count = (prev.count || 1) + 1;
-    if (toastPrioValue(prio) > toastPrioValue(prev.prio)) prev.prio = prio;
-    try {
-      const bt = String(prev.baseText || prev.text || '');
-      if (prev.textEl) prev.textEl.textContent = `${bt} x${prev.count}`;
-      toastBump(prev.el);
-      if (prev.timer) clearTimeout(prev.timer);
-      prev.timer = setTimeout(() => {
-        try {
-          prev.el?.remove?.();
-        } catch {}
-        toastByKey.delete(key);
-        toastDrain();
-      }, (prev.variant || v) === 'big' ? 8200 : 2200);
-    } catch {}
-    return;
-  }
-
-  if (prev && !prev.el) {
-    prev.at = now;
-    prev.count = (prev.count || 1) + 1;
-    if (toastPrioValue(prio) > toastPrioValue(prev.prio)) prev.prio = prio;
-    return;
-  }
-
-  const item = {
-    key,
-    icon,
-    text: String(text || ''),
-    baseText: String(text || ''),
-    variant: v,
-    prio,
-    subtext: String(st || ''),
-    action: act,
-    at: now,
-    count: 1,
-    el: null,
-    textEl: null,
-    timer: 0,
-  };
-
-  toastByKey.set(key, item);
-  if (eventToastsEl.children.length >= MAX_EVENT_TOASTS) {
-    // J19: важное событие вытесняет самый незначительный тост на экране.
-    const worst = toastLowestMounted();
-    if (worst && toastPrioValue(item.prio) > toastPrioValue(worst.prio)) {
-      toastUnmount(worst);
-      toastMount(item);
-      return;
-    }
-    toastQueue.push(key);
-    return;
-  }
-
-  toastMount(item);
-  return;
+  addToastImpl(icon, text, variant, subtext, action, {
+    eventToastsEl,
+    getBigToastCooldownUntil: () => bigToastCooldownUntil,
+    toastByKey,
+    toastQueue,
+    MAX_EVENT_TOASTS,
+    toastPrioValue,
+    toastMount,
+    toastLowestMounted,
+    toastUnmount,
+    toastDrain
+  });
 }
 
 /* C6: порог, ниже которого ЧУЖОЙ захват в ленту не идёт. Домашний квадрат на
@@ -8524,299 +5967,31 @@ const FEED_FOREIGN_CAPTURE_MIN = 48;
 let killfeedDirty = false;
 
 function pushEventFeed(text, kind, actorNum) {
-  const t = performance.now();
-  const s = String(text || '').trim();
-  if (!s) return;
-  const k = String(kind || '');
-  const a = Number.isFinite(Number(actorNum)) ? Number(actorNum) : null;
-  /* C8: подряд идущие одинаковые строки читались как зависший лог. Схлопываем
-     их в одну с множителем ×N (окно 10 с — дальше строка всё равно истечёт). */
-  const head = eventFeed[0];
-  if (head && head.text === s && head.k === k && t - head.t < 10000) {
-    head.n = (head.n || 1) + 1;
-    head.t = t;
-    killfeedDirty = true;
-    return;
-  }
-  eventFeed.unshift({ t, text: s, k, n: 1, a });
-  if (eventFeed.length > 64) eventFeed.length = 64;
-  killfeedDirty = true;
+  pushEventFeedImpl(text, kind, actorNum, {
+    eventFeed,
+    setKillfeedDirty: (v) => {
+      killfeedDirty = v;
+    }
+  });
 }
 
 function renderKillfeed() {
-  if (!killfeedEl) return;
-  const now = performance.now();
-  const small = window.innerWidth <= 720;
-  const maxAge = small ? 8000 : 12000;
-  const maxLines = small ? 4 : 6;
-  const visible = eventFeed.filter((e) => now - e.t < maxAge).slice(0, maxLines);
-  /* C8: замер до правки — 195 узлов за 12 с. Половина пересборок приходилась на
-     пакеты, где видимый текст не менялся вообще: killfeedDirty выставляется на
-     любое событие, а строк на экране всего 4-6. Сверяем подпись и не трогаем
-     DOM, когда рисовать нечего нового. */
-  // C4: значок бота входит в подпись — иначе приход cosExtra не перерисует ленту.
-  const sig =
-    visible.map((e) => `${e.k}${e.text}${e.n || 1}${botArchInfo(e.a) ? `b${e.a}` : ''}`).join('') + lang;
-  if (renderKillfeed._sig === sig) return;
-  renderKillfeed._sig = sig;
-
-  const lines = visible.map((e) => {
-    const div = document.createElement('div');
-    const k = String(e?.k || '').trim();
-    div.className = k ? `killLine killLine${k}` : 'killLine';
-    // C8: множитель схлопнутых повторов.
-    const rep = Number(e?.n) || 1;
-    const txt = rep > 1 ? `${e.text} ×${rep}` : e.text;
-    // C4: в килфиде колонка узкая — оставляем только глиф, без подписи архетипа.
-    const badge = botArchBadge(e.a, { glyphOnly: true });
-    if (badge) div.replaceChildren(badge, document.createTextNode(txt));
-    else div.textContent = txt;
-    return div;
+  renderKillfeedImpl({
+    killfeedEl,
+    eventFeed,
+    you,
+    lang,
+    botArchInfo,
+    botArchBadge,
+    rightEventsDetailsEl,
+    getEventsUnreadCount: () => eventsUnreadCount,
+    setEventsUnreadCount: (v) => {
+      eventsUnreadCount = v;
+    },
+    setBadgeCount,
+    rightEventsBadgeEl,
+    syncRightEmptyStates
   });
-  killfeedEl.replaceChildren(...lines);
-
-  try {
-    if (rightEventsDetailsEl && !rightEventsDetailsEl.open && lines.length) {
-      if (!renderKillfeed._u || now - renderKillfeed._u > 1200) {
-        renderKillfeed._u = now;
-        eventsUnreadCount = Math.min(999, eventsUnreadCount + 1);
-        setBadgeCount(rightEventsBadgeEl, eventsUnreadCount);
-      }
-    }
-  } catch {}
-  try {
-    syncRightEmptyStates();
-  } catch {}
-}
-
-renderKillfeed._u = 0;
-
-function renderMetaHud() {
-  if (!metaHudEl) return;
-  const addRow = (rows, label, value, urgent) => {
-    const v = String(value ?? '').trim();
-    if (!v) return;
-    rows.push({ label, value: v, urgent: !!urgent });
-  };
-
-  const addProgressRow = (rows, label, p, leftText, rightText, urgent) => {
-    const pct = Number(p);
-    if (!Number.isFinite(pct)) return;
-    const lt = String(leftText || '').trim();
-    const rt = String(rightText || '').trim();
-    const vv = lt && rt ? `${lt} • ${rt}` : lt || rt;
-    rows.push({
-      label,
-      value: vv,
-      urgent: !!urgent,
-      progress: Math.max(0, Math.min(1, pct / 100)),
-      progressRight: vv,
-    });
-  };
-
-  const buildSection = (title, rows) => {
-    const sec = document.createElement('div');
-    sec.className = 'metaSection';
-    const t = document.createElement('div');
-    t.className = 'metaSectionTitle';
-    t.textContent = title;
-    sec.appendChild(t);
-    for (const r of rows) {
-      const row = document.createElement('div');
-      row.className = r.urgent ? 'metaRow metaRowUrgent' : 'metaRow';
-      if (typeof r.progress === 'number') {
-        row.className += ' metaRowProgress';
-        row.style.setProperty('--p', String(r.progress));
-      }
-      const l = document.createElement('span');
-      l.className = 'metaLabel';
-      l.textContent = `${r.label}:`;
-      const v = document.createElement('span');
-      v.className = 'metaValue';
-      v.textContent = typeof r.progressRight === 'string' && r.progressRight ? r.progressRight : r.value;
-      row.appendChild(l);
-      row.appendChild(v);
-      sec.appendChild(row);
-    }
-    return sec;
-  };
-
-  const me = lastState?.players?.find?.((p) => p.n === you) || null;
-  const cells = Number(me?.s) || 0;
-  const pct = mapCells ? (cells / mapCells) * 100 : 0;
-
-  // F17: в первом матче мета-системы открываются по одной (см. OB_STAGES).
-  const obBonus = obUnlocked('bonus');
-  const obKills = obUnlocked('bounty');
-  const obDaily = obSecondMatchPlus();
-
-  /* Мутатор раунда и баунти отсюда убраны: оба уже стоят в верхней полосе
-     (#topHudPhase и #topHudBounty), причём там они и нужнее — это события с
-     обратным отсчётом, требующие немедленной реакции, а полоса видна всегда.
-     Дублирование стоило правой панели двух строк, а полосе — ничего. */
-  const matchRows = [];
-
-  const fightRows = [];
-  // «Киллы» живут в #topHudKills. Здесь остаётся только серия: её в верхней
-  // полосе нет, а она объясняет, откуда взялся множитель очков.
-  if (obKills && youStreak >= 2) addRow(fightRows, t('meta.streak'), `x${youStreak}`);
-  const buffs = [];
-  if (youShield && obBonus) buffs.push(infoName(infoPack().powerups, 1, powerupLabel(1)));
-  if (obBonus && youSpeedUntilTick && lastEventsTick && youSpeedUntilTick > lastEventsTick) {
-    const rem = formatTickRemain(youSpeedUntilTick);
-    const tpe = youSpeedType === 4 ? 4 : 2;
-    const dash = infoName(infoPack().powerups, tpe, powerupLabel(tpe));
-    buffs.push(rem ? `${dash} (${rem})` : dash);
-  }
-  if (buffs.length) addRow(fightRows, infoPack().labels.buffs, buffs.join(' • '));
-
-  /* Панель показывает ТОЛЬКО то, чего нет в верхней полосе.
-     Убраны как дубли (замер на живом экране, 1076x970):
-       - «Цель: захват территории» — цель матча не меняется никогда, а слово
-         «Цель» и без того стоит заголовком этой же секции;
-       - «Зона: N • M%»  — ровно это показывают #topHudPct и #topHudCells;
-       - «До конца: м:сс» — это #topHudTime;
-       - «Киллы: N» ниже — это #topHudKills.
-     Верхняя полоса видна всегда и читается одним взглядом; правая панель —
-     для того, что в строку не помещается. */
-  const mainRows = [];
-  // Стиль как валюта имеет смысл только вместе с контрактом, который его даёт.
-  if (youStyle && obUnlocked('contract')) addRow(mainRows, infoPack().labels.style, String(youStyle));
-
-  // Ежедневки — со второго матча: в первом они только добавляют шума.
-  const dailyRows = [];
-  if (obDaily) {
-    // C7: все слоты, сколько бы их ни прислал сервер.
-    for (const s of dailySlots()) {
-      const it = youDailies.get(s);
-      if (!it || !it.type) continue;
-      addRow(dailyRows, dailyLabel(it.type), `${it.prog}/${it.goal}`);
-    }
-  }
-
-  const detailSections = [];
-  const addDetailSection = (title, rows) => {
-    if (!rows.length) return;
-    detailSections.push({ title, rows });
-  };
-  // Заголовок «Матч» уже стоит в summary этого <details> — внутри он был
-  // третьей копией того же слова. Секция про мутатор и баунти — это раунд.
-  addDetailSection(t('meta.round'), matchRows);
-  addDetailSection(t('meta.fight'), fightRows);
-  addDetailSection(t('meta.tasks'), dailyRows);
-
-  /* C7: панель пересобиралась ПОЛНОСТЬЮ на каждом кадре — замер оснасткой
-     (tools/probe.mjs): 16 createElement и 10 записей textContent на кадр,
-     то есть ~1000 узлов в секунду при том, что содержимое меняется раз в
-     секунду (обратные отсчёты) или реже. Тот же приём, что в renderKillfeed:
-     сверяем подпись содержимого и не трогаем DOM, когда рисовать нечего. */
-  const metaSig = JSON.stringify([
-    mainRows,
-    detailSections,
-    // Свёрнутость <details> живёт в DOM, а не в данных: если панель пересобрать,
-    // она схлопнется, поэтому состояние в подпись не входит и пересборка
-    // происходит только при смене самих строк.
-  ]);
-  if (renderMetaHud._sig === metaSig) return;
-  renderMetaHud._sig = metaSig;
-
-  if (!mainRows.length && !detailSections.length) {
-    metaHudEl.textContent = '';
-    metaHudEl.style.display = 'none';
-    return;
-  }
-
-  // Раскрытое состояние блока «Подробнее» переживает пересборку.
-  const wasOpen = !!metaHudEl.querySelector('details.metaDetails')?.open;
-
-  metaHudEl.style.display = '';
-  const frag = document.createDocumentFragment();
-  if (mainRows.length) {
-    frag.appendChild(buildSection(t('meta.wallet'), mainRows));
-  }
-
-  if (detailSections.length) {
-    const det = document.createElement('details');
-    det.className = 'metaDetails';
-    det.open = wasOpen;
-
-    const sum = document.createElement('summary');
-    sum.className = 'metaDetailsSummary';
-    sum.textContent = t('meta.details');
-    det.appendChild(sum);
-
-    for (const s of detailSections) {
-      det.appendChild(buildSection(s.title, s.rows));
-    }
-    frag.appendChild(det);
-  }
-  metaHudEl.replaceChildren(frag);
-
-  try {
-    syncRightEmptyStates();
-  } catch {}
-}
-
-function renderTeamHud() {
-  if (!teamHudEl) return;
-  if (!started || !lastState) {
-    teamHudEl.textContent = '';
-    try {
-      syncRightEmptyStates();
-    } catch {}
-    return;
-  }
-  const ordered = computeTopSorted(lastState.players);
-  // cells/pct/place отсюда убраны вместе со строками «Место» и «Очки»:
-  // ровно эти числа стоят в #topHudPlace, который виден всегда.
-  const small = window.innerWidth <= 720;
-  const maxRows = small ? 10 : 12;
-  const topN = ordered.slice(0, maxRows);
-
-  const rows = topN
-    .map((p, i) => {
-      const pid = String(p.n);
-      const nm = p.nm || String(p.n);
-      const isMe = p.n === you;
-      const pp = mapCells ? ((Number(p.s) || 0) / mapCells) * 100 : 0;
-      const fr = Number(p.cosFrame) || 0;
-      const frClass = `frame${cosClampId(fr)}`;
-      return `
-        <tr class="${isMe ? 'me' : ''} ${frClass}" data-pid="${pid}">
-          <td class="num">${i + 1}</td>
-          <td class="name">${playerTitleHtml(cosTitleByPlayer.get(p.n) || 0)}${escapeHtml(nm)}</td>
-          <td class="num">${Number(p.p) || 0}</td>
-          <td class="num">${pp.toFixed(1)}%</td>
-        </tr>
-      `;
-    })
-    .join('');
-
-  /* Панель — это только таблица. Убрано:
-       - заголовок «Команда»: он уже стоит в summary этого же <details>;
-       - строки «Место» и «Очки»: обе цифры есть в #topHudPlace;
-       - подпись «Топ-5» над таблицей на 12 строк — она врала. Сколько строк
-         показано, видно по самой таблице, отдельная подпись не нужна. */
-  setSafeHtml(
-    teamHudEl,
-    `
-    <div class="metaSection">
-      <table class="teamTable">
-        <thead>
-          <tr>
-            <th class="num">#</th>
-            <th class="name">${escapeHtml(t('lb.player'))}</th>
-            <th class="num">${escapeHtml(t('death.points'))}</th>
-            <th class="num">${escapeHtml(t('match.zone'))}</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows}
-        </tbody>
-      </table>
-    </div>
-  `
-  );
 }
 
 // ...
@@ -8833,782 +6008,141 @@ function handleStateBinary(buf) {
 
   // ROI update: type(1)=2, tick(4), players, rx/ry/rw/rh, dg, dt
   if (msgType === 2) {
-    if (o + 4 + 2 > bl) return;
-    const tick = dv.getUint32(o, true);
-    o += 4;
-    const pc = dv.getUint16(o, true);
-    o += 2;
-
-    const [perPlayerV4, perPlayerV3, perPlayerV2] = PLAYER_RECORD_SIZES;
-    const perPlayer = pickPlayerRecordSize(bl - o, pc);
-    if (perPlayer === null) return;
-    const players = [];
-    for (let k = 0; k < pc; k++) {
-      const n = dv.getUint16(o, true);
-      o += 2;
-      const x = dv.getUint16(o, true);
-      o += 2;
-      const y = dv.getUint16(o, true);
-      o += 2;
-      const d = dv.getUint8(o);
-      o += 1;
-      const a = dv.getUint8(o) === 1;
-      o += 1;
-      const s = dv.getUint16(o, true);
-      o += 2;
-      const p = dv.getUint16(o, true);
-      o += 2;
-      const hue = dv.getUint16(o, true);
-      o += 2;
-      let sh = 0;
-      let bot = 0;
-      let cosCaptureFx = 0;
-      let cosHead = 0;
-      let cosSeg = 0;
-      let cosNameplate = 0;
-      let cosFrame = 0;
-      if (perPlayer === perPlayerV2 || perPlayer === perPlayerV3) {
-        sh = dv.getUint8(o);
-        o += 1;
-      }
-      if (perPlayer === perPlayerV4) {
-        sh = dv.getUint8(o);
-        o += 1;
-      }
-      if (perPlayer === perPlayerV4) {
-        bot = dv.getUint8(o);
-        o += 1;
-      }
-      if (perPlayer === perPlayerV3 || perPlayer === perPlayerV4) {
-        cosCaptureFx = dv.getUint8(o);
-        o += 1;
-        cosHead = dv.getUint8(o);
-        o += 1;
-        cosSeg = dv.getUint8(o);
-        o += 1;
-        cosNameplate = dv.getUint8(o);
-        o += 1;
-        cosFrame = dv.getUint8(o);
-        o += 1;
-      }
-      const c = hueToHsl(hue);
-      if (bot) botIds.add(n);
-      players.push({
-        n,
-        x,
-        y,
-        d: DIR_NAMES[d] || 'right',
-        a,
-        c,
-        s,
-        p,
-        sh,
-        cosCaptureFx,
-        cosHead,
-        cosSeg,
-        cosNameplate,
-        cosFrame,
-        nm: displayNameOf(n, bot ? botDisplayName(n) : `${t('leaderboard.player')} ${n}`),
-        b: 0
-      });
-    }
-    const rx = dv.getUint16(o, true);
-    o += 2;
-    const ry = dv.getUint16(o, true);
-    o += 2;
-    const rw = dv.getUint16(o, true);
-    o += 2;
-    const rh = dv.getUint16(o, true);
-    o += 2;
-    const lenDG = dv.getUint32(o, true);
-    o += 4;
-    const lenDT = dv.getUint32(o, true);
-    o += 4;
-    if (o + lenDG + lenDT > bl) return;
-    const dg = buf.slice(o, o + lenDG);
-    o += lenDG;
-    const dt = buf.slice(o, o + lenDT);
-    onState({ full: false, tick, t: Date.now(), players, dg, dt, roi: { rx, ry, rw, rh } });
+    const nextO = handlePlayersMessage(dv, o, {
+      PLAYER_RECORD_SIZES,
+      pickPlayerRecordSize,
+      hueToHsl,
+      botIds,
+      DIR_NAMES,
+      displayNameOf,
+      botDisplayName,
+      t,
+      onState
+    });
+    if (nextO === null) return;
+    o = nextO;
     return;
   }
 
   // Minimap chunks: type(1)=4, tick(4), cw(1), ch(1), count(2), chunks...
   if (msgType === 4) {
-    if (o + 4 + 1 + 1 + 2 + 1 > bl) return;
-    o += 4;
-    const cw = dv.getUint8(o);
-    o += 1;
-    const ch = dv.getUint8(o);
-    o += 1;
-    if (!cw || !ch) return;
-    const count = dv.getUint16(o, true);
-    o += 2;
-    const flags = dv.getUint8(o);
-    o += 1;
-    const hasTrail = (flags & 1) === 1;
-    const chunkCells = cw * ch;
-    for (let k = 0; k < count; k++) {
-      const bytesChunk = 2 + chunkCells * 2 + (hasTrail ? chunkCells * 2 : 0);
-      if (o + bytesChunk > bl) return;
-      const cx = dv.getUint8(o);
-      o += 1;
-      const cy = dv.getUint8(o);
-      o += 1;
-      const x0 = cx * cw;
-      const y0 = cy * ch;
-      for (let n = 0; n < chunkCells; n++) {
-        const v = dv.getUint16(o, true);
-        o += 2;
-        const xx = n % cw;
-        const yy = (n / cw) | 0;
-        const i = (y0 + yy) * W + (x0 + xx);
-        if (i >= 0 && i < N && minimapGridOwner) minimapGridOwner[i] = v;
-      }
-      if (hasTrail) {
-        for (let n = 0; n < chunkCells; n++) {
-          o += 2;
-        }
-      }
-
-      // update pixels for this chunk only
-      for (let yy = 0; yy < ch; yy++) {
-        const row = (y0 + yy) * W + x0;
-        for (let xx = 0; xx < cw; xx++) {
-          const i = row + xx;
-          if (i >= 0 && i < N) setMinimapPixel(i);
-        }
-      }
-    }
-    minimapHadChunkUpdate = true;
+    const res = handleMinimapMessage(dv, o, {
+      W,
+      N,
+      minimapGridOwner,
+      minimapImage,
+      you,
+      colors,
+      minimapOwnerRgbCache,
+      gridCellOwner,
+      gridCellIsCooling,
+      setMinimapPixel
+    });
+    if (res === null) return;
+    o = res.offset;
+    minimapHadChunkUpdate = res.hadChunkUpdate;
     return;
   }
 
   if (msgType === 5) {
-    const need = (n) => o+n <= bl;
-    if (!need(4 + 1 + 4 + 2 + 4 + 1)) return;
-    const tick = dv.getUint32(o, true);
-    o += 4;
-
-    lastEventsTick = tick;
-    lastEventsAt = Date.now();
-
-    mutatorType = dv.getUint8(o);
-    o += 1;
-    mutatorUntil = dv.getUint32(o, true);
-    o += 4;
-
-    bountyTarget = dv.getUint16(o, true);
-    o += 2;
-    bountyUntil = dv.getUint32(o, true);
-    o += 4;
-
-    const puCount = dv.getUint8(o);
-    o += 1;
-    const nextPU = new Map();
-    if (!need(puCount * 11 + 2)) return;
-    for (let k = 0; k < puCount; k++) {
-      const id = dv.getUint16(o, true);
-      o += 2;
-      const type = dv.getUint8(o);
-      o += 1;
-      const x = dv.getUint16(o, true);
-      o += 2;
-      const y = dv.getUint16(o, true);
-      o += 2;
-      const expires = dv.getUint32(o, true);
-      o += 4;
-      nextPU.set(id, { id, type, x, y, expires });
-    }
-    powerUps = nextPU;
-
-    const evCount = dv.getUint16(o, true);
-    o += 2;
-    for (let k = 0; k < evCount; k++) {
-      if (!need(1)) return;
-      const kind = dv.getUint8(o);
-      o += 1;
-
-      if (kind === 1) {
-        if (!need(9)) return;
-        const victim = dv.getUint16(o, true);
-        o += 2;
-        const killer = dv.getUint16(o, true);
-        o += 2;
-        const reason = dv.getUint8(o);
-        o += 1;
-        const ex = dv.getUint16(o, true);
-        o += 2;
-        const ey = dv.getUint16(o, true);
-        o += 2;
-        const vn = displayNameOf(victim);
-        const kn = killer ? displayNameOf(killer) : '';
-
-        if (victim === you) {
-          lastDeathInfo = { killer, killerName: kn, reason };
-        }
-
-        const rs = deathReasonLabel(reason);
-        // Эффект гибели жертвы — его видят все, а не только убийца.
-        // Стиль берём из cosExtra; без сообщения это базовая вспышка (0).
-        addFxBurst(ex, ey, `die${cosClampId(cosDeathByPlayer.get(victim) || 0)}`, {
-          pid: victim,
-          life: COS_DEATH_MS
-        });
-
-        if (killer) pushEventFeed(`${kn} -> ${vn}${rs ? ` (${rs})` : ''}`, 'Kill', killer);
-        else pushEventFeed(`${vn} ${lang === 'en' ? 'died' : 'погиб'}${rs ? ` (${rs})` : ''}`, 'Death', victim);
-
-        if (killer && killer === you) {
-          youKills++;
-          addFxBurst(ex, ey, 'kill');
-          addShakeClass('medium', ...shakeDirFrom(ex, ey));
-          sfx.kill();
-          fxFlashScreen([255, 96, 96], 0.75);
-          comboBump();
-          vibrate(35);
-          // K5: первое убийство — открываем контракты.
-          obFireEvent('kill');
-        }
-        if (victim === you) {
-          // J2: отклик на собственную смерть — не на чужую.
-          addShakeClass('large', ...shakeDirFrom(ex, ey));
-          fxFlashScreen([255, 80, 80], 1);
-          comboBreak();
-          // K5: первая смерть — теперь понятно, зачем баунти и киллы.
-          obFireEvent('death');
-        }
-        continue;
-      }
-
-      if (kind === 19) {
-        if (!need(2 + 2 + 2 + 4 + 1)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const ex = dv.getUint16(o, true);
-        o += 2;
-        const ey = dv.getUint16(o, true);
-        o += 2;
-        const delta = dv.getUint32(o, true);
-        o += 4;
-        const fxId = dv.getUint8(o);
-        o += 1;
-        const pn = displayNameOf(pid);
-        /* C6: 13 ботов делают по ~66 захватов за матч — это ~2 строки в
-           секунду, лента читалась как зависший лог и в ней тонули киллы.
-           Свой захват идёт в ленту всегда (это ответ на твоё действие),
-           чужой — только если он крупный: порог примерно равен половине
-           типового домашнего квадрата, ниже него событие не несёт
-           информации о раскладе на карте. */
-        if (pid === you || delta >= FEED_FOREIGN_CAPTURE_MIN) {
-          pushEventFeed(
-            `${pn} ${lang === 'en' ? 'captured' : 'захватил'} +${delta} ${lang === 'en' ? 'zone' : 'зоны'}`,
-            'Capture',
-            pid
-          );
-        }
-        addFxBurst(ex, ey, `cap${cosClampId(fxId)}`, { pid });
-        if (pid === you) {
-          // J5: самое частое приятное действие теперь показывает число.
-          addScorePopup(ex, ey, delta);
-          comboBump();
-
-          const jackpot = delta >= CAPTURE_JACKPOT_CELLS;
-          if (jackpot) {
-            addShakeClass('large', ...shakeDirFrom(ex, ey));
-            fxFlashScreen([255, 215, 120], 1);
-            // J12: 140 мс на самом жирном событии игры.
-            triggerHitstop(140);
-            sfx.jackpot();
-            bumpMatchTabBadge();
-            if (!showBigBanner('💎', t('banner.jackpot'), `+${fmtInt(delta)} · ${t('banner.jackpot_sub')}`, 'jackpot')) {
-              addToast('💎', `${t('banner.jackpot')} +${fmtInt(delta)}`, 'big', t('banner.jackpot_sub'), {
-                tab: 'match',
-                key: 'capture_jackpot',
-                prio: 'jackpot'
-              });
-            }
-          } else {
-            addShakeClass('small', ...shakeDirFrom(ex, ey));
-            // J17: раньше захват меньше 40 клеток звучал как ничто.
-            if (delta >= 40) sfx.captureBig();
-            else sfx.captureSmall();
-          }
-
-          celebrateFirstCapture(delta);
-          // K5: первый захват — момент, когда про бонусы уже есть смысл рассказать.
-          obFireEvent('capture');
-        }
-        continue;
-      }
-
-      // F5 «Реклейм»: игрок вернул свою остывающую территорию.
-      // A=игрок, B=клетки, X/Y=точка возврата. Без разбора этого kind весь
-      // остаток пакета событий терялся бы (парсер ломается на неизвестном kind).
-      if (kind === 20) {
-        if (!need(2 + 2 + 2 + 2)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const cells = dv.getUint16(o, true);
-        o += 2;
-        const ex = dv.getUint16(o, true);
-        o += 2;
-        const ey = dv.getUint16(o, true);
-        o += 2;
-        const pn = displayNameOf(pid);
-        // C6: тот же порог, что и у захвата — чужой возврат мелочи в ленте
-        // такой же шум, как и чужой мелкий захват. Свой — всегда.
-        if (pid === you || cells >= FEED_FOREIGN_CAPTURE_MIN) {
-          pushEventFeed(`${pn} ${lang === 'en' ? 'reclaimed' : 'вернул'} +${cells}`, 'Reclaim', pid);
-        }
-        addFxBurst(ex, ey, `cap${cosClampId(cosCaptureFxByPlayer(pid))}`, { pid });
-        if (pid === you && cells > 0) {
-          addScorePopup(ex, ey, cells);
-          // F5: возврат своей земли должен читаться иначе, чем обычный захват —
-          // это отыгранная назад потеря, а не прирост.
-          addFxBurst(ex, ey, 'reclaim', { life: 900 });
-          addShakeClass(cells >= 120 ? 'medium' : 'small', ...shakeDirFrom(ex, ey));
-          fxFlashScreen([120, 220, 255], Math.min(1, 0.35 + cells / 400));
-          sfx.bountyClaimed();
-          addToast('♻', t('reclaim.toast'), cells >= 120 ? 'big' : '', `+${fmtInt(cells)} · ${t('reclaim.toast_desc')}`, {
-            key: 'reclaim',
-            prio: cells >= 120 ? 'jackpot' : 'important'
-          });
-          if (cells >= 120) triggerHitstop(110);
-        }
-        coolDeadlineByOwner.delete(pid);
-        continue;
-      }
-
-      // F5 «Реклейм»: EventCoolBatch (21) — территория погибшего пошла остывать.
-      // A=бывший владелец, B=клетки, C=тик окончательного исчезновения.
-      // Даёт честное время истечения вместо клиентской оценки по первому кадру.
-      if (kind === 21) {
-        if (!need(2 + 2 + 4)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const cells = dv.getUint16(o, true);
-        o += 2;
-        const untilTick = dv.getUint32(o, true);
-        o += 4;
-        if (cells > 0) {
-          const nt = approxNowTick();
-          const remMs = nt != null && tickMs ? Math.max(0, (untilTick - nt) * tickMs) : RECLAIM_WINDOW_MS;
-          coolDeadlineByOwner.set(pid, performance.now() + Math.min(RECLAIM_WINDOW_MS * 1.5, remMs));
-        }
-        continue;
-      }
-
-      if (kind === 15) {
-        if (!need(2 + 1 + 2 + 4)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const slot = dv.getUint8(o);
-        o += 1;
-        const goal = dv.getUint16(o, true);
-        o += 2;
-        const packed = dv.getUint32(o, true);
-        o += 4;
-        // K7: раньше здесь объявлялась `const t`, перекрывавшая функцию перевода
-        // на весь блок. Переименовано в `type`.
-        const type = (packed >>> 16) & 0xffff;
-        const prog = packed & 0xffff;
-        if (pid === you) {
-          dailySetAssign(slot, type, goal, prog);
-          bumpMatchTabBadge();
-          // J16: назначение ежедневки было беззвучным.
-          sfx.dailyAssigned();
-          // C7: ключ тоста включает слот — иначе два слота с одним типом
-          // схлопывались в один тост и одно из заданий оставалось невидимым.
-          addToast('📅', `${infoPack().labels.daily}: ${dailyLabel(type)}`, 'big', infoDesc(infoPack().dailies, type, ''), { tab: 'match', key: `daily_assign_${slot}_${type}`, prio: 'important' });
-        }
-        continue;
-      }
-
-      if (kind === 16) {
-        if (!need(2 + 1 + 2)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const slot = dv.getUint8(o);
-        o += 1;
-        const prog = dv.getUint16(o, true);
-        o += 2;
-        if (pid === you) {
-          dailySetProgress(slot, prog);
-        }
-        continue;
-      }
-
-      if (kind === 17) {
-        if (!need(2 + 1)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const slot = dv.getUint8(o);
-        o += 1;
-        if (pid === you) {
-          bumpMatchTabBadge();
-          // C7: тост называет конкретное задание и различает слоты.
-          const doneIt = youDailies.get(Number(slot) || 0);
-          if (doneIt) doneIt.prog = doneIt.goal || doneIt.prog;
-          const doneName = doneIt?.type ? dailyLabel(doneIt.type) : '';
-          addToast('🏁', infoPack().labels.dailyComplete, 'big', doneName, { tab: 'match', key: `daily_complete_${slot}`, prio: 'important' });
-          sfx.dailyDone();
-          comboBump();
-        }
-        continue;
-      }
-
-      if (kind === 18) {
-        if (!need(2 + 1)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const achv = dv.getUint8(o);
-        o += 1;
-        const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} — ${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'Achv', pid);
-        if (pid === you) {
-          bumpMatchTabBadge();
-          sfx.achievement();
-          fxFlashScreen([255, 225, 150], 0.8);
-          triggerHitstop(90);
-          // J13: ачивка идёт в центральный баннер, а не тонет за тремя мелкими тостами.
-          if (!showBigBanner('🏅', achvLabel(achv), infoDesc(infoPack().achv, achv, ''), 'jackpot')) {
-            addToast('🏅', `${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'big', infoDesc(infoPack().achv, achv, ''), { tab: 'match', key: `achv_${achv}`, prio: 'jackpot' });
-          }
-        }
-        continue;
-      }
-
-      if (kind === 10) {
-        if (!need(2 + 1 + 2 + 4)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const type = dv.getUint8(o);
-        o += 1;
-        const goal = dv.getUint16(o, true);
-        o += 2;
-        const until = dv.getUint32(o, true);
-        o += 4;
-        const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} — ${infoPack().labels.contract}: ${contractLabel(type) || type} ${goal}`, 'Contract', pid);
-        if (pid === you) {
-          youContractType = type;
-          youContractGoal = goal;
-          youContractProgress = 0;
-          youContractUntil = until;
-          bumpMatchTabBadge();
-          // J16: назначение контракта было беззвучным.
-          sfx.contractAssigned();
-          addToast('📜', `${infoPack().labels.contract}: ${contractLabel(type) || type}`, 'big', infoDesc(infoPack().contracts, type, ''), { tab: 'match', key: `contract_assign_${type}`, prio: 'important' });
-        }
-        continue;
-      }
-
-      if (kind === 11) {
-        if (!need(2 + 1 + 2)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const type = dv.getUint8(o);
-        o += 1;
-        const prog = dv.getUint16(o, true);
-        o += 2;
-        if (pid === you) {
-          youContractType = type;
-          youContractProgress = prog;
-        }
-        continue;
-      }
-
-      if (kind === 12) {
-        if (!need(2 + 1)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const type = dv.getUint8(o);
-        o += 1;
-        const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} — ${infoPack().labels.contractComplete}: ${contractLabel(type) || type}`, 'Contract', pid);
-        if (pid === you) {
-          youContractProgress = youContractGoal;
-          bumpMatchTabBadge();
-          addToast('✅', `${infoPack().labels.contractComplete}: ${contractLabel(type) || type}`, 'big', infoDesc(infoPack().contracts, type, ''), { tab: 'match', key: `contract_complete_${type}`, prio: 'important' });
-          sfx.contractDone();
-          comboBump();
-        }
-        continue;
-      }
-
-      if (kind === 13) {
-        if (!need(2 + 2 + 4 + 1)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const delta = dv.getUint16(o, true);
-        o += 2;
-        const total = dv.getUint32(o, true);
-        o += 4;
-        const reason = dv.getUint8(o);
-        o += 1;
-        /* C8: начисления Стиля чужих игроков давали вторую строку на каждый
-           захват бота — при одном человеке в комнате это ~16 строк/с про чужую
-           валюту, ценности для игрока ноль. В ленту идёт только свой Стиль. */
-        if (pid === you) {
-          pushEventFeed(`+${delta} ${t('cosmetics.style_points')} (${styleLabel(reason)})`, 'Style');
-          if (delta > 0) matchStyleEarned += delta;
-          setYouStyle(total);
-          bumpMatchTabBadge();
-          if (delta >= 20) {
-            if (styleToastTimer) {
-              try {
-                clearTimeout(styleToastTimer);
-              } catch {}
-              styleToastTimer = 0;
-              styleToastAcc = 0;
-              styleToastReason = 0;
-              styleToastCount = 0;
-            }
-            addToast('✨', `+${delta} ${t('cosmetics.style_points')}`, 'big', styleLabel(reason), { tab: 'match', key: `style_${reason}_${delta}` });
-          } else if (delta > 0) {
-            if (styleToastAcc && styleToastReason && styleToastReason !== reason) {
-              flushStyleToast();
-            }
-            styleToastAcc += delta;
-            styleToastReason = reason;
-            styleToastCount++;
-            if (!styleToastTimer) {
-              styleToastTimer = setTimeout(flushStyleToast, 650);
-            }
-          }
-        }
-        continue;
-      }
-
-      if (kind === 14) {
-        if (!need(2 + 2)) return;
-        const killer = dv.getUint16(o, true);
-        o += 2;
-        const victim = dv.getUint16(o, true);
-        o += 2;
-        const kn = displayNameOf(killer);
-        const vn = displayNameOf(victim);
-        pushEventFeed(`${lang === 'en' ? 'REVENGE' : 'МЕСТЬ'}: ${kn} -> ${vn}`, 'Revenge', killer);
-        if (killer === you) {
-          bumpMatchTabBadge();
-          sfx.revenge();
-          fxFlashScreen([255, 110, 110], 0.85);
-          if (!showBigBanner('😈', t('banner.revenge'), lang === 'en' ? 'A kill in return for your death' : 'Убийство в ответ на вашу смерть', 'danger')) {
-            addToast('😈', lang === 'en' ? 'Revenge!' : 'Месть!', 'big', lang === 'en' ? 'A kill in return for your death' : 'Убийство в ответ на вашу смерть', { tab: 'match', key: 'revenge', prio: 'jackpot' });
-          }
-        }
-        continue;
-      }
-
-      if (kind === 2) {
-        if (!need(2 + 1)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const streak = dv.getUint8(o);
-        o += 1;
-        const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} — ${t('event.streak')} x${streak}`, 'Streak', pid);
-        if (pid === you) {
-          youStreak = streak;
-          // J3: раньше бип стоял вне этой проверки — в комнате с 14 ботами
-          // получался метроном.
-          sfx.streak(Math.max(0, streak - 2));
-          if (streak === 3) {
-            bumpMatchTabBadge();
-            addToast('🔥', `${t('toast.streak')} x${streak}`, null, t('toast.streak_3'), { tab: 'match', key: `streak_${streak}`, prio: 'important' });
-          }
-          if (streak >= 5) {
-            bumpMatchTabBadge();
-            fxFlashScreen([255, 170, 90], 0.8);
-            if (!showBigBanner('🔥', `${t('banner.streak')} x${streak}`, t('toast.streak_5'), 'jackpot')) {
-              addToast('🔥', `${t('toast.streak')} x${streak}`, 'big', t('toast.streak_5'), { tab: 'match', key: `streak_${streak}`, prio: 'jackpot' });
-            }
-          }
-        }
-        continue;
-      }
-
-      if (kind === 3) {
-        if (!need(2 + 4)) return;
-        const target = dv.getUint16(o, true);
-        o += 2;
-        const until = dv.getUint32(o, true);
-        o += 4;
-        bountyTarget = target;
-        bountyUntil = until;
-        const tn = displayNameOf(target);
-        pushEventFeed(`${t('event.bounty')}: ${tn}`, 'Bounty');
-
-        bumpMatchTabBadge();
-        addToast('🎯', `${infoPack().labels.bounty}: ${tn}`, 'big', t('toast.bounty_desc'), { tab: 'match', key: `bounty_${target}`, prio: target === you ? 'jackpot' : 'important' });
-        // J2/J3: назначение баунти — глобальное событие. Полная громкость только
-        // если цель — ты, иначе 40%.
-        sfx.bountyAssigned(target === you ? 1 : 0.4);
-        if (target === you) fxFlashScreen([255, 140, 90], 0.7);
-        continue;
-      }
-
-      if (kind === 4) {
-        if (!need(2 + 2)) return;
-        const killer = dv.getUint16(o, true);
-        o += 2;
-        const victim = dv.getUint16(o, true);
-        o += 2;
-        const kn = displayNameOf(killer);
-        const vn = displayNameOf(victim);
-        pushEventFeed(`${t('event.bounty_claimed')}: ${kn} -> ${vn}`, 'Bounty', killer);
-
-        bumpMatchTabBadge();
-        const mineClaim = killer === you;
-        addToast('🏆', t('toast.bounty_claim_title'), 'big', t('toast.bounty_claim_desc'), { tab: 'match', key: 'bounty_claim', prio: mineClaim ? 'jackpot' : 'minor' });
-        // J2: тряска и полная громкость только тому, кто забрал награду.
-        if (mineClaim) {
-          sfx.bountyClaimed();
-          addShakeClass('large');
-          fxFlashScreen([255, 210, 120], 0.9);
-          comboBump();
-        } else {
-          sfx.bountyAssigned(0.4);
-        }
-        continue;
-      }
-
-      if (kind === 5) {
-        if (!need(2 + 1 + 2 + 2 + 4)) return;
-        const id = dv.getUint16(o, true);
-        o += 2;
-        const type = dv.getUint8(o);
-        o += 1;
-        const x = dv.getUint16(o, true);
-        o += 2;
-        const y = dv.getUint16(o, true);
-        o += 2;
-        const expires = dv.getUint32(o, true);
-        o += 4;
-        powerUps.set(id, { id, type, x, y, expires });
-        continue;
-      }
-
-      if (kind === 6) {
-        if (!need(2 + 2 + 1 + 2 + 2)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const id = dv.getUint16(o, true);
-        o += 2;
-        const type = dv.getUint8(o);
-        o += 1;
-        const ex = dv.getUint16(o, true);
-        o += 2;
-        const ey = dv.getUint16(o, true);
-        o += 2;
-        powerUps.delete(id);
-        const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} ${t('event.picked')}: ${powerupLabel(type)}`, 'Pickup', pid);
-
-        if (pid === you) {
-          if (type === 1) youShield = true;
-          if (type === 2) {
-            youSpeedUntilTick = lastEventsTick + 45;
-            youSpeedType = 2;
-          }
-          if (type === 4) {
-            youSpeedUntilTick = lastEventsTick + 95;
-            youSpeedType = 4;
-          }
-          addFxBurst(ex, ey, type === 2 ? 'pickup2' : type === 4 ? 'pickup4' : 'pickup');
-          if (type === 2 || type === 4) sfx.speedOn();
-          else sfx.pickup();
-          addShakeClass('micro', ...shakeDirFrom(ex, ey));
-          comboBump();
-        }
-        continue;
-      }
-
-      if (kind === 9) {
-        if (!need(2 + 1 + 2 + 2)) return;
-        const pid = dv.getUint16(o, true);
-        o += 2;
-        const type = dv.getUint8(o);
-        o += 1;
-        const ex = dv.getUint16(o, true);
-        o += 2;
-        const ey = dv.getUint16(o, true);
-        o += 2;
-        const pn = displayNameOf(pid);
-        pushEventFeed(`${pn} ${t('event.used')}: ${powerupLabel(type)}`, 'Use', pid);
-
-        if (pid === you) {
-          if (type === 1) youShield = false;
-          addFxBurst(ex, ey, 'use');
-          addToast(type === 3 ? '💥' : '🛡', `${t('toast.powerup_used')}: ${powerupLabel(type)}`, null, infoDesc(infoPack().powerups, type, ''));
-          if (type === 3) {
-            sfx.explode();
-            fxFlashScreen([255, 150, 90], 0.8);
-          } else {
-            sfx.powerUsed();
-          }
-          addShakeClass('medium', ...shakeDirFrom(ex, ey));
-        }
-        continue;
-      }
-
-      if (kind === 7) {
-        if (!need(1 + 4)) return;
-        const type = dv.getUint8(o);
-        o += 1;
-        const until = dv.getUint32(o, true);
-        o += 4;
-        mutatorType = type;
-        mutatorUntil = until;
-        const mn = mutatorLabel(type);
-        if (mn) pushEventFeed(`${t('event.round')}: ${mn}`, 'Round');
-
-        if (mn) addToast('⚡', `${infoPack().labels.round}: ${mn}`, 'big', infoDesc(infoPack().mutators, type, ''), { key: `mutator_${type}`, prio: 'important' });
-        // J2: глобальное событие — 40% громкости.
-        sfx.mutatorOn(0.4);
-        continue;
-      }
-
-      if (kind === 8) {
-        if (!need(1)) return;
-        const type = dv.getUint8(o);
-        o += 1;
-        if (mutatorType === type) {
-          mutatorType = 0;
-          mutatorUntil = 0;
-        }
-
-        addToast('✓', infoPack().labels.roundEnded, 'big');
-        sfx.mutatorOff(0.4);
-        continue;
-      }
-
-      // Сервер для неизвестного типа события пишет ровно один байт-заглушку
-      // (см. default в buildEventsPooledLocked). Пропускаем его и продолжаем
-      // разбор: иначе старый закешированный клиент терял бы весь остаток
-      // пакета после первого же нового типа события — этот баг в проекте уже
-      // случался дважды и молча ломал киллфид, тосты и обновления заданий.
-      // C10: при рассинхроне версий это десятки предупреждений на тик —
-      // логируем один раз на тип события.
-      if (!unknownEventKindSeen.has(kind)) {
-        unknownEventKindSeen.add(kind);
-        try {
-          console.warn('unknown event kind', kind);
-        } catch {}
-      }
-      if (!need(1)) break;
-      o += 1;
-      continue;
-    }
-
-    // K7: renderKillfeed() звался 13 раз внутри цикла разбора событий (замер:
-    // 784 мутации DOM за 115 с). Один пакет — одна перерисовка в конце.
-    if (killfeedDirty) {
-      killfeedDirty = false;
-      renderKillfeed();
-    }
-    renderMetaHud();
-    renderTopHud();
+    const res = handleEventsMessage(dv, o, {
+      lastEventsTick,
+      lastEventsAt,
+      mutatorType,
+      mutatorUntil,
+      bountyTarget,
+      bountyUntil,
+      powerUps,
+      youKills,
+      youStreak,
+      youShield,
+      youSpeedUntilTick,
+      youSpeedType,
+      matchStyleEarned,
+      styleToastAcc,
+      styleToastReason,
+      styleToastCount,
+      styleToastTimer,
+      youContractType,
+      youContractGoal,
+      youContractProgress,
+      youContractUntil,
+      killfeedDirty,
+      lastDeathInfo,
+      displayNameOf,
+      deathReasonLabel,
+      addFxBurst,
+      cosClampId,
+      cosDeathByPlayer,
+      COS_DEATH_MS,
+      pushEventFeed,
+      t,
+      addShakeClass,
+      shakeDirFrom,
+      sfx,
+      fxFlashScreen,
+      comboBump,
+      vibrate,
+      obFireEvent,
+      FEED_FOREIGN_CAPTURE_MIN,
+      addScorePopup,
+      CAPTURE_JACKPOT_CELLS,
+      triggerHitstop,
+      bumpMatchTabBadge,
+      showBigBanner,
+      addToast,
+      fmtInt,
+      celebrateFirstCapture,
+      cosCaptureFxByPlayer,
+      coolDeadlineByOwner,
+      approxNowTick,
+      tickMs,
+      RECLAIM_WINDOW_MS,
+      dailySetAssign,
+      infoPack,
+      dailyLabel,
+      dailySetProgress,
+      youDailies,
+      achvLabel,
+      infoDesc,
+      contractLabel,
+      styleLabel,
+      setYouStyle,
+      flushStyleToast,
+      comboBreak,
+      mutatorLabel,
+      unknownEventKindSeen,
+      powerupLabel,
+      you,
+      renderKillfeed,
+      renderMetaHud,
+      renderTopHud
+    });
+    if (res === null) return;
+    o = res.offset;
+    lastEventsTick = res.lastEventsTick;
+    lastEventsAt = res.lastEventsAt;
+    mutatorType = res.mutatorType;
+    mutatorUntil = res.mutatorUntil;
+    bountyTarget = res.bountyTarget;
+    bountyUntil = res.bountyUntil;
+    powerUps = res.powerUps;
+    youKills = res.youKills;
+    youStreak = res.youStreak;
+    youShield = res.youShield;
+    youSpeedUntilTick = res.youSpeedUntilTick;
+    youSpeedType = res.youSpeedType;
+    matchStyleEarned = res.matchStyleEarned;
+    styleToastAcc = res.styleToastAcc;
+    styleToastReason = res.styleToastReason;
+    styleToastCount = res.styleToastCount;
+    styleToastTimer = res.styleToastTimer;
+    youContractType = res.youContractType;
+    youContractGoal = res.youContractGoal;
+    youContractProgress = res.youContractProgress;
+    youContractUntil = res.youContractUntil;
+    killfeedDirty = res.killfeedDirty;
+    lastDeathInfo = res.lastDeathInfo;
     return;
   }
   } catch (e) {
@@ -9616,15 +6150,6 @@ function handleStateBinary(buf) {
   }
 }
 
-function onChatInit(history) {
-  chatLog.textContent = '';
-  chatMessages.length = 0;
-  if (!Array.isArray(history)) return;
-  for (const m of history) chatMessages.push(m);
-  renderChat();
-  chatDirty = false;
-  updateChatLayout();
-}
 
 function onChat(m) {
   if (!m) return;
@@ -9845,7 +6370,7 @@ function applyPackedDeltaGridWithAnim(buf, now) {
 }
 
 function onState(s) {
-  lastState = s;
+  clientState.lastState = s;
 
   // K1: прямоугольник ROI приходил и молча выбрасывался. Он — единственный
   // источник правды о том, какая часть сетки вообще свежая.
@@ -9916,7 +6441,7 @@ function onState(s) {
     }
   }
 
-  if (nameChanged && chatMessages.length) renderChat();
+  if (nameChanged && clientState.chatMessages.length) renderChat();
 
   headIndexByOwner.clear();
   for (const p of s.players) {
@@ -9925,11 +6450,11 @@ function onState(s) {
 
   lastPacketAt = performance.now();
 
-  if (lastStateAt != null) {
-    const dt = lastPacketAt - lastStateAt;
+  if (clientState.lastStateAt != null) {
+    const dt = lastPacketAt - clientState.lastStateAt;
     if (dt > 0) tickrate = lerp(tickrate || 0, 1000 / dt, 0.15);
   }
-  lastStateAt = lastPacketAt;
+  clientState.lastStateAt = lastPacketAt;
 
   try {
     refreshOwnGeometry(false);
@@ -9995,77 +6520,30 @@ function getOwnerFillStyle(owner, a) {
 }
 
 function drawMinimap() {
-  if (!minimapImage || !minimapGridOwner || !lastState) return;
-  if (minimapDirty) {
-    minimapDirty = false;
-    for (let i = 0; i < N; i++) setMinimapPixel(i);
-  }
-
-  mmCtx.putImageData(minimapImage, 0, 0);
-  minimapHadChunkUpdate = false;
-
-  // I3: на миникарте видны все живые игроки, а не только ты.
-  // Свою точку рисуем последней и крупнее (ниже, после рамки обзора).
-  for (const p of lastState.players) {
-    if (!p.a) continue;
-    if (p.n === you) continue;
-    if (p.x < 0 || p.y < 0 || p.x >= W || p.y >= H) continue;
-    const c = boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)');
-    const rgb = hslToRgb(c);
-    const isBot = botIds.has(p.n);
-    const isBounty = !!(bountyTarget && p.n === bountyTarget);
-
-    // Тёмная подложка, чтобы точка читалась на своей же территории.
-    mmCtx.fillStyle = 'rgba(0,0,0,0.62)';
-    mmCtx.fillRect(p.x - 1, p.y - 1, 3, 3);
-    mmCtx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${isBot ? 0.62 : 0.98})`;
-    mmCtx.fillRect(p.x, p.y, isBot ? 1 : 2, isBot ? 1 : 2);
-
-    if (isBounty) {
-      mmCtx.save();
-      mmCtx.strokeStyle = 'rgba(255,90,60,0.95)';
-      mmCtx.lineWidth = 1;
-      mmCtx.strokeRect(p.x - 2.5, p.y - 2.5, 6, 6);
-      mmCtx.restore();
-    }
-  }
-
-  mmCtx.save();
-  mmCtx.lineWidth = 1;
-  const w = Math.max(1, viewMaxX - viewMinX + 1);
-  const h = Math.max(1, viewMaxY - viewMinY + 1);
-  mmCtx.strokeStyle = 'rgba(0,0,0,0.70)';
-  mmCtx.lineWidth = 3;
-  mmCtx.strokeRect(viewMinX + 0.5, viewMinY + 0.5, w - 1, h - 1);
-  mmCtx.strokeStyle = 'rgba(255,255,255,0.90)';
-  mmCtx.lineWidth = 1;
-  mmCtx.strokeRect(viewMinX + 0.5, viewMinY + 0.5, w - 1, h - 1);
-
-  try {
-    drawMinimapZones();
-  } catch {}
-
-  const me = lastState.players.find((p) => p.n === you && p.a);
-  if (me) {
-    mmCtx.fillStyle = 'rgba(0,0,0,0.72)';
-    mmCtx.fillRect(me.x - 2, me.y - 2, 5, 5);
-    mmCtx.fillStyle = 'rgba(255,255,255,0.96)';
-    mmCtx.fillRect(me.x - 1, me.y - 1, 3, 3);
-    mmCtx.fillStyle = 'rgba(0,0,0,0.70)';
-    mmCtx.fillRect(me.x, me.y, 1, 1);
-  }
-  mmCtx.restore();
-
-  syncMinimapOverlayCanvas();
-}
-
-function formatRate(bps) {
-  return formatRateOf(bps);
-}
-
-function perfValueSpan(text, bad) {
-  const cls = bad ? 'perfBad' : 'perfOk';
-  return `<span class="perfValue ${cls}">${text}</span>`;
+  const res = drawMinimapImpl(mmCtx, {
+    minimapImage,
+    minimapGridOwner,
+    clientState,
+    minimapDirty,
+    minimapHadChunkUpdate,
+    N,
+    you,
+    colors,
+    botIds,
+    bountyTarget,
+    minimapOwnerRgbCache,
+    gridCellOwner,
+    gridCellIsCooling,
+    viewMinX,
+    viewMinY,
+    viewMaxX,
+    viewMaxY,
+    W,
+    H,
+    syncMinimapOverlayCanvas
+  });
+  minimapDirty = res.dirty;
+  minimapHadChunkUpdate = res.hadChunkUpdate;
 }
 
 function getInterpPlayer(id, t) {
@@ -10086,7 +6564,7 @@ function draw() {
     updateMatchCountdown();
   }
 
-  if (!lastState || !gridOwner || !trailOwner) return;
+  if (!clientState.lastState || !gridOwner || !trailOwner) return;
 
   /* K7: под открытым оверлеем смерти/итогов поле продолжало рисоваться на
      60 fps, причём сквозь backdrop-filter: blur(8px) — худший из возможных
@@ -10127,81 +6605,16 @@ function draw() {
 
   const viewH = Math.max(1, ch - occludedBottom);
 
-  // J12: hitstop замедляет только интерполяцию игроков, не эффекты.
-  const interpNow = performance.now();
-  const interpElapsed = interpNow - lastPacketAt - hitstopLostMs(lastPacketAt, interpNow);
-  const interp = Math.max(0, Math.min(1, interpElapsed / tickMs));
-
-  const my = getInterpPlayer(you, interp);
-  const nt = approxNowTick();
-  const speedActive = !!(my && my.a && nt != null && youSpeedUntilTick && nt < youSpeedUntilTick);
-  const targetX = my ? my.ix + 0.5 : W / 2;
-  const targetY = my ? my.iy + 0.5 : H / 2;
-  camX = followCamera(camX, targetX);
-  camY = followCamera(camY, targetY);
-
-  {
-    const now = performance.now();
-    const dt = now - (draw._shakeAt || now);
-    draw._shakeAt = now;
-    const next = decayShake({
-      x: shakeX, y: shakeY, vx: shakeVelX, vy: shakeVelY,
-      dtMs: dt, intensity: shakeIntensity
-    });
-    shakeX = next.x;
-    shakeY = next.y;
-    shakeVelX = next.vx;
-    shakeVelY = next.vy;
-  }
-
-  /* C1: масштаб считался только от вьюпорта, а ROI сервера фиксирован (80×56).
-     На портретном телефоне (viewH/cw > 1.4) масштаб упирался в ширину, по
-     высоте на экран влезало под сотню рядов — и всё, что выходило за 56 рядов
-     ROI, закрашивалось туманом: до 40% экрана. Клэмпим масштаб снизу так,
-     чтобы экран никогда не был больше фактического ROI. На десктопе
-     (cw/viewH ≈ 1.6) обе поправки меньше базового значения и ничего не
-     меняют. */
-  const baseCell = cellSizeFor({ cw, viewH, roi: lastRoi, roiGrant });
-
-  /* Драматический наезд на точку гибели: чистый визуальный множитель поверх
-     baseCell, не влияющий на ROI/сетевой запрос вьюпорта (см. beginDeathZoom
-     / updateDeathZoom выше). Камера на время наезда смешивается с точкой
-     гибели, а не с текущей целью followCamera. */
-  const { zoom: deathZoom, mixToAnchor: deathZoomMix } = updateDeathZoom(performance.now());
-  const cell = baseCell * deathZoom;
-  const camXForZoom = camX + (deathZoomAnchorX - camX) * deathZoomMix;
-  const camYForZoom = camY + (deathZoomAnchorY - camY) * deathZoomMix;
-
-  /* Камера жёстко зафиксирована на игроке: никакого сдвига по направлению
-     движения. Так просил заказчик — «взгляд» не должен уезжать вперёд при
-     смене направления.
-     Историю двух предыдущих попыток стоит держать в уме, чтобы не вернуться:
-     1) поправка «затолкать вьюпорт внутрь ROI» считалась от края окна, а окно
-        сервер снапит по ROIStep — величина была ступенчатой, и сглаживание не
-        убирало ступеньку, а растягивало её в рывок (0.005..0.6 клетки за кадр);
-     2) ведение вперёд на серверный lookahead рывок убрало, но давало ровно тот
-        эффект, который заказчику не нужен — камера доворачивала на поворотах.
-     Чтобы при нулевом ведении сзади не появлялся туман, сервер тоже перестал
-     смещать окно вперёд (roiLookahead → 0), и ROI центрируется на голове. */
-  camLeadX = 0;
-  camLeadY = 0;
+  const drawCameraDeps = { cw, viewH, you, W, H, tickMs, lastPacketAt, youSpeedUntilTick, shakeX, shakeY, shakeVelX, shakeVelY, shakeIntensity, lastRoi, roiGrant, deathZoomAnchorX, deathZoomAnchorY, getInterpPlayer, approxNowTick, hitstopLostMs, updateDeathZoom };
+  const cam = computeDrawCamera(performance.now(), drawCameraDeps);
+  const { interp, my, nt, speedActive, targetX, targetY, cell, screenBounds, offsetX, offsetY, minX, minY, maxX, maxY, gb, gMinX, gMinY, gMaxX, gMaxY } = cam;
+  const nextShakeX = cam.shakeX, nextShakeY = cam.shakeY, nextShakeVelX = cam.shakeVelX, nextShakeVelY = cam.shakeVelY;
+  shakeX = nextShakeX;
+  shakeY = nextShakeY;
+  shakeVelX = nextShakeVelX;
+  shakeVelY = nextShakeVelY;
 
   ctx.clearRect(0, 0, cw, ch);
-
-  const screenBounds = visibleBounds({
-    cw, viewH, cell,
-    camX: camXForZoom + camLeadX, camY: camYForZoom + camLeadY,
-    shakeX, shakeY, W, H
-  });
-  const { offsetX, offsetY, minX, minY, maxX, maxY } = screenBounds;
-
-  /* K1: границы горячего цикла по сетке — пересечение экрана с последним
-     полученным ROI. За его пределами gridOwner/trailOwner заведомо устарели. */
-  const gb = clampToRoi(screenBounds, lastRoi);
-  const gMinX = gb.minX;
-  const gMinY = gb.minY;
-  const gMaxX = gb.maxX;
-  const gMaxY = gb.maxY;
 
   /* C1: рамка обзора на миникарте рисовалась по границам экрана и заявляла
      обзор больше реального — всё, что за ROI, на экране всё равно туман.
@@ -10241,32 +6654,13 @@ function draw() {
 
   const nowFrame = performance.now();
 
-  const segByOwner = new Map();
-  // Цвет владельца кэшируем до горячего цикла: drawSegTile зовётся для каждой
-  // клетки следа каждый кадр, лишний boostHsl там не нужен.
-  const hslByOwner = new Map();
-  // Стиль территории приходит отдельным JSON (`cosExtra`), а не в 21-байтной
-  // записи снапшота. Паттерн создаётся ОДИН раз на владельца за кадр, дальше в
-  // цикле по клеткам остаётся один fillRect.
-  const terrByOwner = new Map();
-  const terrStyleByOwner = new Map();
-  for (const p of lastState.players) {
-    segByOwner.set(p.n, cosClampId(p.cosSeg));
-    const hsl = boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)');
-    hslByOwner.set(p.n, hsl);
-    const tid = cosClampId(cosTerrByPlayer.get(p.n) || 0);
-    if (tid) {
-      terrByOwner.set(p.n, tid);
-      if (cosTerrIsPattern(tid)) {
-        const st = cosTerrFillStyle(ctx, hsl, tid, offsetX, offsetY, cell);
-        if (st) terrStyleByOwner.set(p.n, st);
-      }
-    }
-  }
-
+  // Спавн искр трассы разгона. Остаётся в draw() (не в paintFieldFx()) —
+  // момент спавна привязан к тому же кадру, что двигает камеру/интерп, а
+  // сама отрисовка частиц (в т.ч. этих) стоит на прежнем месте ниже, после
+  // пауэрапов — см. paintFieldFx() в client_draw.js.
   if (fxEnabled && speedActive) {
-    const dt = Math.min(40, nowFrame - (draw._spAt || nowFrame));
-    draw._spAt = nowFrame;
+    const dt = Math.min(40, nowFrame - (fxSpawnAtRef.at || nowFrame));
+    fxSpawnAtRef.at = nowFrame;
     const [dx, dy] = dirVec(my.d);
     const bx = my.ix + 0.5 - dx * 0.55;
     const by = my.iy + 0.5 - dy * 0.55;
@@ -10297,249 +6691,20 @@ function draw() {
     }
   }
 
-  // I2: собственный след — главный объект риска в игре. Раньше он отличался от
-  // собственной территории всего на 0.07 альфы. Теперь: 0.85 + светлая обводка,
-  // а на длинном следе (сигнал риска) добавляется пульсация яркости.
-  const trailStyle = trailVisualState({
-    trailLen: youTrailLen,
-    pulseFrom: TRAIL_PULSE_FROM,
-    fxEnabled,
-    reducedMotion: prefersReducedMotion(),
-    nowFrame
+  // I2/F18/C10: клетки поля/территорий, cool-edge пути остывающей территории,
+  // следы и лёгкая сетка поверх — см. client_draw.js: paintTerrain().
+  const terrainResult = paintTerrain(ctx, cam, {
+    nowFrame, you, W, H,
+    colors, gridOwner, trailOwner, gridFillAt, headIndexByOwner,
+    cosTerrByPlayer, coolDeadlineByOwner, coolSeenAt,
+    getOwnerFillStyle, gridCellOwner, gridCellIsCooling,
+    RECLAIM_WINDOW_MS, fillAnimMs, wavePeriodMs, waveScale, waveSpeed, waveAlpha,
+    youTrailLen, TRAIL_PULSE_FROM, fxEnabled, reducedMotion: prefersReducedMotion()
   });
-  const ownTrailA = trailStyle.ownAlpha;
-  const otherTrailA = trailStyle.otherAlpha;
-  const ownTrailStroke = trailStyle.ownStroke;
-  const drawOwnOutline = cell >= 8;
-
-  // F18/I4: ближайшая своя клетка ищется бесплатно, прямо в горячем цикле.
-  let nearHomeD = Infinity;
-  let nearHomeX = -1;
-  let nearHomeY = -1;
-  const headCX = my ? my.ix : -1;
-  const headCY = my ? my.iy : -1;
-
-  /* C10: пунктир остывающей территории раньше стоил save()+setLineDash(новый
-     массив)+strokeRect+restore() НА КАЖДУЮ клетку — после смерти это 1000-2000
-     клеток в кадре. Теперь рёбра копятся в Path2D (по одному на квантованный
-     цвет), рисуются только по границе области, а пунктир задаётся один раз. */
-  const coolPaths = coolEdgePaths;
-  coolPaths.clear();
-  const coolSame = (nx, ny, owner) => {
-    if (nx < 0 || ny < 0 || nx >= W || ny >= H) return false;
-    const raw = gridOwner[ny * W + nx];
-    return gridCellIsCooling(raw) && gridCellOwner(raw) === owner;
-  };
-
-  for (let y = gMinY; y <= gMaxY; y++) {
-    for (let x = gMinX; x <= gMaxX; x++) {
-      const i = y * W + x;
-      const rawOwner = gridOwner[i];
-      // F5: старший бит = «клетка остывает, её ещё можно вернуть».
-      const cooling = gridCellIsCooling(rawOwner);
-      const o = cooling ? 0 : rawOwner;
-      const coolOwner = cooling ? gridCellOwner(rawOwner) : 0;
-      const t = trailOwner[i];
-
-      if (cooling) {
-        // Остывающая территория: полупрозрачная заливка, пунктирная граница,
-        // ритм пульса подсказывает, что время уходит.
-        // F5: плюс затухание по мере приближения к концу окна — чем ближе
-        // истечение, тем бледнее клетка и тем чаще пульс.
-        const px = offsetX + x * cell;
-        const py = offsetY + y * cell;
-        // Точное время истечения — из EventCoolBatch; клиентская оценка по
-        // первому увиденному кадру остаётся запасным вариантом.
-        const deadline = coolDeadlineByOwner.get(coolOwner) || 0;
-        const seen = coolSeenAt ? coolSeenAt[i] : 0;
-        const prog = deadline
-          ? Math.max(0, Math.min(1, 1 - (deadline - nowFrame) / RECLAIM_WINDOW_MS))
-          : seen
-            ? Math.max(0, Math.min(1, (nowFrame - seen) / RECLAIM_WINDOW_MS))
-            : 0;
-        const fade = 1 - prog * 0.8;
-        const rate = 0.005 + 0.012 * prog;
-        const pulse = 0.5 + 0.5 * Math.sin(nowFrame * rate - (x + y) * 0.35);
-        ctx.fillStyle = getOwnerFillStyle(coolOwner, (0.14 + 0.10 * pulse) * fade);
-        ctx.fillRect(px, py, cell, cell);
-        if (cell >= 7) {
-          // Альфа квантуется до 1/16 — иначе на каждую клетку приходился бы
-          // свой Path2D и группировка не давала бы выигрыша.
-          const aq = Math.max(1, Math.round((0.45 + 0.25 * pulse) * fade * 16)) / 16;
-          const key = getOwnerFillStyle(coolOwner, aq);
-          let path = coolPaths.get(key);
-          if (!path) {
-            path = new Path2D();
-            coolPaths.set(key, path);
-          }
-          const x1 = px + 0.5;
-          const y1 = py + 0.5;
-          const x2 = px + cell - 0.5;
-          const y2 = py + cell - 0.5;
-          if (!coolSame(x, y - 1, coolOwner)) {
-            path.moveTo(x1, y1);
-            path.lineTo(x2, y1);
-          }
-          if (!coolSame(x, y + 1, coolOwner)) {
-            path.moveTo(x1, y2);
-            path.lineTo(x2, y2);
-          }
-          if (!coolSame(x - 1, y, coolOwner)) {
-            path.moveTo(x1, y1);
-            path.lineTo(x1, y2);
-          }
-          if (!coolSame(x + 1, y, coolOwner)) {
-            path.moveTo(x2, y1);
-            path.lineTo(x2, y2);
-          }
-        }
-      }
-
-      if (o === you && headCX >= 0) {
-        const hdx = x - headCX;
-        const hdy = y - headCY;
-        const hd = hdx * hdx + hdy * hdy;
-        if (hd < nearHomeD) {
-          nearHomeD = hd;
-          nearHomeX = x;
-          nearHomeY = y;
-        }
-      }
-
-      if (o !== 0) {
-        const baseA = 0.58;
-        const filledAt = gridFillAt ? gridFillAt[i] : 0;
-        const age = filledAt ? nowFrame - filledAt : 1e9;
-
-        let waveA = 0;
-        if (filledAt && age >= fillAnimMs) {
-          const t = age - fillAnimMs;
-          if (t < wavePeriodMs) {
-            const wave = 0.5 + 0.5 * Math.sin((x * 0.85 + y * 1.15) * waveScale - t * waveSpeed);
-            const fade = 1 - (t / wavePeriodMs);
-            waveA = waveAlpha * wave * fade;
-          }
-        }
-
-        const px = offsetX + x * cell;
-        const py = offsetY + y * cell;
-        const tid = terrByOwner.get(o) || 0;
-
-        // Одна альфа на все три фазы (появление / анимация заливки / покой),
-        // чтобы стиль территории подключался ровно в одном месте.
-        let a;
-        let shineA = 0;
-        if (age < 0) {
-          a = 0.12 + waveA * 0.35;
-        } else if (age < fillAnimMs) {
-          const p = Math.max(0, Math.min(1, age / fillAnimMs));
-          a = Math.min(0.92, baseA * (0.25 + 0.75 * p) + waveA * 0.5);
-          shineA = 0.18 * (1 - Math.abs(p - 0.5) * 2);
-        } else {
-          a = Math.min(0.92, baseA + waveA);
-        }
-        if (tid) a = Math.max(0, Math.min(1, a + cosTerrAlphaMod(tid, x, y, nowFrame)));
-
-        const pat = tid ? terrStyleByOwner.get(o) : null;
-        if (pat) {
-          // try/finally, а не просто парные присваивания до/после: без него
-          // исключение внутри fillRect (например, битый CanvasPattern) оставит
-          // globalCompositeOperation залипшим на 'lighter' до конца сессии —
-          // ничего не сбрасывает его в начале кадра, и вся дальнейшая
-          // отрисовка тем же ctx (территория, HUD) начнёт светлеть.
-          const additive = cosTerrIsAdditive(tid);
-          if (additive) ctx.globalCompositeOperation = 'lighter';
-          try {
-            ctx.globalAlpha = a;
-            ctx.fillStyle = pat;
-            ctx.fillRect(px, py, cell, cell);
-          } finally {
-            ctx.globalAlpha = 1;
-            if (additive) ctx.globalCompositeOperation = 'source-over';
-          }
-        } else {
-          ctx.fillStyle = getOwnerFillStyle(o, a);
-          ctx.fillRect(px, py, cell, cell);
-        }
-
-        if (shineA > 0.01) {
-          ctx.fillStyle = getOwnerFillStyle(o, Math.min(0.92, 0.22 + shineA + waveA * 0.35));
-          const inset = Math.max(1, (cell * 0.18) | 0);
-          ctx.fillRect(px + inset, py + inset, cell - inset * 2, cell - inset * 2);
-        }
-
-        // Витраж: светящийся шов только по внешней границе владения.
-        if (tid === 5 && cell >= 7) {
-          let e = 0;
-          if (y === 0 || gridOwner[i - W] !== o) e |= 1;
-          if (x === W - 1 || gridOwner[i + 1] !== o) e |= 2;
-          if (y === H - 1 || gridOwner[i + W] !== o) e |= 4;
-          if (x === 0 || gridOwner[i - 1] !== o) e |= 8;
-          if (e) drawTerrSeam(ctx, px, py, cell, hslByOwner.get(o) || 'hsl(210 20% 60%)', e, 0.75);
-        }
-      }
-
-      if (t !== 0) {
-        const mineTrail = t === you;
-        let a = mineTrail ? ownTrailA : otherTrailA;
-        if (headIndexByOwner.get(t) === i) a *= interp;
-        if (a > 0.02) {
-          const segId = segByOwner.get(t) || 0;
-          const px = offsetX + x * cell;
-          const py = offsetY + y * cell;
-          // Единый источник правды: тот же drawSegTile, что и в магазине.
-          drawSegTile(ctx, px, py, cell, hslByOwner.get(t) || 'hsl(210 20% 60%)', segId, x * 31 + y * 17, a, nowFrame);
-
-          if (mineTrail && drawOwnOutline) {
-            ctx.strokeStyle = ownTrailStroke;
-            ctx.lineWidth = 1;
-            ctx.strokeRect(px + 1.5, py + 1.5, cell - 3, cell - 3);
-          }
-        }
-      }
-    }
-  }
-
-  // C10: один save/restore и один setLineDash на весь кадр вместо одного на клетку.
-  if (coolPaths.size) {
-    const dash = Math.max(2, cell * 0.22);
-    ctx.save();
-    ctx.setLineDash([dash, dash]);
-    ctx.lineDashOffset = -nowFrame * 0.02;
-    ctx.lineWidth = 1;
-    for (const [style, path] of coolPaths) {
-      ctx.strokeStyle = style;
-      ctx.stroke(path);
-    }
-    ctx.restore();
-    coolPaths.clear();
-  }
-
-  if (nearHomeX >= 0) {
-    youNearestHomeX = nearHomeX;
-    youNearestHomeY = nearHomeY;
+  if (terrainResult.hasNearHome) {
+    youNearestHomeX = terrainResult.nearHomeX;
+    youNearestHomeY = terrainResult.nearHomeY;
     youNearestHomeAt = nowFrame;
-  }
-
-  {
-    // Сетка в бренд-гамме: чистый белый на #060a12 читался холодным «дребезгом».
-    ctx.strokeStyle = 'rgba(120,220,190,0.055)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    const step = cell >= 16 ? 1 : 2;
-    for (let x = minX; x <= maxX; x += step) {
-      const px = offsetX + x * cell;
-      ctx.moveTo(px, offsetY + minY * cell);
-      ctx.lineTo(px, offsetY + (maxY + 1) * cell);
-    }
-    ctx.stroke();
-    ctx.beginPath();
-    for (let y = minY; y <= maxY; y += step) {
-      const py = offsetY + y * cell;
-      ctx.moveTo(offsetX + minX * cell, py);
-      ctx.lineTo(offsetX + (maxX + 1) * cell, py);
-    }
-    ctx.stroke();
   }
 
   /* K1: туман за пределами ROI. Рисуется после сетки и до рамки карты, чтобы
@@ -10598,324 +6763,25 @@ function draw() {
     ctx.restore();
   }
 
+  // Пауэрапы поля — см. client_draw.js: paintPowerUps().
   if (powerUps && powerUps.size) {
-    const now = performance.now();
-    const nt = approxNowTick();
-    for (const pu of powerUps.values()) {
-      const x = Number(pu.x) || 0;
-      const y = Number(pu.y) || 0;
-      if (
-        x < minX - OFFSCREEN_MARGIN_CELLS ||
-        x > maxX + OFFSCREEN_MARGIN_CELLS ||
-        y < minY - OFFSCREEN_MARGIN_CELLS ||
-        y > maxY + OFFSCREEN_MARGIN_CELLS
-      ) {
-        continue;
-      }
-
-      const cx = offsetX + (x + 0.5) * cell;
-      const cy = offsetY + (y + 0.5) * cell;
-
-      let pulse = 1;
-      let alpha = 1;
-      if (nt != null && pu.expires) {
-        const rem = Number(pu.expires) - nt;
-        if (rem < 30) {
-          const blink = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(now * 0.020));
-          alpha *= Math.max(0.15, blink);
-          pulse *= 0.96 + 0.10 * (0.5 + 0.5 * Math.sin(now * 0.016));
-        } else {
-          pulse *= 0.98 + 0.06 * (0.5 + 0.5 * Math.sin(now * 0.008));
-        }
-      }
-
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.translate(cx, cy);
-      ctx.scale(pulse, pulse);
-      ctx.translate(-cx, -cy);
-
-      const r = cell * 0.34;
-      if (pu.type === 1) {
-        ctx.save();
-        ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-          const a = -Math.PI / 2 + (i * Math.PI) / 3;
-          const px = cx + Math.cos(a) * r;
-          const py = cy + Math.sin(a) * r;
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(0,255,255,0.18)';
-        ctx.strokeStyle = 'rgba(0,255,255,0.92)';
-        ctx.lineWidth = Math.max(1, cell * 0.10);
-        ctx.shadowColor = 'rgba(0,255,255,0.55)';
-        ctx.shadowBlur = 16;
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
-      } else if (pu.type === 2) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(cx - r * 0.35, cy - r * 0.65);
-        ctx.lineTo(cx + r * 0.05, cy - r * 0.10);
-        ctx.lineTo(cx - r * 0.05, cy - r * 0.10);
-        ctx.lineTo(cx + r * 0.35, cy + r * 0.65);
-        ctx.lineTo(cx - r * 0.05, cy + r * 0.15);
-        ctx.lineTo(cx + r * 0.05, cy + r * 0.15);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(255,215,0,0.20)';
-        ctx.strokeStyle = 'rgba(255,215,0,0.92)';
-        ctx.lineWidth = Math.max(1, cell * 0.10);
-        ctx.shadowColor = 'rgba(255,215,0,0.55)';
-        ctx.shadowBlur = 16;
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
-      } else if (pu.type === 3) {
-        ctx.save();
-        ctx.beginPath();
-        for (let i = 0; i < 10; i++) {
-          const a = -Math.PI / 2 + (i * Math.PI) / 5;
-          const rr = i % 2 === 0 ? r * 0.95 : r * 0.42;
-          const px = cx + Math.cos(a) * rr;
-          const py = cy + Math.sin(a) * rr;
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(255,80,80,0.18)';
-        ctx.strokeStyle = 'rgba(255,80,80,0.95)';
-        ctx.lineWidth = Math.max(1, cell * 0.10);
-        ctx.shadowColor = 'rgba(255,80,80,0.65)';
-        ctx.shadowBlur = 18;
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 0.22, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.90)';
-        ctx.fill();
-        ctx.restore();
-      } else if (pu.type === 4) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(cx - r * 0.55, cy - r * 0.05);
-        ctx.lineTo(cx - r * 0.10, cy - r * 0.70);
-        ctx.lineTo(cx - r * 0.05, cy - r * 0.22);
-        ctx.lineTo(cx + r * 0.55, cy + r * 0.05);
-        ctx.lineTo(cx + r * 0.10, cy + r * 0.70);
-        ctx.lineTo(cx + r * 0.05, cy + r * 0.22);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(170,120,255,0.20)';
-        ctx.strokeStyle = 'rgba(190,150,255,0.96)';
-        ctx.lineWidth = Math.max(1, cell * 0.10);
-        ctx.shadowColor = 'rgba(190,150,255,0.70)';
-        ctx.shadowBlur = 18;
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 0.90, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(190,150,255,0.22)';
-        ctx.lineWidth = Math.max(1, cell * 0.06);
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      ctx.restore();
-    }
+    powerUpScreenPos = paintPowerUps(ctx, cam, performance.now(), { powerUps, approxNowTick, OFFSCREEN_MARGIN_CELLS });
+  } else if (powerUpScreenPos.length) {
+    powerUpScreenPos = [];
   }
 
-  if (fxEnabled && fxParticles.length) {
-    for (let i = fxParticles.length - 1; i >= 0; i--) {
-      const p0 = fxParticles[i];
-      const bornAt = typeof p0.bornAt === 'number' ? p0.bornAt : p0.t0;
-      const lastAt = typeof p0.lastAt === 'number' ? p0.lastAt : p0.t0;
-      const age = nowFrame - bornAt;
-      if (age > 520) {
-        fxParticles.splice(i, 1);
-        continue;
-      }
-      const dt = Math.min(40, Math.max(0, nowFrame - lastAt));
-      p0.x += p0.vx * dt;
-      p0.y += p0.vy * dt;
-      p0.lastAt = nowFrame;
+  // FX-частицы поля (искры трассы разгона): движение + отрисовка + вычистка
+  // истёкших — см. client_draw.js: paintFieldFx(). Спавн стоит выше по кадру
+  // (см. комментарий там), сама отрисовка — на прежнем месте, после
+  // пауэрапов и до змей/следов.
+  paintFieldFx(ctx, cam, nowFrame, { fxEnabled, fxIntensity, fxParticles, OFFSCREEN_MARGIN_CELLS });
 
-      if (
-        p0.x < minX - OFFSCREEN_MARGIN_CELLS ||
-        p0.x > maxX + OFFSCREEN_MARGIN_CELLS ||
-        p0.y < minY - OFFSCREEN_MARGIN_CELLS ||
-        p0.y > maxY + OFFSCREEN_MARGIN_CELLS
-      ) {
-        continue;
-      }
-      const a = (1 - age / 520) * (0.50 + 0.40 * fxIntensity);
-      const cx = offsetX + p0.x * cell;
-      const cy = offsetY + p0.y * cell;
-      const rr = Math.max(1, cell * p0.r);
-      ctx.save();
-      ctx.globalAlpha = a;
-      ctx.shadowColor = p0.c;
-      ctx.shadowBlur = Math.max(6, cell * 0.45);
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.beginPath();
-      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
-
-  ctx.font = `12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-
-  for (const p of lastState.players) {
-    if (!p.a) continue;
-    const ip = getInterpPlayer(p.n, interp) || { ...p, ix: p.x, iy: p.y };
-    const c = boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)');
-    const px = offsetX + (ip.ix + 0.5) * cell;
-    const py = offsetY + (ip.iy + 0.5) * cell;
-
-    const [dx, dy] = dirVec(ip.d);
-    if (fxEnabled && p.n === you && speedActive) {
-      ctx.save();
-      ctx.globalAlpha = 0.55 * (0.35 + fxIntensity * 0.65);
-      ctx.strokeStyle = c;
-      ctx.shadowColor = c;
-      ctx.shadowBlur = Math.max(10, cell * 0.9);
-      ctx.lineWidth = Math.max(2, cell * 0.14);
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(px, py);
-      ctx.lineTo(px - dx * cell * 0.85, py - dy * cell * 0.85);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    const isBounty = !!(bountyTarget && p.n === bountyTarget);
-    // Байт `sh` — битовая маска: бит0 = щит, бит1 = неуязвимость после респавна.
-    const shMask = Number(ip.sh) || 0;
-    const hasShield = (shMask & 1) !== 0;
-    const hasInvuln = (shMask & 2) !== 0;
-    const hasSpeed = !!(p.n === you && speedActive);
-    const speedType = hasSpeed ? (youSpeedType === 4 ? 4 : 2) : 0;
-
-    if (hasInvuln) {
-      const tt = performance.now() * 0.010 + (p.n % 997) * 0.02;
-      const pulse = 0.5 + 0.5 * Math.sin(tt);
-      ctx.save();
-      ctx.globalAlpha = 0.30 + 0.30 * pulse;
-      ctx.setLineDash([Math.max(2, cell * 0.14), Math.max(2, cell * 0.12)]);
-      ctx.lineDashOffset = -performance.now() * 0.04;
-      ctx.strokeStyle = 'rgba(255,255,255,0.92)';
-      ctx.lineWidth = Math.max(1, cell * 0.07);
-      ctx.beginPath();
-      ctx.arc(px, py, cell * (0.54 + 0.04 * pulse), 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (hasShield) {
-      const tt = performance.now() * 0.004 + (p.n % 997) * 0.01;
-      const pulse = 0.5 + 0.5 * Math.sin(tt);
-      const rr = cell * (0.46 + 0.04 * pulse);
-      ctx.save();
-      ctx.globalAlpha = 0.22 + 0.18 * pulse;
-      ctx.strokeStyle = 'rgba(120,200,255,0.95)';
-      ctx.shadowColor = 'rgba(120,200,255,0.95)';
-      ctx.shadowBlur = Math.max(10, cell * 0.8);
-      ctx.lineWidth = Math.max(2, cell * 0.10);
-      ctx.beginPath();
-      ctx.arc(px, py, rr, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (hasSpeed) {
-      const tt = performance.now() * 0.006 + (p.n % 997) * 0.02;
-      const pulse = 0.5 + 0.5 * Math.sin(tt);
-      const rr = cell * (speedType === 4 ? (0.64 + 0.035 * pulse) : (0.60 + 0.03 * pulse));
-      ctx.save();
-      ctx.globalAlpha = (speedType === 4 ? 0.18 : 0.16) + (speedType === 4 ? 0.14 : 0.12) * pulse;
-      ctx.strokeStyle = speedType === 4 ? 'rgba(190,150,255,0.94)' : 'rgba(255,215,0,0.92)';
-      ctx.shadowColor = speedType === 4 ? 'rgba(190,150,255,0.85)' : 'rgba(255,215,0,0.75)';
-      ctx.shadowBlur = Math.max(8, cell * (speedType === 4 ? 0.85 : 0.7));
-      ctx.lineWidth = Math.max(2, cell * (speedType === 4 ? 0.095 : 0.08));
-      if (speedType === 4) {
-        ctx.beginPath();
-        ctx.arc(px, py, rr, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha *= 0.60;
-        ctx.lineWidth = Math.max(1, cell * 0.06);
-        ctx.beginPath();
-        ctx.arc(px, py, rr * 0.82, 0, Math.PI * 2);
-        ctx.stroke();
-      } else {
-        ctx.setLineDash([Math.max(2, cell * 0.10), Math.max(2, cell * 0.10)]);
-        ctx.lineDashOffset = -performance.now() * 0.02;
-        ctx.beginPath();
-        ctx.arc(px, py, rr, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
-    // Голова и направляющий нос — единый drawHead, тот же и в магазине.
-    drawHead(ctx, px, py, cell, c, ip.cosHead, dx, dy, nowFrame);
-
-    if (isBounty) {
-      ctx.save();
-      ctx.strokeStyle = 'rgba(255,80,80,0.95)';
-      ctx.lineWidth = Math.max(2, cell * 0.11);
-      ctx.setLineDash([Math.max(3, cell * 0.16), Math.max(2, cell * 0.10)]);
-      ctx.lineDashOffset = -performance.now() * 0.03;
-      ctx.shadowColor = 'rgba(255,80,80,0.75)';
-      ctx.shadowBlur = Math.max(10, cell * 0.75);
-      ctx.beginPath();
-      ctx.arc(px, py, cell * 0.70, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (hasShield || hasSpeed || isBounty || hasInvuln) {
-      const badges = [];
-      if (hasInvuln) badges.push({ fill: 'rgba(255,255,255,0.95)', stroke: 'rgba(0,0,0,0.35)' });
-      if (hasShield) badges.push({ fill: 'rgba(120,200,255,0.95)', stroke: 'rgba(255,255,255,0.25)' });
-      if (hasSpeed) badges.push({ fill: speedType === 4 ? 'rgba(190,150,255,0.95)' : 'rgba(255,215,0,0.95)', stroke: 'rgba(255,255,255,0.25)' });
-      if (isBounty) badges.push({ fill: 'rgba(255,80,80,0.95)', stroke: 'rgba(255,255,255,0.25)' });
-
-      const br = Math.max(2, cell * 0.075);
-      const gap = br * 2.25;
-      const bx0 = px - ((badges.length - 1) * gap) / 2;
-      const by = py - cell * 0.72;
-      ctx.save();
-      ctx.globalAlpha = 0.95;
-      ctx.shadowColor = 'rgba(0,0,0,0.35)';
-      ctx.shadowBlur = 6;
-      for (let i = 0; i < badges.length; i++) {
-        const b = badges[i];
-        const bx = bx0 + i * gap;
-        ctx.beginPath();
-        ctx.arc(bx, by, br, 0, Math.PI * 2);
-        ctx.fillStyle = b.fill;
-        ctx.fill();
-        ctx.lineWidth = Math.max(1, cell * 0.03);
-        ctx.strokeStyle = b.stroke;
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
-    /* Титул идёт перед ником — он виден всем, кто видит плашку.
-       C4: у бота перед титулом идёт глиф архетипа. В канвасе CSS-бейджа быть
-       не может, поэтому берём тот же символ, что рисует .botArch::before —
-       один знак, плашка от него почти не растёт, а «кто передо мной» читается
-       ещё до того, как бот что-то сделает. */
-    const archGlyph = botArchGlyph(ip.n);
-    const label = `${archGlyph ? `${archGlyph} ` : ''}${cosTitlePrefix(cosTitleByPlayer.get(ip.n) || 0)}${ip.nm ? String(ip.nm) : String(ip.n)}`;
-    // Плашка ника — единый drawNamePlate, тот же и в магазине.
-    drawNamePlate(ctx, label, px, py - cell * 0.58, c, ip.cosNameplate, 0.95, 12, nowFrame);
-  }
+  // Змеи/следы/nameplate-метки/индикаторы направления — см. client_draw.js:
+  // paintEntities().
+  paintEntities(ctx, cam, {
+    you, colors, fxEnabled, fxIntensity, bountyTarget, youSpeedType,
+    cosTitleByPlayer, getInterpPlayer, botArchGlyph, cosTitlePrefix
+  }, nowFrame);
 
   // I4: радар угрозы. Дуга по краю экрана в направлении чужой головы ближе
   // 25 клеток, пока игрок вне своей территории. Интенсивность растёт при сближении.
@@ -10930,7 +6796,7 @@ function draw() {
     const THREAT_CELLS = 25;
     let drawn = 0;
 
-    for (const p of lastState.players) {
+    for (const p of clientState.lastState.players) {
       if (!p.a || p.n === you) continue;
       const dx = p.x + 0.5 - hx;
       const dy = p.y + 0.5 - hy;
@@ -11079,134 +6945,13 @@ function draw() {
     lastMinimapDrawAt = nowFrame;
   }
 
-  if (fxBursts.length) {
-    for (let i = fxBursts.length - 1; i >= 0; i--) {
-      const fx = fxBursts[i];
-      const knd0 = String(fx.kind || '');
-      const isScore = knd0 === 'score';
-      // Длительность бурста — параметр: вспышка захвата живёт 650 мс,
-      // эффект гибели дольше, всплывающее число — своё время.
-      const life = Number(fx.life) > 0 ? Number(fx.life) : isScore ? SCORE_POPUP_MS : 650;
-      const age = nowFrame - fx.t0;
-      if (age > life) {
-        fxBursts.splice(i, 1);
-        continue;
-      }
-      if (!isScore && !fxEnabled) continue;
-      const x = fx.x;
-      const y = fx.y;
-      if (
-        x < minX - OFFSCREEN_MARGIN_CELLS ||
-        x > maxX + OFFSCREEN_MARGIN_CELLS ||
-        y < minY - OFFSCREEN_MARGIN_CELLS ||
-        y > maxY + OFFSCREEN_MARGIN_CELLS
-      ) {
-        continue;
-      }
-
-      // J5: всплывающее число «+247» над точкой захвата.
-      if (isScore) {
-        const sp = Math.max(0, Math.min(1, age / SCORE_POPUP_MS));
-        const v = Math.max(0, Math.round(Number(fx.value) || 0));
-        if (!v) continue;
-        const scale = age < 150 ? easeOutBack(age / 150) : 1;
-        const alpha = sp > 0.72 ? Math.max(0, (1 - sp) / 0.28) : 1;
-        const size = Math.round(12 + Math.min(28, v * 0.35));
-        const sx = offsetX + (x + 0.5) * cell;
-        const sy = offsetY + (y + 0.5) * cell - easeOutCubic(sp) * cell * 1.2;
-        const col = v >= 300 ? 'rgba(200,130,255,1)' : v >= 100 ? 'rgba(255,210,60,1)' : 'rgba(255,255,255,1)';
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.translate(sx, sy);
-        if (scale !== 1) ctx.scale(scale, scale);
-        ctx.font = `700 ${size}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(0,0,0,0.95)';
-        ctx.strokeText(`+${v}`, 0, 0);
-        ctx.fillStyle = col;
-        ctx.fillText(`+${v}`, 0, 0);
-        ctx.restore();
-        continue;
-      }
-
-      const p = Math.max(0, Math.min(1, age / life));
-      const cx = offsetX + (x + 0.5) * cell;
-      const cy = offsetY + (y + 0.5) * cell;
-      const knd = knd0;
-
-      // Гибель: тот же drawDeathFx, что и в превью магазина.
-      if (knd.startsWith('die')) {
-        const dieId = cosClampId(Number(knd.slice(3)) || 0);
-        const owner = Number(fx.pid);
-        const ownerHsl = boostHsl(colors.get(owner) || 'hsl(210 20% 60%)');
-        drawDeathFx(ctx, cx, cy, cell * (0.6 + fxIntensity * 0.7), ownerHsl, dieId, p);
-        continue;
-      }
-
-      const isCap = knd.startsWith('cap');
-      const base = cell * (knd === 'kill' ? 1.1 : isCap ? 1.05 : 0.85);
-      const r = base * (0.35 + 1.25 * p) * (0.35 + fxIntensity * 0.95);
-      const a = (1 - p) * (0.55 + 0.45 * fxIntensity);
-
-      // Захват: тот же drawCaptureFx, что и в превью магазина. Цвет берётся
-      // от игрока, совершившего захват (варианты 5..7 — со своей палитрой).
-      if (isCap) {
-        const capId = cosClampId(knd.slice(3));
-        const owner = Number(fx.pid);
-        const ownerHsl = boostHsl(colors.get(owner) || colors.get(you) || 'hsl(210 20% 60%)');
-        const capCell = cell * (0.35 + fxIntensity * 0.95);
-        drawCaptureFx(ctx, cx, cy, capCell, ownerHsl, capId, p);
-        continue;
-      }
-
-      let col = 'rgba(255,215,0,0.92)';
-      if (knd === 'kill') col = 'rgba(255,45,85,0.95)';
-      // F5: возврат остывшей земли — холодный голубой, а не «золото захвата».
-      else if (knd === 'reclaim') col = 'rgba(120,220,255,0.96)';
-      else if (knd === 'use') col = 'rgba(0,255,255,0.95)';
-      else if (knd === 'pickup2') col = 'rgba(255,215,0,0.95)';
-      else if (knd === 'pickup4') col = 'rgba(190,150,255,0.96)';
-
-      ctx.save();
-      ctx.globalAlpha = a;
-      ctx.strokeStyle = col;
-      ctx.lineWidth = Math.max(1, cell * 0.10);
-      if (knd === 'pickup4') {
-        ctx.lineWidth = Math.max(2, cell * 0.10);
-        for (let k = 0; k < 10; k++) {
-          const ang = p * 2.0 + (k * Math.PI * 2) / 10;
-          ctx.beginPath();
-          ctx.moveTo(cx + Math.cos(ang) * r * 0.30, cy + Math.sin(ang) * r * 0.30);
-          ctx.lineTo(cx + Math.cos(ang) * r * 1.05, cy + Math.sin(ang) * r * 1.05);
-          ctx.stroke();
-        }
-        ctx.globalAlpha = a * 0.85;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 0.95, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha = a * 0.45;
-        ctx.lineWidth = Math.max(1, cell * 0.06);
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2);
-        ctx.stroke();
-      } else if (knd === 'pickup2') {
-        ctx.lineWidth = Math.max(2, cell * 0.09);
-        ctx.setLineDash([Math.max(2, cell * 0.10), Math.max(2, cell * 0.10)]);
-        ctx.lineDashOffset = -nowFrame * 0.03;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.stroke();
-      } else {
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-  }
+  // Всплески событий поля (kill/reclaim/pickup/захват/гибель/очки) —
+  // см. client_draw.js: paintBursts(). Мутирует fxBursts in-place.
+  paintBursts(ctx, cam, nowFrame, {
+    bursts: fxBursts, fxEnabled, fxIntensity, SCORE_POPUP_MS, OFFSCREEN_MARGIN_CELLS,
+    you, colors, boostHsl, cosClampId, drawDeathFx, drawCaptureFx,
+    easeOutBack, easeOutCubic
+  });
 
   if (started) {
     renderMetaHud();
@@ -11258,35 +7003,11 @@ function draw() {
     }
   }
 
-  const pingText = pingMs == null ? '…' : `${pingMs.toFixed(0)}ms`;
-  const upText = formatRate(upBps);
-  const downText = formatRate(downBps);
-  const tr = tickrate ? `${tickrate.toFixed(1)}` : '…';
-  const sr = tickMs ? `${(1000 / tickMs).toFixed(1)}` : '…';
-  const rid = roomId == null ? '…' : String(roomId);
-
-  const fpsText = fps ? fps.toFixed(0) : '…';
-  const srvNum = tickMs ? 1000 / tickMs : null;
-  const tickBad = srvNum != null && tickrate ? tickrate < srvNum * 0.8 : tr === '…';
-
-  const roomBad = roomId == null;
-  const fpsBad = fps ? fps < 30 : fpsText === '…';
-  const pingBad = pingMs == null ? true : pingMs > 150;
-  const upBad = upText === '…';
-  const downBad = downText === '…';
-  const srvBad = srvNum == null;
-
   if (!perfEnabled) {
     return;
   }
 
-  setSafeHtml(perfEl, `
-    <div class="perfRow">${escapeHtml(t('perf.room'))}: ${perfValueSpan(rid, roomBad)}</div>
-    <div class="perfRow">${escapeHtml(t('perf.fps'))}: ${perfValueSpan(fpsText, fpsBad)}</div>
-    <div class="perfRow">${escapeHtml(t('perf.ping'))}: ${perfValueSpan(pingText, pingBad)}</div>
-    <div class="perfRow">${escapeHtml(t('perf.traffic'))}: ↑ ${perfValueSpan(upText, upBad)}&nbsp;&nbsp;↓ ${perfValueSpan(downText, downBad)}</div>
-    <div class="perfRow">${escapeHtml(t('perf.ticks'))}: ${perfValueSpan(tr, tickBad)} (${escapeHtml(t('perf.server'))} ${perfValueSpan(sr, srvBad)})</div>
-  `);
+  renderPerfPanel(perfEl, { roomId, fps, pingMs, upBps, downBps, tickrate, tickMs }, t);
 }
 
 bindSettingsUi();

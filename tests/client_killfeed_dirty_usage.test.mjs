@@ -19,6 +19,11 @@ import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLIENT_JS = readFileSync(join(HERE, '../public/client.js'), 'utf8');
+// Фаза 3: сама pushEventFeed() переехала в client_fx_ui.js (как
+// pushEventFeedImpl) — killfeedDirty теперь выставляется через колбэк
+// setKillfeedDirty(true), но источник флага остаётся тем же самым, ровно
+// одним местом.
+const CLIENT_FX_UI_JS = readFileSync(join(HERE, '../public/client_fx_ui.js'), 'utf8');
 
 function functionBody(source, name) {
   const start = source.indexOf(`function ${name}(`);
@@ -38,10 +43,10 @@ function functionBody(source, name) {
   throw new Error(`не нашли конец function ${name}()`);
 }
 
-test('killfeedDirty выставляется внутри pushEventFeed', () => {
-  const body = functionBody(CLIENT_JS, 'pushEventFeed');
-  const matches = body.match(/killfeedDirty\s*=\s*true/g) || [];
-  assert.ok(matches.length >= 1, 'pushEventFeed() не выставляет killfeedDirty');
+test('killfeedDirty выставляется внутри pushEventFeedImpl (через setKillfeedDirty)', () => {
+  const body = functionBody(CLIENT_FX_UI_JS, 'pushEventFeedImpl');
+  const matches = body.match(/setKillfeedDirty\s*\(\s*true\s*\)/g) || [];
+  assert.ok(matches.length >= 1, 'pushEventFeedImpl() не выставляет killfeedDirty через setKillfeedDirty(true)');
 });
 
 test('handleStateBinary() не выставляет killfeedDirty вручную', () => {
