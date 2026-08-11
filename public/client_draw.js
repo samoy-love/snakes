@@ -551,3 +551,65 @@ export function paintEntities(ctx, cameraFrame, state, now) {
     drawNamePlate(ctx, label, px, py - cell * 0.58, c, ip.cosNameplate, 0.95, 12, now);
   }
 }
+
+/* FX-частицы над полем: искры трассы разгона — движение, отрисовка и
+   вычистка истёкших. Не DOM-тосты/баннеры/попапы — те в client_fx_ui.js;
+   это именно то, что рисуется поверх canvas игрового поля.
+
+   Вынесено из draw() (public/client.js) — вызывается на прежнем месте, после
+   пауэрапов и до paintEntities(); порядок слоёв не менялся. Спавн частиц
+   остаётся в draw() (привязан к тому же кадру, что движение камеры/интерп) —
+   paintFieldFx() получает уже наполненный fxParticles и только рисует.
+
+   fxParticles — тот же массив-накопитель client.js, мутируется на месте
+   (splice при истечении жизни частицы), возврата не требует: ссылка на
+   массив стабильна.
+
+   cameraFrame — результат computeDrawCamera(), передаётся как есть. deps —
+   модульные значения client.js (fxEnabled, fxIntensity, fxParticles,
+   OFFSCREEN_MARGIN_CELLS), приходят так же, как в paintTerrain()/
+   paintEntities(), и по той же причине держит tests/client_draw_wiring.test.mjs
+   зелёным. */
+export function paintFieldFx(ctx, cameraFrame, now, deps) {
+  const { fxEnabled, fxIntensity, fxParticles, OFFSCREEN_MARGIN_CELLS } = deps;
+  const { offsetX, offsetY, cell, minX, maxX, minY, maxY } = cameraFrame;
+
+  if (fxEnabled && fxParticles.length) {
+    for (let i = fxParticles.length - 1; i >= 0; i--) {
+      const p0 = fxParticles[i];
+      const bornAt = typeof p0.bornAt === 'number' ? p0.bornAt : p0.t0;
+      const lastAt = typeof p0.lastAt === 'number' ? p0.lastAt : p0.t0;
+      const age = now - bornAt;
+      if (age > 520) {
+        fxParticles.splice(i, 1);
+        continue;
+      }
+      const dt = Math.min(40, Math.max(0, now - lastAt));
+      p0.x += p0.vx * dt;
+      p0.y += p0.vy * dt;
+      p0.lastAt = now;
+
+      if (
+        p0.x < minX - OFFSCREEN_MARGIN_CELLS ||
+        p0.x > maxX + OFFSCREEN_MARGIN_CELLS ||
+        p0.y < minY - OFFSCREEN_MARGIN_CELLS ||
+        p0.y > maxY + OFFSCREEN_MARGIN_CELLS
+      ) {
+        continue;
+      }
+      const a = (1 - age / 520) * (0.50 + 0.40 * fxIntensity);
+      const cx = offsetX + p0.x * cell;
+      const cy = offsetY + p0.y * cell;
+      const rr = Math.max(1, cell * p0.r);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.shadowColor = p0.c;
+      ctx.shadowBlur = Math.max(6, cell * 0.45);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+}

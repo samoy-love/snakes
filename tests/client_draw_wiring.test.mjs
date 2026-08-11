@@ -159,6 +159,24 @@ test('paintEntities() не читает идентификаторы, котор
   );
 });
 
+// paintFieldFx() — вынесена из draw() (§ шаг «Отрисовка FX-частиц/вспышек
+// поверх поля»). Как и computeDrawCamera()/paintTerrain()/paintEntities(), не
+// тянет ничего из client.js через замыкание — всё приходит параметром deps,
+// поэтому её верхний уровень собственный.
+test('paintFieldFx() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'paintFieldFx');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `paintFieldFx() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
 // handleStateBinary() — тот же класс риска: единый курсор чтения буфера `o`
 // двигается вручную по всей функции (§6.4 отчёта разведки от 2026-08-05),
 // и вынос куска вроде pickPlayerRecordSize должен оставить обвязку вокруг

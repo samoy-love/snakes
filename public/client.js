@@ -1,5 +1,5 @@
 import { clientState } from './client_state.js';
-import { computeDrawCamera, paintEntities, paintTerrain } from './client_draw.js';
+import { computeDrawCamera, paintEntities, paintFieldFx, paintTerrain } from './client_draw.js';
 import {
   ensureLeaderboardDom,
   resetLeaderboardUi,
@@ -2297,6 +2297,11 @@ let lastYouStats = null;
 // с разными значениями (±1 у пауэрапов, ±2 у частиц и бурстов) — объект у
 // самого края экрана пропадал/появлялся на клетку раньше, чем остальные.
 const OFFSCREEN_MARGIN_CELLS = 2;
+
+// Момент последнего спавна искр трассы разгона — раньше жил как draw._spAt,
+// теперь передаётся в paintFieldFx() (client_draw.js) как мутируемый ref,
+// чтобы функция не зависела от объекта draw().
+const fxSpawnAtRef = { at: 0 };
 
 /* I2/F18: геометрия «своего» — длина следа и ближайшая своя клетка. */
 const TRAIL_PULSE_FROM = 22;
@@ -7301,9 +7306,13 @@ function draw() {
 
   const nowFrame = performance.now();
 
+  // Спавн искр трассы разгона. Остаётся в draw() (не в paintFieldFx()) —
+  // момент спавна привязан к тому же кадру, что двигает камеру/интерп, а
+  // сама отрисовка частиц (в т.ч. этих) стоит на прежнем месте ниже, после
+  // пауэрапов — см. paintFieldFx() в client_draw.js.
   if (fxEnabled && speedActive) {
-    const dt = Math.min(40, nowFrame - (draw._spAt || nowFrame));
-    draw._spAt = nowFrame;
+    const dt = Math.min(40, nowFrame - (fxSpawnAtRef.at || nowFrame));
+    fxSpawnAtRef.at = nowFrame;
     const [dx, dy] = dirVec(my.d);
     const bx = my.ix + 0.5 - dx * 0.55;
     const by = my.iy + 0.5 - dy * 0.55;
@@ -7541,44 +7550,11 @@ function draw() {
     powerUpScreenPos = [];
   }
 
-  if (fxEnabled && fxParticles.length) {
-    for (let i = fxParticles.length - 1; i >= 0; i--) {
-      const p0 = fxParticles[i];
-      const bornAt = typeof p0.bornAt === 'number' ? p0.bornAt : p0.t0;
-      const lastAt = typeof p0.lastAt === 'number' ? p0.lastAt : p0.t0;
-      const age = nowFrame - bornAt;
-      if (age > 520) {
-        fxParticles.splice(i, 1);
-        continue;
-      }
-      const dt = Math.min(40, Math.max(0, nowFrame - lastAt));
-      p0.x += p0.vx * dt;
-      p0.y += p0.vy * dt;
-      p0.lastAt = nowFrame;
-
-      if (
-        p0.x < minX - OFFSCREEN_MARGIN_CELLS ||
-        p0.x > maxX + OFFSCREEN_MARGIN_CELLS ||
-        p0.y < minY - OFFSCREEN_MARGIN_CELLS ||
-        p0.y > maxY + OFFSCREEN_MARGIN_CELLS
-      ) {
-        continue;
-      }
-      const a = (1 - age / 520) * (0.50 + 0.40 * fxIntensity);
-      const cx = offsetX + p0.x * cell;
-      const cy = offsetY + p0.y * cell;
-      const rr = Math.max(1, cell * p0.r);
-      ctx.save();
-      ctx.globalAlpha = a;
-      ctx.shadowColor = p0.c;
-      ctx.shadowBlur = Math.max(6, cell * 0.45);
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.beginPath();
-      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
+  // FX-частицы поля (искры трассы разгона): движение + отрисовка + вычистка
+  // истёкших — см. client_draw.js: paintFieldFx(). Спавн стоит выше по кадру
+  // (см. комментарий там), сама отрисовка — на прежнем месте, после
+  // пауэрапов и до змей/следов.
+  paintFieldFx(ctx, cam, nowFrame, { fxEnabled, fxIntensity, fxParticles, OFFSCREEN_MARGIN_CELLS });
 
   // Змеи/следы/nameplate-метки/индикаторы направления — см. client_draw.js:
   // paintEntities().
