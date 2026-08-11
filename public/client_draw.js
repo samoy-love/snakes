@@ -759,6 +759,146 @@ export function paintPowerUps(ctx, cameraFrame, now, deps) {
   return screenPos;
 }
 
+/* Всплески событий поля (kill/reclaim/pickup/use/захват/гибель/всплывающее
+   число очков) — fxBursts. Мутирует и прорежает переданный массив bursts
+   in-place (splice истёкших), как и раньше в draw(). deps несёт то, что
+   нельзя импортировать сюда без цикла модулей (drawDeathFx/drawCaptureFx —
+   client_cos_draw.js тянет client_draw.js через paintEntities) плюс обычный
+   набор модульных значений client.js, как у соседних paint*(). */
+export function paintBursts(ctx, cameraFrame, nowFrame, deps) {
+  const { bursts, fxEnabled, fxIntensity, SCORE_POPUP_MS, OFFSCREEN_MARGIN_CELLS, you, colors, boostHsl, cosClampId, drawDeathFx, drawCaptureFx, easeOutBack, easeOutCubic } = deps;
+  const { offsetX, offsetY, cell, minX, maxX, minY, maxY } = cameraFrame;
+
+  if (!bursts.length) return;
+
+  for (let i = bursts.length - 1; i >= 0; i--) {
+    const fx = bursts[i];
+    const knd0 = String(fx.kind || '');
+    const isScore = knd0 === 'score';
+    // Длительность бурста — параметр: вспышка захвата живёт 650 мс,
+    // эффект гибели дольше, всплывающее число — своё время.
+    const life = Number(fx.life) > 0 ? Number(fx.life) : isScore ? SCORE_POPUP_MS : 650;
+    const age = nowFrame - fx.t0;
+    if (age > life) {
+      bursts.splice(i, 1);
+      continue;
+    }
+    if (!isScore && !fxEnabled) continue;
+    const x = fx.x;
+    const y = fx.y;
+    if (
+      x < minX - OFFSCREEN_MARGIN_CELLS ||
+      x > maxX + OFFSCREEN_MARGIN_CELLS ||
+      y < minY - OFFSCREEN_MARGIN_CELLS ||
+      y > maxY + OFFSCREEN_MARGIN_CELLS
+    ) {
+      continue;
+    }
+
+    // J5: всплывающее число «+247» над точкой захвата.
+    if (isScore) {
+      const sp = Math.max(0, Math.min(1, age / SCORE_POPUP_MS));
+      const v = Math.max(0, Math.round(Number(fx.value) || 0));
+      if (!v) continue;
+      const scale = age < 150 ? easeOutBack(age / 150) : 1;
+      const alpha = sp > 0.72 ? Math.max(0, (1 - sp) / 0.28) : 1;
+      const size = Math.round(12 + Math.min(28, v * 0.35));
+      const sx = offsetX + (x + 0.5) * cell;
+      const sy = offsetY + (y + 0.5) * cell - easeOutCubic(sp) * cell * 1.2;
+      const col = v >= 300 ? 'rgba(200,130,255,1)' : v >= 100 ? 'rgba(255,210,60,1)' : 'rgba(255,255,255,1)';
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(sx, sy);
+      if (scale !== 1) ctx.scale(scale, scale);
+      ctx.font = `700 ${size}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.95)';
+      ctx.strokeText(`+${v}`, 0, 0);
+      ctx.fillStyle = col;
+      ctx.fillText(`+${v}`, 0, 0);
+      ctx.restore();
+      continue;
+    }
+
+    const p = Math.max(0, Math.min(1, age / life));
+    const cx = offsetX + (x + 0.5) * cell;
+    const cy = offsetY + (y + 0.5) * cell;
+    const knd = knd0;
+
+    // Гибель: тот же drawDeathFx, что и в превью магазина.
+    if (knd.startsWith('die')) {
+      const dieId = cosClampId(Number(knd.slice(3)) || 0);
+      const owner = Number(fx.pid);
+      const ownerHsl = boostHsl(colors.get(owner) || 'hsl(210 20% 60%)');
+      drawDeathFx(ctx, cx, cy, cell * (0.6 + fxIntensity * 0.7), ownerHsl, dieId, p);
+      continue;
+    }
+
+    const isCap = knd.startsWith('cap');
+    const base = cell * (knd === 'kill' ? 1.1 : isCap ? 1.05 : 0.85);
+    const r = base * (0.35 + 1.25 * p) * (0.35 + fxIntensity * 0.95);
+    const a = (1 - p) * (0.55 + 0.45 * fxIntensity);
+
+    // Захват: тот же drawCaptureFx, что и в превью магазина. Цвет берётся
+    // от игрока, совершившего захват (варианты 5..7 — со своей палитрой).
+    if (isCap) {
+      const capId = cosClampId(knd.slice(3));
+      const owner = Number(fx.pid);
+      const ownerHsl = boostHsl(colors.get(owner) || colors.get(you) || 'hsl(210 20% 60%)');
+      const capCell = cell * (0.35 + fxIntensity * 0.95);
+      drawCaptureFx(ctx, cx, cy, capCell, ownerHsl, capId, p);
+      continue;
+    }
+
+    let col = 'rgba(255,215,0,0.92)';
+    if (knd === 'kill') col = 'rgba(255,45,85,0.95)';
+    // F5: возврат остывшей земли — холодный голубой, а не «золото захвата».
+    else if (knd === 'reclaim') col = 'rgba(120,220,255,0.96)';
+    else if (knd === 'use') col = 'rgba(0,255,255,0.95)';
+    else if (knd === 'pickup2') col = 'rgba(255,215,0,0.95)';
+    else if (knd === 'pickup4') col = 'rgba(190,150,255,0.96)';
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = Math.max(1, cell * 0.10);
+    if (knd === 'pickup4') {
+      ctx.lineWidth = Math.max(2, cell * 0.10);
+      for (let k = 0; k < 10; k++) {
+        const ang = p * 2.0 + (k * Math.PI * 2) / 10;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang) * r * 0.30, cy + Math.sin(ang) * r * 0.30);
+        ctx.lineTo(cx + Math.cos(ang) * r * 1.05, cy + Math.sin(ang) * r * 1.05);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = a * 0.85;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.95, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = a * 0.45;
+      ctx.lineWidth = Math.max(1, cell * 0.06);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (knd === 'pickup2') {
+      ctx.lineWidth = Math.max(2, cell * 0.09);
+      ctx.setLineDash([Math.max(2, cell * 0.10), Math.max(2, cell * 0.10)]);
+      ctx.lineDashOffset = -nowFrame * 0.03;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
 function perfValueSpan(text, bad) {
   const cls = bad ? 'perfBad' : 'perfOk';
   return `<span class="perfValue ${cls}">${text}</span>`;

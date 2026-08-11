@@ -194,6 +194,23 @@ test('paintPowerUps() не читает идентификаторы, котор
   );
 });
 
+// paintBursts() — вынесена из draw() (§ шаг «Отрисовка всплесков fxBursts»).
+// Как и остальные paint*() этого файла, не тянет ничего из client.js через
+// замыкание — bursts/цвета/хелперы рисования приходят deps.
+test('paintBursts() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'paintBursts');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `paintBursts() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
 // renderPerfPanel() — вынесена из конца draw() (§ шаг «Панель #perf в конце
 // draw()»). Как и остальные функции этого файла, не тянет ничего из
 // client.js через замыкание — метрики и t() приходят параметрами.
