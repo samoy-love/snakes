@@ -216,6 +216,7 @@ export const I18N = {
     'meta.leaderboard': 'Таблица',
     'meta.fight': 'Бой',
     'meta.tasks': 'Задания',
+    'meta.tasks_hint': 'Ежедневные задания — сбрасываются раз в сутки, прогресс не переносится между днями',
 
     'rooms.invalid_title': 'Некорректное название',
     'rooms.full': 'Комната заполнена',
@@ -650,6 +651,7 @@ export const I18N = {
     'meta.leaderboard': 'Standings',
     'meta.fight': 'Fight',
     'meta.tasks': 'Tasks',
+    'meta.tasks_hint': 'Daily tasks — reset once every 24 hours, progress does not carry over between days',
 
     'rooms.invalid_title': 'Invalid title',
     'rooms.full': 'Room is full',

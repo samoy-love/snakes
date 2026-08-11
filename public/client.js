@@ -4573,7 +4573,7 @@ function renderMenuMeta() {
     const done = prog >= it.goal;
     const pct = (prog / it.goal) * 100;
     rows.push(`
-      <div class="menuMetaRow${done ? ' isDone' : ''}">
+      <div class="menuMetaRow${done ? ' isDone' : ''}" title="${escapeHtml(t('meta.tasks_hint'))}">
         <span class="menuMetaIcon" aria-hidden="true">${done ? '🏁' : '📅'}</span>
         <span class="menuMetaText">${escapeHtml(dailyLabel(it.type))}</span>
         <span class="menuMetaValue">${fmtInt(prog)}/${fmtInt(it.goal)}</span>
@@ -8614,12 +8614,13 @@ function renderMetaHud() {
     });
   };
 
-  const buildSection = (title, rows) => {
+  const buildSection = (title, rows, titleHint) => {
     const sec = document.createElement('div');
     sec.className = 'metaSection';
     const t = document.createElement('div');
     t.className = 'metaSectionTitle';
     t.textContent = title;
+    if (titleHint) t.title = titleHint;
     sec.appendChild(t);
     for (const r of rows) {
       const row = document.createElement('div');
@@ -8695,15 +8696,15 @@ function renderMetaHud() {
   }
 
   const detailSections = [];
-  const addDetailSection = (title, rows) => {
+  const addDetailSection = (title, rows, titleHint) => {
     if (!rows.length) return;
-    detailSections.push({ title, rows });
+    detailSections.push({ title, rows, titleHint });
   };
   // Заголовок «Матч» уже стоит в summary этого <details> — внутри он был
   // третьей копией того же слова. Секция про мутатор и баунти — это раунд.
   addDetailSection(t('meta.round'), matchRows);
   addDetailSection(t('meta.fight'), fightRows);
-  addDetailSection(t('meta.tasks'), dailyRows);
+  addDetailSection(t('meta.tasks'), dailyRows, t('meta.tasks_hint'));
 
   /* C7: панель пересобиралась ПОЛНОСТЬЮ на каждом кадре — замер оснасткой
      (tools/probe.mjs): 16 createElement и 10 записей textContent на кадр,
@@ -8746,7 +8747,7 @@ function renderMetaHud() {
     det.appendChild(sum);
 
     for (const s of detailSections) {
-      det.appendChild(buildSection(s.title, s.rows));
+      det.appendChild(buildSection(s.title, s.rows, s.titleHint));
     }
     frag.appendChild(det);
   }
