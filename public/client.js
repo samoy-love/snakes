@@ -494,11 +494,15 @@ function setMinimapPixel(i) {
   let g = 16;
   let b = 20;
   if (o !== 0) {
+    // УХ33: своя территория выделяется насыщеннее чужой — не притемняем её
+    // тем же множителем 0.50, чтобы цвет читался ярче остальных владений.
+    const isMine = you && o === you;
     let rgb = minimapOwnerRgbCache.get(o);
     if (!rgb) {
       const c = boostHsl(colors.get(o) || 'hsl(210 20% 60%)');
       const raw2 = hslToRgb(c);
-      rgb = [Math.round(raw2[0] * 0.50), Math.round(raw2[1] * 0.50), Math.round(raw2[2] * 0.50)];
+      const mul = isMine ? 0.82 : 0.50;
+      rgb = [Math.round(raw2[0] * mul), Math.round(raw2[1] * mul), Math.round(raw2[2] * mul)];
       minimapOwnerRgbCache.set(o, rgb);
     }
     // Остывающая территория на миникарте заметно тусклее «живой».
@@ -2528,16 +2532,33 @@ const minimapOverlayCanvas = document.getElementById('minimapOverlayCanvas');
 let minimapOverlayOpen = false;
 let minimapOverlayCtx = null;
 
+/* УХ33: у миникарты не было легенды для точек-иконок — жёлтая рамка топ-1 и
+   красная у баунти читались только методом тыка. Три строки: своя точка,
+   боты, остальные игроки — с теми же значками/цветами, что рисует
+   drawMinimap()/setMinimapPixel(). */
 function updateMinimapLegend() {
   if (!minimapLegendEl) return;
+  const rows = [
+    { swatch: 'minimapLegendMe', label: t('minimap.legend_me') },
+    { swatch: 'minimapLegendPlayer', label: t('minimap.legend_player') },
+    { swatch: 'minimapLegendBot', label: t('minimap.legend_bot') }
+  ];
+  const items = rows.map((r) => {
+    const row = document.createElement('div');
+    row.className = 'minimapLegendRow';
+    const sw = document.createElement('span');
+    sw.className = `minimapLegendSwatch ${r.swatch}`;
+    row.append(sw, document.createTextNode(r.label));
+    return row;
+  });
   try {
-    minimapLegendEl.classList.add('hidden');
+    minimapLegendEl.replaceChildren(...items);
   } catch {}
   try {
-    minimapLegendEl.setAttribute('aria-hidden', 'true');
+    minimapLegendEl.classList.remove('hidden');
   } catch {}
   try {
-    minimapLegendEl.replaceChildren();
+    minimapLegendEl.setAttribute('aria-hidden', 'false');
   } catch {}
 }
 
@@ -3358,6 +3379,7 @@ function renderTopHud() {
       topHudTimeEl.textContent = rem || '';
       const sec = matchEndTick ? tickRemainSeconds(matchEndTick) : null;
       topHudTimeEl.classList.toggle('isUrgent', sec != null && sec <= 30);
+      topHudTimeEl.classList.toggle('isCritical', sec != null && sec <= 15);
       topHudTimeEl.classList.toggle('hidden', !rem);
       try {
         topHudTimeEl.title = t('hud.time_left');
@@ -8612,6 +8634,19 @@ function pushEventFeed(text, kind, actorNum) {
     killfeedDirty = true;
     return;
   }
+  /* UX15: однотипные события одного игрока подряд (например "захватил +N зоны")
+     схлопываем в одну строку с суммой, а не плодим повторы — сравниваем текст
+     без хвостового числа, чтобы разные +N всё равно объединялись. */
+  if (head && head.k === k && head.a === a && a != null && t - head.t < 10000) {
+    const m = /^(.*\+)(\d+)(\D*)$/.exec(s);
+    const hm = head.text ? /^(.*\+)(\d+)(\D*)$/.exec(head.text) : null;
+    if (m && hm && m[1] === hm[1] && m[3] === hm[3]) {
+      head.text = `${hm[1]}${Number(hm[2]) + Number(m[2])}${hm[3]}`;
+      head.t = t;
+      killfeedDirty = true;
+      return;
+    }
+  }
   eventFeed.unshift({ t, text: s, k, n: 1, a });
   if (eventFeed.length > 64) eventFeed.length = 64;
   killfeedDirty = true;
@@ -8630,7 +8665,7 @@ function renderKillfeed() {
      DOM, когда рисовать нечего нового. */
   // C4: значок бота входит в подпись — иначе приход cosExtra не перерисует ленту.
   const sig =
-    visible.map((e) => `${e.k}${e.text}${e.n || 1}${botArchInfo(e.a) ? `b${e.a}` : ''}`).join('') + lang;
+    visible.map((e) => `${e.k}${e.text}${e.n || 1}${botArchInfo(e.a) ? `b${e.a}` : ''}${e.a === you ? 'm' : ''}`).join('') + lang;
   if (renderKillfeed._sig === sig) return;
   renderKillfeed._sig = sig;
 
@@ -8638,6 +8673,9 @@ function renderKillfeed() {
     const div = document.createElement('div');
     const k = String(e?.k || '').trim();
     div.className = k ? `killLine killLine${k}` : 'killLine';
+    // УХ31: отличаем свои события от чужих цветом левой полосы/фона.
+    if (you && e?.a != null && Number(e.a) === you) div.classList.add('killLineMine');
+    else if (e?.a != null) div.classList.add('killLineOther');
     // C8: множитель схлопнутых повторов.
     const rep = Number(e?.n) || 1;
     const txt = rep > 1 ? `${e.text} ×${rep}` : e.text;
