@@ -2484,7 +2484,7 @@ function botDisplayName(id) {
   const n = Number(id) || 0;
   const seed = (Math.imul(n, 1103515245) + 12345) >>> 0;
   const list = lang === 'en' ? BOT_NAMES_EN : BOT_NAMES_RU;
-  const base = list[seed % list.length] || (lang === 'en' ? 'Bot' : 'Бот');
+  const base = list[seed % list.length] || t('name.bot_fallback');
   return `${base}#${(seed % 99) + 1}`;
 }
 
@@ -8053,7 +8053,7 @@ function infoDesc(map, type, fallback) {
 
 function powerupLabel(type) {
   const p = infoPack();
-  return infoName(p.powerups, type, lang === 'en' ? 'Item' : 'Предмет');
+  return infoName(p.powerups, type, t('name.item_fallback'));
 }
 
 function mutatorLabel(type) {
@@ -8068,7 +8068,7 @@ function contractLabel(type) {
 
 function dailyLabel(type) {
   const p = infoPack();
-  return infoName(p.dailies, type, lang === 'en' ? 'Daily' : 'Задание');
+  return infoName(p.dailies, type, t('name.daily_fallback'));
 }
 
 function achvLabel(type) {
@@ -9056,7 +9056,7 @@ function handleStateBinary(buf) {
         });
 
         if (killer) pushEventFeed(`${kn} -> ${vn}${rs ? ` (${rs})` : ''}`, 'Kill', killer);
-        else pushEventFeed(`${vn} ${lang === 'en' ? 'died' : 'погиб'}${rs ? ` (${rs})` : ''}`, 'Death', victim);
+        else pushEventFeed(`${vn} ${t('feed.died')}${rs ? ` (${rs})` : ''}`, 'Death', victim);
 
         if (killer && killer === you) {
           youKills++;
@@ -9101,7 +9101,7 @@ function handleStateBinary(buf) {
            информации о раскладе на карте. */
         if (pid === you || delta >= FEED_FOREIGN_CAPTURE_MIN) {
           pushEventFeed(
-            `${pn} ${lang === 'en' ? 'captured' : 'захватил'} +${delta} ${lang === 'en' ? 'zone' : 'зоны'}`,
+            `${pn} ${t('feed.captured')} +${delta} ${t('feed.zone')}`,
             'Capture',
             pid
           );
@@ -9158,7 +9158,7 @@ function handleStateBinary(buf) {
         // C6: тот же порог, что и у захвата — чужой возврат мелочи в ленте
         // такой же шум, как и чужой мелкий захват. Свой — всегда.
         if (pid === you || cells >= FEED_FOREIGN_CAPTURE_MIN) {
-          pushEventFeed(`${pn} ${lang === 'en' ? 'reclaimed' : 'вернул'} +${cells}`, 'Reclaim', pid);
+          pushEventFeed(`${pn} ${t('feed.reclaimed')} +${cells}`, 'Reclaim', pid);
         }
         addFxBurst(ex, ey, `cap${cosClampId(cosCaptureFxByPlayer(pid))}`, { pid });
         if (pid === you && cells > 0) {
@@ -9388,13 +9388,13 @@ function handleStateBinary(buf) {
         o += 2;
         const kn = displayNameOf(killer);
         const vn = displayNameOf(victim);
-        pushEventFeed(`${lang === 'en' ? 'REVENGE' : 'МЕСТЬ'}: ${kn} -> ${vn}`, 'Revenge', killer);
+        pushEventFeed(`${t('feed.revenge')}: ${kn} -> ${vn}`, 'Revenge', killer);
         if (killer === you) {
           bumpMatchTabBadge();
           sfx.revenge();
           fxFlashScreen([255, 110, 110], 0.85);
-          if (!showBigBanner('😈', t('banner.revenge'), lang === 'en' ? 'A kill in return for your death' : 'Убийство в ответ на вашу смерть', 'danger')) {
-            addToast('😈', lang === 'en' ? 'Revenge!' : 'Месть!', 'big', lang === 'en' ? 'A kill in return for your death' : 'Убийство в ответ на вашу смерть', { tab: 'match', key: 'revenge', prio: 'jackpot' });
+          if (!showBigBanner('😈', t('banner.revenge'), t('banner.revenge_sub'), 'danger')) {
+            addToast('😈', t('banner.revenge'), 'big', t('banner.revenge_sub'), { tab: 'match', key: 'revenge', prio: 'jackpot' });
           }
         }
         continue;
