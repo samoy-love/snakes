@@ -595,7 +595,10 @@ function cosTitleName(id) {
        'Contractor', 'Executor', 'Bounty Hunter', 'Trendsetter', 'Regular', 'Devoted']
     : ['', 'Боец', 'Нагибатор', 'Легенда', 'Землевладелец', 'Картограф', 'Мститель',
        'Подрядчик', 'Исполнитель', 'Охотник за головами', 'Модник', 'Завсегдатай', 'Преданный'];
-  return list[i] || cosTitleServerNames.get(i) || '';
+  // Запасной вариант для титула, которого клиент ещё не знает: сервер шлёт оба
+  // имени, берём то, на котором сейчас интерфейс (R5).
+  const srv = cosTitleServerNames.get(i);
+  return list[i] || (srv ? (en ? srv.en : srv.ru) : '') || '';
 }
 
 function cosTitleReq(id) {
@@ -3510,7 +3513,12 @@ net = createNetModule({
         for (const it of d.titles) {
           const id = Number(it?.id);
           const nm = typeof it?.name === 'string' ? it.name.trim() : '';
-          if (Number.isFinite(id) && id > 0 && nm) cosTitleServerNames.set(id, nm);
+          // R5: язык выбирается в момент отрисовки, а не здесь — иначе смена
+          // языка на лету оставила бы подставленные имена от старого.
+          const nmEn = typeof it?.nameEn === 'string' ? it.nameEn.trim() : '';
+          if (Number.isFinite(id) && id > 0 && nm) {
+            cosTitleServerNames.set(id, { ru: nm, en: nmEn || nm });
+          }
           // C3: связка «титул → ачивка», без неё прогресс не найти.
           const av = Number(it?.achv);
           if (Number.isFinite(id) && id > 0 && Number.isFinite(av) && av >= 0) {

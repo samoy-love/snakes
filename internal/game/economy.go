@@ -729,26 +729,33 @@ func ensureProfileCosmeticsLocked(pr *profiles.Profile) {
 const TitleMaxID = 13
 
 // titleRule binds a title id to the achievement that unlocks it.
+//
+// R5: nameEn travels with the rule for the same reason bot nicknames carry
+// one. The client keeps its own translation table and falls back to the
+// server name when a title is newer than the client — which meant the
+// fallback served Russian into an English UI. Now both names are on the wire
+// and the fallback is correct in either language.
 type titleRule struct {
-	id   uint8
-	achv uint8
-	name string
+	id     uint8
+	achv   uint8
+	name   string
+	nameEn string
 }
 
 var titleRules = []titleRule{
-	{1, AchvKills10, "Боец"},
-	{2, AchvKills100, "Нагибатор"},
-	{3, AchvKills1000, "Легенда"},
-	{4, AchvCapture10k, "Землевладелец"},
-	{5, AchvCapture100k, "Картограф"},
-	{6, AchvRevenge15, "Мститель"},
-	{7, AchvContracts25, "Подрядчик"},
-	{8, AchvContracts100, "Исполнитель"},
-	{9, AchvBounty15, "Охотник за головами"},
-	{10, AchvStyle10000, "Модник"},
-	{11, AchvStreak7, "Завсегдатай"},
-	{12, AchvStreak30, "Преданный"},
-	{13, AchvFirstMatch, "Новичок"},
+	{1, AchvKills10, "Боец", "Fighter"},
+	{2, AchvKills100, "Нагибатор", "Crusher"},
+	{3, AchvKills1000, "Легенда", "Legend"},
+	{4, AchvCapture10k, "Землевладелец", "Landlord"},
+	{5, AchvCapture100k, "Картограф", "Cartographer"},
+	{6, AchvRevenge15, "Мститель", "Avenger"},
+	{7, AchvContracts25, "Подрядчик", "Contractor"},
+	{8, AchvContracts100, "Исполнитель", "Executor"},
+	{9, AchvBounty15, "Охотник за головами", "Bounty Hunter"},
+	{10, AchvStyle10000, "Модник", "Trendsetter"},
+	{11, AchvStreak7, "Завсегдатай", "Regular"},
+	{12, AchvStreak30, "Преданный", "Devoted"},
+	{13, AchvFirstMatch, "Новичок", "Rookie"},
 }
 
 // titlesPayload renders the "achievement -> title" table for the "hello"
@@ -756,7 +763,12 @@ var titleRules = []titleRule{
 func titlesPayload() []map[string]any {
 	out := make([]map[string]any, 0, len(titleRules))
 	for _, tr := range titleRules {
-		out = append(out, map[string]any{"id": tr.id, "achv": tr.achv, "name": tr.name})
+		out = append(out, map[string]any{
+			"id":     tr.id,
+			"achv":   tr.achv,
+			"name":   tr.name,
+			"nameEn": tr.nameEn,
+		})
 	}
 	return out
 }
