@@ -30,3 +30,26 @@ export const clientState = {
   camLeadX: 0,
   camLeadY: 0
 };
+
+/* Единственная точка входа для дозаписи в chatMessages — WS-хендлеры и
+   рендер чата (public/client_chat_ui.js) больше не пушат в массив напрямую.
+   Возвращает true, если самое старое сообщение пришлось обрезать (лимит
+   истории — 200), чтобы вызывающий знал, что нужен полный renderChat(), а
+   не точечное добавление одной строки. */
+export function pushChatMessage(msg) {
+  clientState.chatMessages.push(msg);
+  let shifted = false;
+  while (clientState.chatMessages.length > 200) {
+    clientState.chatMessages.shift();
+    shifted = true;
+  }
+  return shifted;
+}
+
+/* Полная замена истории чата при входе в комнату (onChatInit). */
+export function resetChatMessages(history) {
+  clientState.chatMessages.length = 0;
+  if (Array.isArray(history)) {
+    for (const m of history) clientState.chatMessages.push(m);
+  }
+}
