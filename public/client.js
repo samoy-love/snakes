@@ -1212,6 +1212,17 @@ function toastBump(el) {
   } catch {}
 }
 
+// UX18: тосты активных модификаторов раунда ("Раунд: ...") теряют смысл,
+// когда игрок уже смотрит на экран смерти/результатов — убираем их вместе
+// с открытием оверлея, сам механизм тостов не трогаем.
+function dismissRoundModToasts() {
+  for (const item of Array.from(toastByKey.values())) {
+    if (String(item.key || '').startsWith('mutator_') && item.el) {
+      toastUnmount(item);
+    }
+  }
+}
+
 function toastMount(item) {
   if (!eventToastsEl || !item) return;
   const wrap = document.createElement('div');
@@ -3695,6 +3706,7 @@ function updateDeathZoom(now) {
 function showDeathOverlay() {
   if (deathOverlay) deathOverlay.classList.remove('hidden');
   overlayManager.open('death');
+  dismissRoundModToasts();
   syncOverlayUiState();
   setChatCollapsed(true);
   toggleEmojiPanel(false);
