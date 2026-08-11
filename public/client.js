@@ -1,4 +1,5 @@
 import { clientState } from './client_state.js';
+import { createChatUi } from './client_chat_ui.js';
 import { installErrorLogging } from './client_errors.js';
 import { createAudioModule } from './client_audio.js';
 import { createFxModule } from './client_fx.js';
@@ -2517,7 +2518,58 @@ function refreshBotNames() {
 
 let chatDirty = false;
 
-let chatRenderedCount = 0;
+function notifyChatUnread() {
+  unreadCount = Math.min(999, unreadCount + 1);
+  updateUnreadBadge();
+}
+
+function bumpChatOpenUntilBy(ms) {
+  chatOpenUntil = performance.now() + (Number(ms) || 0);
+}
+
+const chatUi = createChatUi({
+  chat,
+  chatLog,
+  chatInput,
+  emojiBtn,
+  emojiPanel,
+  emojiCloseBtn,
+  emojiRecent,
+  emojiGrid,
+  EMOJIS,
+  setSafeEmojiHtml,
+  displayNameOf,
+  formatTime,
+  getYou: () => you,
+  updateChatLayout,
+  bumpChatVisibility,
+  CHAT_AUTO_OPEN_MS,
+  notifyUnread: notifyChatUnread,
+  setChatCollapsed: (v) => setChatCollapsed(v),
+  bumpChatOpenUntil: bumpChatOpenUntilBy,
+  scheduleChatInputOverlayRender: () => scheduleChatInputOverlayRender()
+});
+
+function buildChatLineElement(m) {
+  return chatUi.buildChatLineElement(m);
+}
+
+function renderChat() {
+  chatUi.renderChat();
+}
+
+function addChatLine(msg) {
+  chatUi.addChatLine(msg);
+}
+
+function onChatInit(history) {
+  chatUi.onChatInit(history);
+  chatDirty = false;
+}
+
+function toggleEmojiPanel(open) {
+  chatUi.toggleEmojiPanel(open);
+}
 
 const minimapLegendEl = document.getElementById('minimapLegend');
 const minimapOverlayEl = document.getElementById('minimapOverlay');
@@ -5275,96 +5327,6 @@ chatInput?.addEventListener('keydown', (e) => {
   }
 });
 
-function toggleEmojiPanel(open) {
-  const shouldOpen = open ?? !emojiPanel.classList.contains('open');
-  emojiPanel.classList.toggle('open', shouldOpen);
-  if (shouldOpen) chatOpenUntil = performance.now() + 12000;
-  if (shouldOpen) {
-    renderEmojiRecent();
-  } else {
-    renderEmojiGrid(EMOJIS);
-  }
-}
-
-emojiBtn.addEventListener('click', () => {
-  if (chat.classList.contains('collapsed')) setChatCollapsed(false);
-  toggleEmojiPanel();
-});
-
-const RECENT_KEY = 'recentEmojis';
-let recentEmojis = [];
-
-function getEmojiCode(e) {
-  const cps = Array.from(String(e)).map((ch) => ch.codePointAt(0).toString(16));
-  return cps.join('-').toLowerCase().replace(/-fe0f/g, '');
-}
-
-function loadRecentEmojis() {
-  try {
-    const v = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
-    if (Array.isArray(v)) return v.filter((x) => typeof x === 'string').slice(0, 24);
-  } catch {
-    // ignore
-  }
-  return [];
-}
-
-function saveRecentEmojis() {
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(recentEmojis.slice(0, 24)));
-  } catch {
-    // ignore
-  }
-}
-
-function pushRecentEmoji(e) {
-  const s = String(e);
-  recentEmojis = [s, ...recentEmojis.filter((x) => x !== s)].slice(0, 24);
-  saveRecentEmojis();
-}
-
-function createEmojiButton(e) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  setSafeEmojiHtml(b, e);
-  b.addEventListener('click', () => {
-    insertAtCursor(chatInput, e);
-    pushRecentEmoji(e);
-    renderEmojiRecent();
-    chatOpenUntil = performance.now() + 12000;
-  });
-  return b;
-}
-
-function renderEmojiGrid(list) {
-  if (!emojiGrid) return;
-  const frag = document.createDocumentFragment();
-  for (const e of list) frag.appendChild(createEmojiButton(e));
-  emojiGrid.replaceChildren(frag);
-}
-
-function renderEmojiRecent() {
-  if (!emojiRecent) return;
-  if (!recentEmojis.length) {
-    emojiRecent.classList.add('hidden');
-    emojiRecent.replaceChildren();
-    return;
-  }
-  emojiRecent.classList.remove('hidden');
-  const frag = document.createDocumentFragment();
-  for (const e of recentEmojis) frag.appendChild(createEmojiButton(e));
-  emojiRecent.replaceChildren(frag);
-}
-
-recentEmojis = loadRecentEmojis();
-renderEmojiGrid(EMOJIS);
-
-setSafeEmojiHtml(emojiBtn, '\u{1F600}');
-
-emojiCloseBtn?.addEventListener('click', () => {
-  toggleEmojiPanel(false);
-});
-
 function setChatCollapsed(v) {
   chat.classList.toggle('collapsed', v);
   if (v) toggleEmojiPanel(false);
@@ -5569,86 +5531,6 @@ nameInput.addEventListener('keydown', (e) => {
 
 function formatTime(t) {
   return formatClock(t);
-}
-
-function addChatLine(msg) {
-  clientState.chatMessages.push(msg);
-  let shifted = false;
-  while (clientState.chatMessages.length > 200) {
-    clientState.chatMessages.shift();
-    shifted = true;
-  }
-  if (chat.classList.contains('collapsed')) {
-    bumpChatVisibility(CHAT_AUTO_OPEN_MS, false);
-  }
-
-  try {
-    const ae = document.activeElement;
-    const focused = !!(ae && chat.contains(ae));
-    if (!focused) {
-      unreadCount = Math.min(999, unreadCount + 1);
-      updateUnreadBadge();
-    }
-  } catch {}
-
-  if (shifted) {
-    renderChat();
-    bumpChatVisibility(CHAT_AUTO_OPEN_MS, false);
-    return;
-  }
-
-  if (chatRenderedCount === clientState.chatMessages.length - 1) {
-    const atBottom = chatLog.scrollTop + chatLog.clientHeight >= chatLog.scrollHeight - 24;
-    chatLog.appendChild(buildChatLineElement(msg));
-    chatRenderedCount = clientState.chatMessages.length;
-    if (atBottom) chatLog.scrollTop = chatLog.scrollHeight;
-  } else {
-    renderChat();
-  }
-  bumpChatVisibility(CHAT_AUTO_OPEN_MS, false);
-  updateChatLayout();
-}
-
-function buildChatLineElement(m) {
-  const line = document.createElement('div');
-  line.className = 'chatLine';
-  if (m?.n === you) line.classList.add('me');
-
-  const meta = document.createElement('div');
-  meta.className = 'chatMeta';
-
-  const nameEl = document.createElement('div');
-  nameEl.className = 'chatName';
-  nameEl.textContent = displayNameOf(m?.n);
-
-  const timeEl = document.createElement('div');
-  timeEl.className = 'chatTime';
-  timeEl.textContent = formatTime(m?.t);
-
-  meta.appendChild(nameEl);
-  meta.appendChild(timeEl);
-
-  const textEl = document.createElement('div');
-  textEl.className = 'chatText';
-  setSafeEmojiHtml(textEl, String(m?.text ?? ''));
-
-  line.appendChild(meta);
-  line.appendChild(textEl);
-  return line;
-}
-
-function renderChat() {
-  const atBottom = chatLog.scrollTop + chatLog.clientHeight >= chatLog.scrollHeight - 24;
-
-  const frag = document.createDocumentFragment();
-  for (const m of clientState.chatMessages) {
-    frag.appendChild(buildChatLineElement(m));
-  }
-
-  chatLog.replaceChildren(frag);
-  chatRenderedCount = clientState.chatMessages.length;
-  if (atBottom) chatLog.scrollTop = chatLog.scrollHeight;
-  updateChatLayout();
 }
 
 chatInput?.addEventListener('input', () => {
@@ -9532,15 +9414,6 @@ function handleStateBinary(buf) {
   }
 }
 
-function onChatInit(history) {
-  chatLog.textContent = '';
-  clientState.chatMessages.length = 0;
-  if (!Array.isArray(history)) return;
-  for (const m of history) clientState.chatMessages.push(m);
-  renderChat();
-  chatDirty = false;
-  updateChatLayout();
-}
 
 function onChat(m) {
   if (!m) return;
