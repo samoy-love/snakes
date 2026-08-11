@@ -211,6 +211,18 @@ const (
 	HuntCapHuman = 3
 	HuntCapBot   = 3
 
+	// R1: the levelled cap overshot at the one moment it hurts most. Measured
+	// live and in simulation, a player who has not built anything yet dies
+	// roughly every ten seconds while a bot dies every eighty: three hunters
+	// on a snake whose whole estate is the 3x3 spawn patch is not a duel, it
+	// is a queue. Below HuntFledglingCells the cap drops to one, so there is
+	// always a threat but never a pile-on. The gate is territory, not a timer:
+	// it opens exactly when the player has something worth taking, and it
+	// closes again after a death, which is when it is needed again.
+	HuntCapHumanFledgling = 1
+	// HuntFledglingCells is ~0.5% of the map, i.e. two or three honest loops.
+	HuntFledglingCells = 150
+
 	// G14: windup before a hunt actually starts. The bot drives straight at
 	// the target for a few ticks, which is the player's cue to react.
 	HuntWindupMin = 3
@@ -1992,6 +2004,11 @@ func huntCapFor(victim *Player) int {
 	}
 	if victim.bot {
 		return HuntCapBot
+	}
+	// R1: a player who has not built anything yet is hunted by one bot at a
+	// time, not three. See HuntFledglingCells.
+	if len(victim.owned) < HuntFledglingCells {
+		return HuntCapHumanFledgling
 	}
 	return HuntCapHuman
 }

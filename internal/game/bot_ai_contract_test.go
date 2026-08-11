@@ -306,6 +306,12 @@ func TestHunterCensusNeverSticks(t *testing.T) {
 	b3 := newHuntBot(r, 4, ArchAggressor)
 	b4 := newHuntBot(r, 5, ArchAggressor)
 
+	// R1: пока человек не отстроился, на него охотится один бот, а не трое.
+	if got := huntCapFor(victim); got != HuntCapHumanFledgling {
+		t.Fatalf("лимит охотников на новичка = %d, ожидалось %d", got, HuntCapHumanFledgling)
+	}
+	// Дальше проверяется полный лимит, поэтому человек «отстраивается».
+	victim.owned = make([]int, HuntFledglingCells)
 	if got := huntCapFor(victim); got != HuntCapHuman {
 		t.Fatalf("лимит охотников на человека = %d, ожидалось %d", got, HuntCapHuman)
 	}
