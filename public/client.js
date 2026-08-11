@@ -1,3 +1,4 @@
+import { clientState } from './client_state.js';
 import { installErrorLogging } from './client_errors.js';
 import { createAudioModule } from './client_audio.js';
 import { createFxModule } from './client_fx.js';
@@ -178,10 +179,10 @@ function drawZoneCircle(cx, cy, r, stroke, fill, icon) {
 }
 
 function drawMinimapZones() {
-  if (!lastState?.players?.length) return;
+  if (!clientState.lastState?.players?.length) return;
   const now = performance.now();
 
-  const ordered = computeTopSorted(lastState.players);
+  const ordered = computeTopSorted(clientState.lastState.players);
   const candidateTop1 = ordered.find((p) => p && p.a) || null;
   if (!candidateTop1) {
     minimapTop1PinnedId = 0;
@@ -193,7 +194,7 @@ function drawMinimapZones() {
       minimapTop1NextSwitchAt = now + MINIMAP_TOP1_SWITCH_COOLDOWN_MS;
     }
 
-    const pinned = lastState.players.find((p) => p && p.a && p.n === minimapTop1PinnedId) || null;
+    const pinned = clientState.lastState.players.find((p) => p && p.a && p.n === minimapTop1PinnedId) || null;
     if (!pinned) {
       minimapTop1PinnedId = candidateTop1.n;
       minimapTop1NextSwitchAt = now + MINIMAP_TOP1_SWITCH_COOLDOWN_MS;
@@ -218,7 +219,7 @@ function drawMinimapZones() {
   }
 
   if (btId) {
-    const bt = lastState.players.find((p) => p && p.n === btId) || null;
+    const bt = clientState.lastState.players.find((p) => p && p.n === btId) || null;
     if (!bt || !bt.a) {
       minimapBountyZone = null;
     } else {
@@ -477,7 +478,7 @@ function gridCellIsCooling(v) {
 
 // Вспышка захвата конкретного игрока — берём из последнего снапшота.
 function cosCaptureFxByPlayer(pid) {
-  const list = lastState?.players;
+  const list = clientState.lastState?.players;
   if (!Array.isArray(list)) return 0;
   for (const p of list) {
     if (p?.n === pid) return Number(p.cosCaptureFx) || 0;
@@ -2243,7 +2244,7 @@ function trackEvent(name) {
   }
 }
 
-let lastState = null;
+// lastState теперь в clientState.lastState (public/client_state.js)
 let gridOwner = null;
 let trailOwner = null;
 
@@ -2687,7 +2688,7 @@ let downBps = null;
 let upBps = null;
 
 let tickrate = 0;
-let lastStateAt = null;
+// lastStateAt теперь в clientState.lastStateAt (public/client_state.js)
 
 let headIndexByOwner = new Map();
 
@@ -3268,7 +3269,7 @@ function ensureTopHudPhaseEl() {
 
 function renderTopHud() {
   if (!topHudEl) return;
-  if (!started || !lastState) {
+  if (!started || !clientState.lastState) {
     topHudEl.setAttribute('aria-hidden', 'true');
     return;
   }
@@ -3282,7 +3283,7 @@ function renderTopHud() {
   // Магазин — со второго матча: в первом тратить ещё нечего и незачем.
   if (cosmeticsBtn) cosmeticsBtn.classList.toggle('hidden', !obSecondMatchPlus());
 
-  const me = lastState.players?.find((p) => p.n === you);
+  const me = clientState.lastState.players?.find((p) => p.n === you);
   const cells = Number(me?.s) || 0;
   const pct = mapCells ? (cells / mapCells) * 100 : 0;
 
@@ -3316,7 +3317,7 @@ function renderTopHud() {
       const sig = `${lastPacketAt}|${points}|${lang}`;
       if (renderTopHud._placeSig !== sig) {
         renderTopHud._placeSig = sig;
-        const ordered = computeTopSorted(lastState.players);
+        const ordered = computeTopSorted(clientState.lastState.players);
         const idx = ordered.findIndex((p) => p.n === you);
         /* Очки из полосы убраны: место уже ранжирует игрока, а сами очки
            стоят колонкой в правой таблице (и в итогах матча). В полосе
@@ -4418,7 +4419,7 @@ function resetClientForNewMatch() {
   renderMetaHud._sig = null;
   renderTopHud._placeSig = null;
 
-  lastState = null;
+  clientState.lastState = null;
   prevPlayers = new Map();
   currPlayers = new Map();
   headIndexByOwner = new Map();
@@ -5130,11 +5131,11 @@ function commitBestPct(pct) {
 
 function renderDeathStats() {
   if (!deathStatsEl) return;
-  if (!lastState) {
+  if (!clientState.lastState) {
     deathStatsEl.textContent = '';
     return;
   }
-  const ordered = computeTopSorted(lastState.players);
+  const ordered = computeTopSorted(clientState.lastState.players);
   const meIndex = ordered.findIndex((p) => p.n === you);
   const me = meIndex >= 0 ? ordered[meIndex] : null;
 
@@ -5260,7 +5261,7 @@ renderTeamHud._u = 0;
 renderTeamHud._at = 0;
 
 function updateLeaderboard() {
-  if (!lastState) return;
+  if (!clientState.lastState) return;
   ensureLeaderboardDom();
   if (!leaderboardTbody) return;
 
@@ -5271,7 +5272,7 @@ function updateLeaderboard() {
   const small = window.innerWidth <= 720;
   const maxRows = small ? 8 : 10;
   const topCount = 5;
-  const ordered = computeTopSorted(lastState.players);
+  const ordered = computeTopSorted(clientState.lastState.players);
   const meIndex = ordered.findIndex((p) => p.n === you);
 
   // Hysteresis for switching between "Top" and "Around me" mode.
@@ -8758,7 +8759,7 @@ function renderMetaHud() {
     return sec;
   };
 
-  const me = lastState?.players?.find?.((p) => p.n === you) || null;
+  const me = clientState.lastState?.players?.find?.((p) => p.n === you) || null;
   const cells = Number(me?.s) || 0;
   const pct = mapCells ? (cells / mapCells) * 100 : 0;
 
@@ -8882,14 +8883,14 @@ function renderMetaHud() {
 
 function renderTeamHud() {
   if (!teamHudEl) return;
-  if (!started || !lastState) {
+  if (!started || !clientState.lastState) {
     teamHudEl.textContent = '';
     try {
       syncRightEmptyStates();
     } catch {}
     return;
   }
-  const ordered = computeTopSorted(lastState.players);
+  const ordered = computeTopSorted(clientState.lastState.players);
   // cells/pct/place отсюда убраны вместе со строками «Место» и «Очки»:
   // ровно эти числа стоят в #topHudPlace, который виден всегда.
   const small = window.innerWidth <= 720;
@@ -9968,7 +9969,7 @@ function applyPackedDeltaGridWithAnim(buf, now) {
 }
 
 function onState(s) {
-  lastState = s;
+  clientState.lastState = s;
 
   // K1: прямоугольник ROI приходил и молча выбрасывался. Он — единственный
   // источник правды о том, какая часть сетки вообще свежая.
@@ -10048,11 +10049,11 @@ function onState(s) {
 
   lastPacketAt = performance.now();
 
-  if (lastStateAt != null) {
-    const dt = lastPacketAt - lastStateAt;
+  if (clientState.lastStateAt != null) {
+    const dt = lastPacketAt - clientState.lastStateAt;
     if (dt > 0) tickrate = lerp(tickrate || 0, 1000 / dt, 0.15);
   }
-  lastStateAt = lastPacketAt;
+  clientState.lastStateAt = lastPacketAt;
 
   try {
     refreshOwnGeometry(false);
@@ -10118,7 +10119,7 @@ function getOwnerFillStyle(owner, a) {
 }
 
 function drawMinimap() {
-  if (!minimapImage || !minimapGridOwner || !lastState) return;
+  if (!minimapImage || !minimapGridOwner || !clientState.lastState) return;
   if (minimapDirty) {
     minimapDirty = false;
     for (let i = 0; i < N; i++) setMinimapPixel(i);
@@ -10129,7 +10130,7 @@ function drawMinimap() {
 
   // I3: на миникарте видны все живые игроки, а не только ты.
   // Свою точку рисуем последней и крупнее (ниже, после рамки обзора).
-  for (const p of lastState.players) {
+  for (const p of clientState.lastState.players) {
     if (!p.a) continue;
     if (p.n === you) continue;
     if (p.x < 0 || p.y < 0 || p.x >= W || p.y >= H) continue;
@@ -10168,7 +10169,7 @@ function drawMinimap() {
     drawMinimapZones();
   } catch {}
 
-  const me = lastState.players.find((p) => p.n === you && p.a);
+  const me = clientState.lastState.players.find((p) => p.n === you && p.a);
   if (me) {
     mmCtx.fillStyle = 'rgba(0,0,0,0.72)';
     mmCtx.fillRect(me.x - 2, me.y - 2, 5, 5);
@@ -10209,7 +10210,7 @@ function draw() {
     updateMatchCountdown();
   }
 
-  if (!lastState || !gridOwner || !trailOwner) return;
+  if (!clientState.lastState || !gridOwner || !trailOwner) return;
 
   /* K7: под открытым оверлеем смерти/итогов поле продолжало рисоваться на
      60 fps, причём сквозь backdrop-filter: blur(8px) — худший из возможных
@@ -10373,7 +10374,7 @@ function draw() {
   // цикле по клеткам остаётся один fillRect.
   const terrByOwner = new Map();
   const terrStyleByOwner = new Map();
-  for (const p of lastState.players) {
+  for (const p of clientState.lastState.players) {
     segByOwner.set(p.n, cosClampId(p.cosSeg));
     const hsl = boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)');
     hslByOwner.set(p.n, hsl);
@@ -10897,7 +10898,7 @@ function draw() {
 
   ctx.font = `12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
 
-  for (const p of lastState.players) {
+  for (const p of clientState.lastState.players) {
     if (!p.a) continue;
     const ip = getInterpPlayer(p.n, interp) || { ...p, ix: p.x, iy: p.y };
     const c = boostHsl(colors.get(p.n) || p.c || 'hsl(210 20% 60%)');
@@ -11058,7 +11059,7 @@ function draw() {
     const THREAT_CELLS = 25;
     let drawn = 0;
 
-    for (const p of lastState.players) {
+    for (const p of clientState.lastState.players) {
       if (!p.a || p.n === you) continue;
       const dx = p.x + 0.5 - hx;
       const dy = p.y + 0.5 - hy;
