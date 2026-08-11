@@ -6,6 +6,7 @@ import { createNetModule } from './client_net.js';
 import { BOT_NAMES_EN, BOT_NAMES_RU, EN, I18N, RU } from './client_i18n.js';
 import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
 import { filterAndSortRooms } from './client_rooms.js';
+import { renderRoomsList, renderRoomsEmpty, updateRoomsStats } from './client_rooms_ui.js';
 import { PLAYER_RECORD_SIZES, pickPlayerRecordSize } from './client_protocol.js';
 import { trailVisualState } from './client_trail_style.js';
 import { DEATH_REASON, deathReasonSuffix } from './client_death.js';
@@ -4651,247 +4652,45 @@ leaveBtn?.addEventListener('click', () => {
   showMenuOverlay();
 });
 
-function renderRoomsList(rooms, emptyMessage) {
-  if (!roomsListEl) return;
-  roomsListEl.textContent = '';
-  if (!Array.isArray(rooms) || rooms.length === 0) {
-    roomsListEl.textContent = emptyMessage || t('rooms.empty');
-    return;
-  }
-
-  const wrap = document.createElement('div');
-  wrap.setAttribute('role', 'listbox');
-  wrap.setAttribute('aria-label', t('rooms.list_aria'));
-  for (const r of rooms) {
-    const row = document.createElement('div');
-    const rid = r?.id;
-    const titleText = String(r?.title || '').trim();
-    const humans = Number(r?.humans) || 0;
-    const limit = Number(r?.limit) || 0;
-    const names = Array.isArray(r?.names) ? r.names : [];
-    const nameCount = Number(r?.nameCount) || names.length;
-    const namesTruncated = !!r?.namesTruncated;
-
-    const title = document.createElement('div');
-    title.className = 'roomRowTitle';
-    if (titleText) title.textContent = `${titleText} (#${rid})`;
-    else title.textContent = `${t('rooms.room')} ${rid}`;
-
-    const meta = document.createElement('div');
-    meta.className = 'roomRowMeta';
-    if (humans === 0) {
-      meta.classList.add('isEmpty');
-      const countSpan = document.createElement('span');
-      countSpan.textContent = `${humans}/${limit}`;
-      const badge = document.createElement('span');
-      badge.className = 'roomEmptyBadge';
-      badge.textContent = t('rooms.badge_empty');
-      meta.appendChild(countSpan);
-      meta.appendChild(badge);
-    } else {
-      meta.textContent = `${humans}/${limit}`;
-    }
-
-    const list = document.createElement('div');
-    list.className = 'roomRowSub';
-    const hidden = Math.max(0, nameCount - names.length);
-    const suffix = (namesTruncated || hidden > 0) && hidden > 0 ? ` (+${hidden})` : '';
-    list.textContent = (names.length ? names.join(', ') : '—') + suffix;
-
-    const join = document.createElement('button');
-    join.className = 'btnGhost roomRowJoin';
-    join.type = 'button';
-    join.textContent = t('rooms.join');
-    join.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      attemptJoinRoom(rid);
-    });
-
-    row.classList.add('roomRow');
-    row.dataset.rid = String(rid);
-    row.setAttribute('role', 'option');
-    if (selectedRoomId != null && Number(rid) === Number(selectedRoomId)) {
-      row.classList.add('selected');
-      row.setAttribute('aria-selected', 'true');
-    } else {
-      row.setAttribute('aria-selected', 'false');
-    }
-    row.tabIndex = 0;
-
-    const applySelection = (target) => {
+function renderRoomsListLocal(rooms, emptyMessage) {
+  renderRoomsList(roomsListEl, rooms, {
+    t,
+    selectedRoomId,
+    emptyMessage,
+    onSelect: (rid) => {
       selectedRoomId = rid;
       if (joinRoomBtn) joinRoomBtn.disabled = selectedRoomId == null;
-      const parent = target?.parentElement;
-      if (parent) {
-        for (const el of parent.children) {
-          try {
-            el.classList.remove('selected');
-            el.setAttribute('aria-selected', 'false');
-          } catch {}
-        }
-      }
-      try {
-        target.classList.add('selected');
-        target.setAttribute('aria-selected', 'true');
-      } catch {}
-    };
-
-    row.addEventListener('click', () => {
-      applySelection(row);
-      updateRoomsStats(lastRooms);
-    });
-    row.addEventListener('dblclick', () => {
-      applySelection(row);
-      attemptJoinRoom(rid);
-    });
-    row.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
-        e.preventDefault();
-        applySelection(row);
-        return;
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        applySelection(row);
-        attemptJoinRoom(rid);
-        return;
-      }
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        const parent = row.parentElement;
-        if (!parent) return;
-        const items = Array.from(parent.children);
-        const idx = items.indexOf(row);
-        const next = e.key === 'ArrowDown' ? items[idx + 1] : items[idx - 1];
-        const nextRid = next?.dataset?.rid;
-        if (!next || nextRid == null) return;
-        try {
-          next.focus();
-        } catch {}
-        selectedRoomId = Number(nextRid);
-        if (joinRoomBtn) joinRoomBtn.disabled = selectedRoomId == null;
-        for (const el of items) {
-          try {
-            el.classList.remove('selected');
-            el.setAttribute('aria-selected', 'false');
-          } catch {}
-        }
-        try {
-          next.classList.add('selected');
-          next.setAttribute('aria-selected', 'true');
-        } catch {}
-      }
-    });
-
-    const top = document.createElement('div');
-    top.className = 'roomRowTop';
-    const left = document.createElement('div');
-    left.className = 'roomRowLeft';
-    left.appendChild(title);
-    left.appendChild(meta);
-    top.appendChild(left);
-    top.appendChild(join);
-
-    row.appendChild(top);
-    row.appendChild(list);
-    wrap.appendChild(row);
-  }
-  roomsListEl.appendChild(wrap);
+      updateRoomsStatsLocal(lastRooms);
+    },
+    onJoin: (rid) => attemptJoinRoom(rid)
+  });
 }
 
-function renderRoomsEmpty(kind, message) {
-  if (!roomsListEl) return;
-  roomsListEl.textContent = '';
-
-  const wrap = document.createElement('div');
-  wrap.className = 'roomsEmpty';
-
-  const title = document.createElement('div');
-  title.className = 'roomsEmptyTitle';
-
-  const desc = document.createElement('div');
-  desc.className = 'roomsEmptyDesc';
-
-  const actions = document.createElement('div');
-  actions.className = 'roomsEmptyActions';
-
-  const k = String(kind || 'empty');
-  if (k === 'loading') {
-    title.textContent = t('rooms.empty_loading_title');
-    desc.textContent = t('rooms.empty_loading_desc');
-  } else if (k === 'error') {
-    title.textContent = t('rooms.empty_error_title');
-    desc.textContent = String(message || t('rooms.empty_error_desc'));
-    const retry = document.createElement('button');
-    retry.className = 'btnGhost';
-    retry.textContent = t('rooms.retry');
-    retry.addEventListener('click', () => refreshRoomsBtn?.click());
-    const create = document.createElement('button');
-    create.className = 'btnPrimary';
-    create.textContent = t('rooms.create_room');
-    create.addEventListener('click', () => setRoomsCreateOpen(true));
-    actions.appendChild(retry);
-    actions.appendChild(create);
-  } else if (k === 'noMatch') {
-    title.textContent = t('rooms.empty_no_match_title');
-    desc.textContent = t('rooms.empty_no_match_desc');
-    const reset = document.createElement('button');
-    reset.className = 'btnGhost';
-    reset.textContent = t('rooms.reset_search');
-    reset.addEventListener('click', () => {
+function renderRoomsEmptyLocal(kind, message) {
+  renderRoomsEmpty(roomsListEl, kind, message, {
+    t,
+    onRetry: () => refreshRoomsBtn?.click(),
+    onCreateRoom: () => setRoomsCreateOpen(true),
+    onResetSearch: () => {
       if (roomsSearchInput) roomsSearchInput.value = '';
       updateRoomsUi();
       try {
         roomsSearchInput?.focus();
       } catch {}
-    });
-    const create = document.createElement('button');
-    create.className = 'btnPrimary';
-    create.textContent = t('rooms.create_room');
-    create.addEventListener('click', () => {
-      setRoomsCreateOpen(true);
-    });
-    actions.appendChild(reset);
-    actions.appendChild(create);
-  } else {
-    title.textContent = t('rooms.empty_none_title');
-    desc.textContent = t('rooms.empty_none_desc');
-    const create = document.createElement('button');
-    create.className = 'btnPrimary';
-    create.textContent = t('rooms.create_room');
-    create.addEventListener('click', () => {
-      setRoomsCreateOpen(true);
-    });
-    actions.appendChild(create);
-  }
-
-  wrap.appendChild(title);
-  wrap.appendChild(desc);
-  if (actions.childNodes.length) wrap.appendChild(actions);
-  roomsListEl.appendChild(wrap);
+    }
+  });
 }
 
-function updateRoomsStats(rawRooms) {
-  const rooms = Array.isArray(rawRooms) ? rawRooms : [];
-  const totalHumans = rooms.reduce((acc, r) => acc + (Number(r?.humans) || 0), 0);
-
-  // Счётчик онлайна в шапке меню: самая ценная для конверсии цифра, раньше она
-  // была спрятана в служебную строку внутри свёрнутой панели комнат.
-  try {
-    const onlineEl = document.getElementById('menuOnlineCount');
-    if (onlineEl) onlineEl.textContent = formatNumber(totalHumans);
-    // K7: в поле `humans` сервер считает только людей, поэтому в пустой момент
-    // бейдж честно писал «0 сейчас играют» — при 13 живых ботах на карте это
-    // худшая из возможных первых цифр. Ботов в списке комнат нет, посчитать их
-    // клиент не может, поэтому нулевой бейдж просто прячем.
-    const badgeEl = document.getElementById('menuOnlineBadge');
-    if (badgeEl) badgeEl.classList.toggle('hidden', !(totalHumans > 0));
-  } catch {}
-
-  if (!roomsStatsEl) return;
-  const status = roomsLoading ? ` • ${t('rooms.loading')}` : roomsLoadError ? ` • ${roomsLoadError}` : '';
-  roomsStatsEl.textContent = `${t('rooms.stats_prefix')}: ${formatNumber(rooms.length)} • ${t('rooms.stats_online')}: ${formatNumber(totalHumans)}${wsStatusSuffix()}${status}`;
+function updateRoomsStatsLocal(rawRooms) {
+  updateRoomsStats(
+    rawRooms,
+    {
+      statsEl: roomsStatsEl,
+      onlineEl: document.getElementById('menuOnlineCount'),
+      badgeEl: document.getElementById('menuOnlineBadge')
+    },
+    { t, formatNumber, wsStatusSuffix, loading: roomsLoading, error: roomsLoadError }
+  );
 }
 
 /* Порядок и отбор комнат переехали в client_rooms.js — вместе с тестами.
@@ -4915,27 +4714,27 @@ function updateRoomsUi() {
   if (joinRoomBtn) {
     joinRoomBtn.disabled = selectedRoomId == null;
   }
-  updateRoomsStats(lastRooms);
+  updateRoomsStatsLocal(lastRooms);
   const raw = Array.isArray(lastRooms) ? lastRooms : [];
   const filtered = applyRoomsFilterSort();
 
   if (roomsLoading && raw.length === 0) {
-    renderRoomsEmpty('loading');
+    renderRoomsEmptyLocal('loading');
     return;
   }
   if (roomsLoadError && raw.length === 0) {
-    renderRoomsEmpty('error', roomsLoadError);
+    renderRoomsEmptyLocal('error', roomsLoadError);
     return;
   }
   if (raw.length === 0) {
-    renderRoomsEmpty('empty');
+    renderRoomsEmptyLocal('empty');
     return;
   }
   if (filtered.length === 0) {
-    renderRoomsEmpty('noMatch');
+    renderRoomsEmptyLocal('noMatch');
     return;
   }
-  renderRoomsList(filtered);
+  renderRoomsListLocal(filtered);
 }
 
 playBtn?.addEventListener('click', () => {
