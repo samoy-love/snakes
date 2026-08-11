@@ -2237,6 +2237,18 @@ let gridFillAt = null;
 const RECLAIM_WINDOW_MS = 15000;
 let coolSeenAt = null;
 
+/* Окно реклейма, как его назвал сервер в hello (reclaimTicks). Нужно тексту
+   подсказки на экране смерти: вписанное в словарь число уже один раз пережило
+   изменение константы на сервере. Пусто — старый сервер, работает встроенное
+   значение. */
+let reclaimTicksFromServer = 0;
+
+function reclaimWindowSec() {
+  const ticks = Number(reclaimTicksFromServer) || 0;
+  const ms = ticks > 0 ? ticks * (Number(tickMs) || 100) : RECLAIM_WINDOW_MS;
+  return Math.round(ms / 1000);
+}
+
 // Бывший владелец -> момент (performance.now), когда его остывающая земля
 // исчезнет окончательно. Приходит событием EventCoolBatch (21).
 const coolDeadlineByOwner = new Map();
@@ -3486,6 +3498,10 @@ net = createNetModule({
       if (d?.cosmeticsPrices && typeof d.cosmeticsPrices === 'object') {
         cosmeticsPrices = d.cosmeticsPrices;
       }
+      // F5: окно реклейма словами сервера, см. reclaimWindowSec().
+      if (Number.isFinite(Number(d?.reclaimTicks)) && Number(d.reclaimTicks) > 0) {
+        reclaimTicksFromServer = Number(d.reclaimTicks);
+      }
       // Таблица титулов с сервера: страховка на случай, когда серверный набор
       // шире клиентского — тогда имя берётся оттуда, а не рисуется пустым.
       if (Array.isArray(d?.titles)) {
@@ -3699,7 +3715,11 @@ function renderDeathReason() {
     const reasonText = deathReasonText(lastDeathInfo);
     const hintText = deathsSeen < 3 ? deathReasonHint(lastDeathInfo) : '';
     // F5 «Реклейм»: механика нигде не объяснена, показываем её на первой смерти.
-    const reclaimText = deathsSeen < 1 ? t('reclaim.hint') : '';
+    // Секунды подставляются из reclaimTicks, пришедшего в hello: раньше «20»
+    // было вписано в саму строку словаря и пережило G22, где окно урезали до
+    // 15 секунд. Единственный раз, когда игрок читает эту подсказку, она врала
+    // на треть — и врала в ту сторону, которая стоит ему земли.
+    const reclaimText = deathsSeen < 1 ? tfmt('reclaim.hint', { sec: reclaimWindowSec() }) : '';
     try {
       const frag = document.createDocumentFragment();
       if (reasonText) {

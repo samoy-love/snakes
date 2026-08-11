@@ -355,7 +355,7 @@ export const I18N = {
     'onb.shop_title': 'Магазин открыт',
     'onb.shop_desc': 'Копи ✨ Стиль и меняй его на внешний вид змейки.',
 
-    'reclaim.hint': 'Твоя земля остывает 20 секунд — успей вернуться и забрать её обратно.',
+    'reclaim.hint': 'Твоя земля остывает {sec} секунд — успей вернуться и забрать её обратно.',
     'reclaim.toast': 'Земля возвращена',
     'reclaim.toast_desc': 'Ты успел вернуться до конца остывания.',
 
@@ -757,7 +757,7 @@ export const I18N = {
     'onb.shop_title': 'Shop unlocked',
     'onb.shop_desc': 'Bank ✨ Style and spend it on the look of your snake.',
 
-    'reclaim.hint': 'Your land stays warm for 20 seconds — get back in time and take it back.',
+    'reclaim.hint': 'Your land stays warm for {sec} seconds — get back in time and take it back.',
     'reclaim.toast': 'Land reclaimed',
     'reclaim.toast_desc': 'You made it back before the land cooled down.',
 
