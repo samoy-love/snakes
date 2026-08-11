@@ -235,12 +235,30 @@ test('client.js: размер записи игрока в ROI совпадае�
 });
 
 test('client.js: разбор чанков миникарты', () => {
-  const start = src.indexOf('if (msgType === 4) {');
-  assert.notEqual(start, -1, 'в client.js не найден разбор чанков миникарты');
-  const block = src.slice(start, src.indexOf('if (msgType === 5) {', start));
+  // Разбор чанков живёт в handleMinimapMessage() (public/client_ws_handlers.js),
+  // client.js лишь вызывает её на месте своей ветки msgType === 4.
+  const fnStart = src.indexOf('function handleMinimapMessage(');
+  assert.notEqual(fnStart, -1, 'не найден разбор чанков миникарты (handleMinimapMessage)');
+  let depth = 0;
+  let bodyStart = -1;
+  let block = null;
+  for (let i = fnStart; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === '{') {
+      if (depth === 0) bodyStart = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        block = src.slice(bodyStart, i + 1);
+        break;
+      }
+    }
+  }
+  assert.ok(block, 'не нашли конец handleMinimapMessage()');
 
   // Заголовок: tick(4) + cw(1) + ch(1) + count(2) + flags(1); байт типа уже снят.
-  const head = block.match(/if \(o \+ ([\d\s+*]+) > bl\) return;/);
+  const head = block.match(/if \(o \+ ([\d\s+*]+) > bl\) return null;/);
   assert.ok(head, 'нет охранной проверки заголовка миникарты');
   assert.equal(
     evalArith(head[1], 'заголовок миникарты') + 4,

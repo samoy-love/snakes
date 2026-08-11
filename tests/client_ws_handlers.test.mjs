@@ -49,3 +49,17 @@ test('handlePlayersMessage() не читает идентификаторы, к�
     `handlePlayersMessage() читает необъявленные идентификаторы: ${unknown.join(', ')}`
   );
 });
+
+test('handleMinimapMessage() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_ws_handlers.js', () => {
+  const masked = maskNonCode(CLIENT_WS_HANDLERS_JS);
+  const body = extractFunctionBody(masked, 'handleMinimapMessage');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `handleMinimapMessage() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});

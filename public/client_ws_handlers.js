@@ -115,3 +115,67 @@ export function handlePlayersMessage(dv, offset, ctx) {
   onState({ full: false, tick, t: Date.now(), players, dg, dt, roi: { rx, ry, rw, rh } });
   return o;
 }
+
+// msgType === 4: minimap chunks (tick, cw, ch, count, flags, chunks...).
+// ctx — явные зависимости, которые тело читало через замыкание client.js:
+//   W, N                                       — размеры минимапы
+//   minimapGridOwner                           — Uint16Array владельцев клеток
+//   minimapImage, you, colors, minimapOwnerRgbCache,
+//   gridCellOwner, gridCellIsCooling           — данные для setMinimapPixel
+//   setMinimapPixel                            — client_minimap.js
+// Возвращает null, если буфера не хватило (диспетчер должен прервать разбор
+// без побочных эффектов), иначе { offset, hadChunkUpdate: true }.
+export function handleMinimapMessage(dv, offset, ctx) {
+  const { W, N, minimapGridOwner, minimapImage, you, colors, minimapOwnerRgbCache, gridCellOwner, gridCellIsCooling, setMinimapPixel } = ctx;
+  const bl = dv.byteLength;
+  let o = offset;
+
+  if (o + 4 + 1 + 1 + 2 + 1 > bl) return null;
+  o += 4;
+  const cw = dv.getUint8(o);
+  o += 1;
+  const ch = dv.getUint8(o);
+  o += 1;
+  if (!cw || !ch) return null;
+  const count = dv.getUint16(o, true);
+  o += 2;
+  const flags = dv.getUint8(o);
+  o += 1;
+  const hasTrail = (flags & 1) === 1;
+  const chunkCells = cw * ch;
+  for (let k = 0; k < count; k++) {
+    const bytesChunk = 2 + chunkCells * 2 + (hasTrail ? chunkCells * 2 : 0);
+    if (o + bytesChunk > bl) return null;
+    const cx = dv.getUint8(o);
+    o += 1;
+    const cy = dv.getUint8(o);
+    o += 1;
+    const x0 = cx * cw;
+    const y0 = cy * ch;
+    for (let n = 0; n < chunkCells; n++) {
+      const v = dv.getUint16(o, true);
+      o += 2;
+      const xx = n % cw;
+      const yy = (n / cw) | 0;
+      const i = (y0 + yy) * W + (x0 + xx);
+      if (i >= 0 && i < N && minimapGridOwner) minimapGridOwner[i] = v;
+    }
+    if (hasTrail) {
+      for (let n = 0; n < chunkCells; n++) {
+        o += 2;
+      }
+    }
+
+    // update pixels for this chunk only
+    for (let yy = 0; yy < ch; yy++) {
+      const row = (y0 + yy) * W + x0;
+      for (let xx = 0; xx < cw; xx++) {
+        const i = row + xx;
+        if (i >= 0 && i < N) {
+          setMinimapPixel(i, { minimapImage, minimapGridOwner, you, colors, minimapOwnerRgbCache, gridCellOwner, gridCellIsCooling });
+        }
+      }
+    }
+  }
+  return { offset: o, hadChunkUpdate: true };
+}

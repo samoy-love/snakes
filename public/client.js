@@ -15,7 +15,7 @@ import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
 import { filterAndSortRooms } from './client_rooms.js';
 import { renderRoomsList, renderRoomsEmpty, updateRoomsStats } from './client_rooms_ui.js';
 import { PLAYER_RECORD_SIZES, pickPlayerRecordSize } from './client_protocol.js';
-import { handlePlayersMessage } from './client_ws_handlers.js';
+import { handlePlayersMessage, handleMinimapMessage } from './client_ws_handlers.js';
 import { trailVisualState } from './client_trail_style.js';
 import { DEATH_REASON, deathReasonSuffix } from './client_death.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
@@ -6026,54 +6026,21 @@ function handleStateBinary(buf) {
 
   // Minimap chunks: type(1)=4, tick(4), cw(1), ch(1), count(2), chunks...
   if (msgType === 4) {
-    if (o + 4 + 1 + 1 + 2 + 1 > bl) return;
-    o += 4;
-    const cw = dv.getUint8(o);
-    o += 1;
-    const ch = dv.getUint8(o);
-    o += 1;
-    if (!cw || !ch) return;
-    const count = dv.getUint16(o, true);
-    o += 2;
-    const flags = dv.getUint8(o);
-    o += 1;
-    const hasTrail = (flags & 1) === 1;
-    const chunkCells = cw * ch;
-    for (let k = 0; k < count; k++) {
-      const bytesChunk = 2 + chunkCells * 2 + (hasTrail ? chunkCells * 2 : 0);
-      if (o + bytesChunk > bl) return;
-      const cx = dv.getUint8(o);
-      o += 1;
-      const cy = dv.getUint8(o);
-      o += 1;
-      const x0 = cx * cw;
-      const y0 = cy * ch;
-      for (let n = 0; n < chunkCells; n++) {
-        const v = dv.getUint16(o, true);
-        o += 2;
-        const xx = n % cw;
-        const yy = (n / cw) | 0;
-        const i = (y0 + yy) * W + (x0 + xx);
-        if (i >= 0 && i < N && minimapGridOwner) minimapGridOwner[i] = v;
-      }
-      if (hasTrail) {
-        for (let n = 0; n < chunkCells; n++) {
-          o += 2;
-        }
-      }
-
-      // update pixels for this chunk only
-      for (let yy = 0; yy < ch; yy++) {
-        const row = (y0 + yy) * W + x0;
-        for (let xx = 0; xx < cw; xx++) {
-          const i = row + xx;
-          if (i >= 0 && i < N) {
-            setMinimapPixel(i, { minimapImage, minimapGridOwner, you, colors, minimapOwnerRgbCache, gridCellOwner, gridCellIsCooling });
-          }
-        }
-      }
-    }
-    minimapHadChunkUpdate = true;
+    const res = handleMinimapMessage(dv, o, {
+      W,
+      N,
+      minimapGridOwner,
+      minimapImage,
+      you,
+      colors,
+      minimapOwnerRgbCache,
+      gridCellOwner,
+      gridCellIsCooling,
+      setMinimapPixel
+    });
+    if (res === null) return;
+    o = res.offset;
+    minimapHadChunkUpdate = res.hadChunkUpdate;
     return;
   }
 
