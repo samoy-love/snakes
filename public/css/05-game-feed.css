@@ -14,10 +14,23 @@
    padding: 7px 9px;
    border-radius: var(--r-md);
    border: 1px solid var(--border2);
+   border-left: 3px solid transparent;
    background: color-mix(in srgb, var(--panel) 85%, rgba(0,0,0,0.15));
    backdrop-filter: blur(10px);
    font-size: var(--fs-meta);
    line-height: 1.35;
+ }
+
+ /* УХ31: отличаем свои события от чужих в ленте EVENTS — левая полоса и лёгкий
+    оттенок фона по цвету игрока (--brand) против нейтрального для чужих
+    (--brand2), чтобы не выдумывать новую пару цветов. */
+ .killLine.killLineMine {
+  border-left-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, color-mix(in srgb, var(--panel) 85%, rgba(0,0,0,0.15)));
+ }
+
+ .killLine.killLineOther {
+  border-left-color: var(--brand2);
  }
 
  #eventToasts {
