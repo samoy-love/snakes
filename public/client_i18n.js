@@ -322,6 +322,9 @@ export const I18N = {
 
     'minimap.title': 'Миникарта',
     'minimap.overlay_aria': 'Увеличенная миникарта',
+    'minimap.legend_me': 'Вы',
+    'minimap.legend_bot': 'Бот',
+    'minimap.legend_player': 'Игрок',
 
     'settings.fx_preset': 'Пресет эффектов',
     'settings.fx_preset_hint': 'Управляет тряской, вспышками, частицами и счётчиками. «Спокойно» включается автоматически при системном запрете анимаций.',
@@ -736,6 +739,9 @@ export const I18N = {
 
     'minimap.title': 'Minimap',
     'minimap.overlay_aria': 'Expanded minimap',
+    'minimap.legend_me': 'You',
+    'minimap.legend_bot': 'Bot',
+    'minimap.legend_player': 'Player',
 
     'settings.fx_preset': 'Effects preset',
     'settings.fx_preset_hint': 'Controls shake, flashes, particles and count-ups. "Calm" turns on automatically when the system asks for reduced motion.',
