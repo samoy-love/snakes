@@ -645,6 +645,9 @@ function setNameCellWithTitle(td, titleId, name, playerNum) {
   td._bsig = bsig;
   const badge = bi ? botArchBadge(playerNum) : null;
   const tn = cosTitleName(tid);
+  // Ник обрезается css text-overflow:ellipsis — title показывает полное имя
+  // (с титулом, если он есть) при наведении мыши.
+  td.title = tn ? `${tn} ${nm}` : nm;
   if (!tn) {
     if (badge) td.replaceChildren(badge, document.createTextNode(nm));
     else td.textContent = nm;
@@ -1122,6 +1125,9 @@ let mutatorUntil = 0;
 let bountyTarget = 0;
 let bountyUntil = 0;
 let powerUps = new Map();
+// C14: экран-координаты нарисованных бонусов — для подсказки эффекта по
+// наведению мыши (у канвас-объектов нет нативного title). Заполняется в draw().
+let powerUpScreenPos = [];
 
 let youKills = 0;
 let youStreak = 0;
@@ -6218,6 +6224,51 @@ function endSwipe(e) {
 canvas.addEventListener('pointerup', endSwipe);
 canvas.addEventListener('pointercancel', endSwipe);
 
+// C14: у бонусов на канвасе нет нативного title — маленькая подсказка рядом
+// с курсором при наведении на иконку подсказывает эффект без лишней вёрстки.
+let powerUpTooltipEl = null;
+function powerUpTooltip() {
+  if (!powerUpTooltipEl) {
+    powerUpTooltipEl = document.createElement('div');
+    powerUpTooltipEl.className = 'powerupTooltip hidden';
+    document.body.appendChild(powerUpTooltipEl);
+  }
+  return powerUpTooltipEl;
+}
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'touch') return;
+  if (!powerUpScreenPos.length) {
+    if (powerUpTooltipEl) powerUpTooltipEl.classList.add('hidden');
+    return;
+  }
+  const mx = e.clientX;
+  const my = e.clientY;
+  let hit = null;
+  let bestD = Infinity;
+  for (const p of powerUpScreenPos) {
+    const dx = mx - p.cx;
+    const dy = my - p.cy;
+    const d = dx * dx + dy * dy;
+    const rr = (p.r * 1.6) * (p.r * 1.6);
+    if (d <= rr && d < bestD) {
+      bestD = d;
+      hit = p;
+    }
+  }
+  const el = powerUpTooltip();
+  if (!hit) {
+    el.classList.add('hidden');
+    return;
+  }
+  el.textContent = powerupLabel(hit.type);
+  el.style.left = `${mx + 14}px`;
+  el.style.top = `${my + 14}px`;
+  el.classList.remove('hidden');
+});
+canvas.addEventListener('pointerleave', () => {
+  if (powerUpTooltipEl) powerUpTooltipEl.classList.add('hidden');
+});
+
 // Zoom disabled: fixed visible area regardless of screen size
 
 /* G-lag: диагностика жалобы «поле рисуется, а движение долго не начинается».
@@ -10602,6 +10653,7 @@ function draw() {
   if (powerUps && powerUps.size) {
     const now = performance.now();
     const nt = approxNowTick();
+    const nextPuScreenPos = [];
     for (const pu of powerUps.values()) {
       const x = Number(pu.x) || 0;
       const y = Number(pu.y) || 0;
@@ -10616,6 +10668,7 @@ function draw() {
 
       const cx = offsetX + (x + 0.5) * cell;
       const cy = offsetY + (y + 0.5) * cell;
+      nextPuScreenPos.push({ cx, cy, r: cell * 0.34, type: pu.type });
 
       let pulse = 1;
       let alpha = 1;
@@ -10727,6 +10780,9 @@ function draw() {
 
       ctx.restore();
     }
+    powerUpScreenPos = nextPuScreenPos;
+  } else if (powerUpScreenPos.length) {
+    powerUpScreenPos = [];
   }
 
   if (fxEnabled && fxParticles.length) {
