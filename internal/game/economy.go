@@ -646,6 +646,7 @@ const (
 	AchvStreak3      = 19
 	AchvStreak7      = 20
 	AchvStreak30     = 21
+	AchvFirstMatch   = 22
 )
 
 // achvRule binds an achievement code to a profile counter and its threshold.
@@ -677,6 +678,7 @@ var achvRules = []achvRule{
 	{AchvStreak3, 3, func(pr *profiles.Profile) uint32 { return pr.StreakDays }},
 	{AchvStreak7, 7, func(pr *profiles.Profile) uint32 { return pr.StreakDays }},
 	{AchvStreak30, 30, func(pr *profiles.Profile) uint32 { return pr.StreakDays }},
+	{AchvFirstMatch, 1, func(pr *profiles.Profile) uint32 { return pr.TotalMatches }},
 }
 
 func ensureProfileCosmeticsLocked(pr *profiles.Profile) {
@@ -715,7 +717,7 @@ func ensureProfileCosmeticsLocked(pr *profiles.Profile) {
 // ---------------------------------------------------------------------------
 
 // TitleMaxID is the highest title id; ids index bits of a uint32 mask.
-const TitleMaxID = 12
+const TitleMaxID = 13
 
 // titleRule binds a title id to the achievement that unlocks it.
 type titleRule struct {
@@ -737,6 +739,7 @@ var titleRules = []titleRule{
 	{10, AchvStyle10000, "Модник"},
 	{11, AchvStreak7, "Завсегдатай"},
 	{12, AchvStreak30, "Преданный"},
+	{13, AchvFirstMatch, "Новичок"},
 }
 
 // titlesPayload renders the "achievement -> title" table for the "hello"
