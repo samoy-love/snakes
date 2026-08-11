@@ -20,7 +20,12 @@ import { dirname, join } from 'node:path';
 import { COSMETICS_CATS } from '../public/client_cos_model.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CLIENT_JS = readFileSync(join(HERE, '../public/client.js'), 'utf8');
+// MINI_COSMETIC_PREVIEW_BY_CAT переехала в client_shop_ui.js вместе с
+// остальной DOM-обвязкой магазина (Фаза 4.2) — ищем таблицы в обоих файлах.
+const CLIENT_JS =
+  readFileSync(join(HERE, '../public/client.js'), 'utf8') +
+  '\n' +
+  readFileSync(join(HERE, '../public/client_shop_ui.js'), 'utf8');
 
 const ALL_TABS = [...COSMETICS_CATS, 'title'];
 

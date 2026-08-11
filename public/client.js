@@ -57,6 +57,16 @@ import {
 import { buyButtonState, equipButtonState, visibleItems } from './client_cos_ui.js';
 import { renderMenuMetaImpl, showMenuOverlayImpl, updateMenuNameUiImpl } from './client_menu_ui.js';
 import {
+  COS_SCENE,
+  cosmeticsSelectItemImpl,
+  drawCosmeticsScene,
+  drawMiniCosmeticPreview as drawMiniCosmeticPreviewImpl,
+  hideCosmeticsOverlayImpl,
+  scheduleCosmeticsPreviewAnimImpl,
+  showCosmeticsOverlayImpl,
+  syncCosmeticsUiImpl
+} from './client_shop_ui.js';
+import {
   approxTickNow,
   formatClock,
   formatGroupedCount,
@@ -457,88 +467,9 @@ function playerTitleHtml(titleId) {
   return nm ? `<span class="playerTitle">${escapeHtml(nm)}</span>` : '';
 }
 
-// Одна функция на категорию, вместо цепочки if (cat === ...). Ключи —
-// COSMETICS_TABS (проверено tests/client_cosmetics_cats_usage.test.mjs):
-// забытая категория провалит тест, а не молча останется пустой иконкой.
-const MINI_COSMETIC_PREVIEW_BY_CAT = {
-  frame(c, { W, id }) {
-    drawFrameRow(c, 2, 8, W - 4, 13, id, 1, '', '', false);
-    drawFrameRow(c, 2, 22, W - 4, 14, id, 2, '', '', true);
-  },
-  // Иконка проигрывает тот же цикл, что и игра, только короче.
-  capturefx(c, { cx, cy, base, id, now }) {
-    const p = ((now % 1400) / 1400);
-    c.save();
-    c.translate(0, 0);
-    drawCaptureFx(c, cx, cy, 13, base, id, p);
-    c.restore();
-  },
-  // Квадратные плитки — ровно как след в игре (раньше рисовалась цепочка кружков).
-  // cell 10, а не 13: с 13 голова оказывалась в x≈47 при ширине канваса 44
-  // и обрезалась правым краем.
-  seg(c, { cy, base, id, now }) {
-    const cell = 10;
-    for (let i = 0; i < 3; i++) {
-      drawSegTile(c, 2 + i * cell, cy - cell / 2, cell, base, id, i, 0.95, now);
-    }
-    drawHead(c, 2 + 3 * cell + cell * 0.55, cy, cell, base, 0, 1, 0, now);
-  },
-  nameplate(c, { cx, cy, base, id, now }) {
-    drawNamePlate(c, 'YOU', cx, cy + 9, base, id, 0.98, 10, now);
-  },
-  head(c, { cx, cy, base, id, now }) {
-    drawHead(c, cx - 3, cy, 34, base, id, 1, 0, now);
-  },
-  // 2×2 клетки территории — тот же узор, что и на поле.
-  terr(c, { W, H, base, id, now }) {
-    const cell = 20;
-    const ox = (W - cell * 2) / 2;
-    const oy = (H - cell * 2) / 2;
-    for (let gy = 0; gy < 2; gy++) {
-      for (let gx = 0; gx < 2; gx++) {
-        drawTerrTile(c, ox + gx * cell, oy + gy * cell, cell, base, id, gx, gy, 0.72, now);
-      }
-    }
-    if (cosClampId(id) === 5) {
-      drawTerrSeam(c, ox, oy, cell * 2, base, 15, 0.9, true);
-    }
-  },
-  // Иконка статична (перерисовывается только при пересборке списка), поэтому
-  // берём фазу середины эффекта — на случайной фазе он был бы уже погасшим.
-  death(c, { cx, cy, base, id }) {
-    drawDeathFx(c, cx, cy, 11, base, id, 0.42);
-  },
-  title(c, { cx, cy, id }) {
-    c.save();
-    c.font = `700 11px ${COS_FONT}`;
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillStyle = 'rgba(255,255,255,0.9)';
-    c.fillText(id === 0 ? '—' : '«»', cx, cy);
-    c.restore();
-  }
-};
-
+/* Мини-превью в карточке списка — DOM-обвязка магазина в client_shop_ui.js. */
 function drawMiniCosmeticPreview(canvasEl, cat, id) {
-  if (!canvasEl) return;
-  const W = 44;
-  const H = 44;
-  const c = cosPrepCanvas(canvasEl, W, H);
-  if (!c) return;
-  c.fillStyle = 'rgba(0,0,0,0.26)';
-  c.fillRect(0, 0, W, H);
-
-  const draw = MINI_COSMETIC_PREVIEW_BY_CAT[cat];
-  if (!draw) return;
-  draw(c, {
-    W,
-    H,
-    cx: W / 2,
-    cy: H / 2,
-    base: boostHsl(colors.get(you) || 'hsl(210 20% 60%)'),
-    now: performance.now(),
-    id
-  });
+  drawMiniCosmeticPreviewImpl(canvasEl, cat, id, shopUiDeps());
 }
 
 function wsSend(type, data) {
@@ -5915,67 +5846,17 @@ function cosmeticsOpIsPending(cat, id) {
   return pendingCosmeticsOp.cat === cat && Number(pendingCosmeticsOp.id) === Number(id);
 }
 
+/* Показ/скрытие/анимация оверлея — DOM-обвязка магазина в client_shop_ui.js. */
 function showCosmeticsOverlay() {
-  if (!cosmeticsOverlay) return;
-  if (!cosmeticsLoaded) {
-    cosmeticsEnsureLocalReady();
-  }
-  cosmeticsOpen = true;
-  cosmeticsOverlay.classList.remove('hidden');
-  overlayManager.open('cosmetics');
-  cosmeticsOpClear();
-  /* C13: открываем превью на том предмете, который реально надет.
-     Титулы — не покупаемая категория, и раньше их выбор проваливался в
-     ветку по умолчанию цепочки if и указывал на id надетой РАМКИ. Теперь
-     неизвестная категория даёт 0, но у титулов есть своё «надетое», и его
-     надо взять явно — ровно так же, как это делает переключение вкладок. */
-  const eq0 = cosmeticsCat === 'title' ? youTitleId : cosmeticsEqForCat(cosmeticsCat);
-  cosmeticsSelId = Number.isFinite(Number(eq0)) ? Number(eq0) : 0;
-  setCosmeticsStatus('', '');
-  if (!wsIsConnected()) setCosmeticsStatus(() => t('cosmetics.no_connection'), 'info');
-  else if (cosmeticsSource !== 'server') setCosmeticsStatus(() => t('cosmetics.unconfirmed_hint'), 'info');
-  syncOverlayUiState();
-  syncCosmeticsUi();
-  overlayManager.focusDefault('cosmetics');
+  showCosmeticsOverlayImpl(shopUiDeps());
 }
 
 function hideCosmeticsOverlay() {
-  // Возврат в меню: панель «Ваш облик» снова видна — будим её отрисовку.
-  // showMenuOverlay() здесь не вызывается, поэтому сама она бы не ожила.
-  try {
-    setTimeout(() => scheduleMenuSkinPreview(), 0);
-  } catch {}
-  if (!cosmeticsOverlay) return;
-  cosmeticsOpen = false;
-  cosmeticsOverlay.classList.add('hidden');
-  overlayManager.close('cosmetics');
-  cosmeticsOpClear();
-  setCosmeticsStatus('', '');
-  syncOverlayUiState();
-  if (cosmeticsPreviewRaf) {
-    try {
-      cancelAnimationFrame(cosmeticsPreviewRaf);
-    } catch {}
-    cosmeticsPreviewRaf = 0;
-  }
+  hideCosmeticsOverlayImpl(shopUiDeps());
 }
 
 function scheduleCosmeticsPreviewAnim() {
-  if (cosmeticsPreviewRaf) return;
-  const tick = () => {
-    cosmeticsPreviewRaf = 0;
-    if (!cosmeticsOverlay || cosmeticsOverlay.classList.contains('hidden')) return;
-    const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-    if (!reduceMotion) {
-      const now = performance.now();
-      if (!cosmeticsPreviewLastAt || now - cosmeticsPreviewLastAt > 33) {
-        cosmeticsPreviewLastAt = now;
-        renderCosmeticsPreview();
-      }
-      cosmeticsPreviewRaf = requestAnimationFrame(tick);
-    }
-  };
-  cosmeticsPreviewRaf = requestAnimationFrame(tick);
+  scheduleCosmeticsPreviewAnimImpl(shopUiDeps());
 }
 
 /* COSMETICS_MAX_ID, COSMETICS_CATS, запасной прайс, bitHas и лестница тиров
@@ -6398,693 +6279,6 @@ function cosmeticsEquipLocal(cat, id) {
   syncCosmeticsUi();
 }
 
-// Заглушка магазина на время локальной загрузки: три полосы в блоке
-// «как заработать», пять пустых вкладок, пять пустых карточек предмета.
-// Числа заглушек (5 вкладок, 5 карточек) декоративные и не обязаны совпадать
-// с реальным числом категорий/предметов — это скелетон, а не превью данных.
-function renderCosmeticsSkeleton() {
-  try {
-    if (cosmeticsEarnStyleEl) {
-      const wrap = document.createElement('div');
-      wrap.style.display = 'grid';
-      wrap.style.gap = '8px';
-      const l1 = document.createElement('div');
-      l1.className = 'skeletonLine';
-      l1.style.width = '62%';
-      const l2 = document.createElement('div');
-      l2.className = 'skeletonLine';
-      l2.style.width = '92%';
-      const l3 = document.createElement('div');
-      l3.className = 'skeletonLine';
-      l3.style.width = '86%';
-      wrap.appendChild(l1);
-      wrap.appendChild(l2);
-      wrap.appendChild(l3);
-      cosmeticsEarnStyleEl.replaceChildren(wrap);
-    }
-
-    if (cosmeticsTabsEl) {
-      const btns = Array.from({ length: 5 }).map(() => {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'cosmeticsTabBtn';
-        b.disabled = true;
-        const sk = document.createElement('div');
-        sk.className = 'skeletonLine';
-        sk.style.width = '86px';
-        sk.style.height = '10px';
-        b.appendChild(sk);
-        return b;
-      });
-      cosmeticsTabsEl.replaceChildren(...btns);
-    }
-
-    if (cosmeticsItemsEl) {
-      const items = Array.from({ length: 5 }).map(() => {
-        const card = document.createElement('div');
-        card.className = 'cosmeticsItem';
-
-        const prev = document.createElement('div');
-        prev.className = 'cosmeticsItemPreview skeletonBlock';
-
-        const left = document.createElement('div');
-        left.className = 'cosmeticsItemLeft';
-        const t1 = document.createElement('div');
-        t1.className = 'skeletonLine';
-        t1.style.width = '220px';
-        const t2 = document.createElement('div');
-        t2.className = 'skeletonLine';
-        t2.style.width = '140px';
-        left.appendChild(t1);
-        left.appendChild(t2);
-
-        const right = document.createElement('div');
-        right.className = 'cosmeticsItemRight';
-        const b = document.createElement('div');
-        b.className = 'skeletonBlock';
-        b.style.width = '92px';
-        b.style.height = '34px';
-        b.style.borderRadius = '12px';
-        right.appendChild(b);
-
-        card.appendChild(left);
-        card.appendChild(right);
-        card.insertBefore(prev, left);
-        return card;
-      });
-      cosmeticsItemsEl.replaceChildren(...items);
-    }
-
-    if (cosmeticsHintEl) cosmeticsHintEl.textContent = '';
-  } catch {}
-}
-
-function syncCosmeticsUi() {
-  if (!cosmeticsOverlay || cosmeticsOverlay.classList.contains('hidden')) return;
-
-  if (!cosmeticsLoaded) {
-    cosmeticsEnsureLocalReady();
-  }
-
-  if (!cosmeticsLoaded) {
-    if (cosmeticsStyleEl) cosmeticsStyleEl.textContent = '—';
-    renderCosmeticsSkeleton();
-    return;
-  }
-
-  if (cosmeticsStyleEl) cosmeticsStyleEl.textContent = String(Math.floor(youStyle || 0));
-
-  if (cosmeticsFilterAllBtn) cosmeticsFilterAllBtn.classList.toggle('isActive', cosmeticsFilter === 'all');
-  if (cosmeticsFilterOwnedBtn) cosmeticsFilterOwnedBtn.classList.toggle('isActive', cosmeticsFilter === 'owned');
-  if (cosmeticsFilterAvailableBtn) cosmeticsFilterAvailableBtn.classList.toggle('isActive', cosmeticsFilter === 'available');
-
-  if (cosmeticsEarnStyleEl) {
-    if (!cosmeticsEarnExpanded) {
-      const hint = `<div>${escapeHtml(t('cosmetics.style_hint'))}</div>`;
-      const off = cosmeticsSource === 'cache' ? `<div style="margin-top:6px">${escapeHtml(t('cosmetics.offline_hint'))}</div>` : '';
-      setSafeHtml(cosmeticsEarnStyleEl, hint + off);
-    } else {
-      setSafeHtml(
-        cosmeticsEarnStyleEl,
-        `
-        <div><b>${escapeHtml(t('cosmetics.earn_title'))}</b></div>
-        <div class="row"><span class="k">${escapeHtml(t('cosmetics.earn_kills'))}</span><span>${escapeHtml(t('cosmetics.earn_kills_desc'))}</span></div>
-        <div class="row"><span class="k">${escapeHtml(t('cosmetics.earn_revenge'))}</span><span>${escapeHtml(t('cosmetics.earn_revenge_desc'))}</span></div>
-        <div class="row"><span class="k">${escapeHtml(t('cosmetics.earn_contracts'))}</span><span>${escapeHtml(t('cosmetics.earn_contracts_desc'))}</span></div>
-        <div class="row"><span class="k">${escapeHtml(t('cosmetics.earn_dailies'))}</span><span>${escapeHtml(t('cosmetics.earn_dailies_desc'))}</span></div>
-        <div class="row"><span class="k">${escapeHtml(t('cosmetics.earn_bounty'))}</span><span>${escapeHtml(t('cosmetics.earn_bounty_desc'))}</span></div>
-        `
-      );
-    }
-  }
-
-  if (cosmeticsTabsEl) {
-    const btns = COSMETICS_TABS.map((cid) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      // .isTitles — вкладка титулов оформлена золотом: это награда за достижения,
-      // а не товар, и визуально не должна читаться как магазин.
-      b.className = cid === 'title' ? 'cosmeticsTabBtn isTitles' : 'cosmeticsTabBtn';
-      // D11: счётчик владения прямо в табе — «Рамки 2/8».
-      const total = cid === 'title' ? COS_TITLE_MAX : COSMETICS_MAX_ID + 1;
-      const have = cid === 'title' ? cosTitlesUnlockedCount() : cosmeticsOwnedCount(cid);
-      const fullLabel = `${cosmeticsLabel(cid)} ${have}/${total}`;
-      // Полная подпись видна ассистивным технологиям и как тултип — на
-      // экране только иконка категории и счётчик, восемь вкладок в ряд.
-      const icon = document.createElement('span');
-      icon.className = 'cosmeticsTabIcon';
-      icon.setAttribute('aria-hidden', 'true');
-      icon.textContent = COSMETICS_TAB_ICON_BY_CAT[cid] || '❔';
-      const count = document.createElement('span');
-      count.className = 'cosmeticsTabCount';
-      count.setAttribute('aria-hidden', 'true');
-      count.textContent = `${have}/${total}`;
-      b.append(icon, count);
-      b.title = fullLabel;
-      b.setAttribute('aria-label', fullLabel);
-      b.setAttribute('role', 'tab');
-      b.setAttribute('aria-selected', cid === cosmeticsCat ? 'true' : 'false');
-      b.addEventListener('click', () => {
-        cosmeticsCat = cid;
-        cosmeticsSelId = cid === 'title' ? Math.max(0, Number(youTitleId) || 0) : (Number(cosmeticsEqForCat(cid)) || 0);
-        syncCosmeticsUi();
-      });
-      return b;
-    });
-    cosmeticsTabsEl.replaceChildren(...btns);
-    // Вкладок восемь и лента скроллится: активная вкладка после смены категории
-    // может оказаться за краем. scroll-margin для неё уже задан в CSS.
-    if (cosmeticsTabsScrolledCat !== cosmeticsCat) {
-      cosmeticsTabsScrolledCat = cosmeticsCat;
-      try {
-        const active = btns.find((b) => b.getAttribute('aria-selected') === 'true');
-        active?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
-      } catch {}
-    }
-  }
-
-  /* C4: запись «где это видно» стояла НИЖЕ ветки титулов, поэтому на вкладке
-     «Титулы» элемент сохранял описание предыдущей категории — в EN там
-     оставалась русская строка посреди английского магазина. Пишем до ветки,
-     для любой категории, включая титулы.
-     «Где это видно» — свойство КАТЕГОРИИ, а не предмета: показываем один раз
-     под вкладками; пустая строка скрывается стилями через :empty. */
-  try {
-    if (cosmeticsWhereEl) cosmeticsWhereEl.textContent = t(`cosmetics.where_${cosmeticsCat}`) || '';
-  } catch {}
-
-  if (cosmeticsItemsEl && cosmeticsCat === 'title') {
-    renderCosmeticsTitles();
-    renderCosmeticsPreview();
-    scheduleCosmeticsPreviewAnim();
-    return;
-  }
-
-  if (cosmeticsItemsEl) {
-    cosmeticsItemsEl.classList.remove('isTitles');
-    const mask = cosmeticsMaskForCat(cosmeticsCat);
-    const eq = cosmeticsEqForCat(cosmeticsCat);
-    // C9: until the server confirms the inventory, everything we show is provisional.
-    const confirmed = cosmeticsSource === 'server';
-    const online = wsIsConnected();
-    const items = [];
-    const balance = Math.max(0, Math.floor(Number(youStyle) || 0));
-
-    // D11: порядок по цене, а не по id — при поштучных ценах порядок по id
-    // ломает восприятие лестницы редкости.
-    const order = visibleItems(cosmeticsCat, cosmeticsFilter, balance, mask, eq, cosmeticsPrices, COSMETICS_MAX_ID);
-
-    let lastTier = '';
-    for (const entry of order) {
-      const id = entry.id;
-      const price = entry.price;
-      const owned = entry.owned;
-      const equipped = entry.equipped;
-      const missing = entry.missing;
-
-      const variant = cosmeticsVariantName(cosmeticsCat, id);
-      const tier = entry.tier;
-
-      // D11: разделители между группами тиров.
-      if (tier !== lastTier) {
-        lastTier = tier;
-        const sep = document.createElement('div');
-        sep.className = `cosmeticsTierSep ${tierClass(tier)}`;
-        sep.textContent = cosmeticsTierLabel(tier);
-        items.push(sep);
-      }
-
-      const card = document.createElement('div');
-      /* Модификатор тира на самой карточке. Его не было вовсе: класс вешался
-         только на разделитель групп, поэтому вся лестница редкости в CSS была
-         мёртвой — полоса тира, цвет цены, свечение legendary и анимированная
-         рамка mythic не рисовались ни разу, хотя правила для них написаны
-         (style.css, блок D11) и комментарий там это прямо обещает. */
-      card.className = `cosmeticsItem ${tierClass(tier)}` + (cosmeticsSelId === id ? ' isSelected' : '');
-      // K7: выбор предмета раньше пересобирал весь список, и фокус улетал в
-      // <body>. Теперь у карточки есть стабильный id, а выбор только
-      // переключает класс на уже существующих карточках.
-      card.dataset.cosid = String(id);
-      card.classList.toggle('isOwned', owned);
-      card.classList.toggle('isEquipped', owned && equipped);
-      card.classList.toggle('isLocked', !owned && balance < price);
-      card.tabIndex = 0;
-      card.addEventListener('click', () => {
-        cosmeticsSelectItem(id);
-      });
-      // Фокус с клавиатуры равен выбору: Tab по списку сразу меняет превью.
-      card.addEventListener('focus', () => cosmeticsSelectItem(id));
-      card.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          cosmeticsSelectItem(id);
-        }
-      });
-
-      const prev = document.createElement('div');
-      prev.className = 'cosmeticsItemPreview';
-      const cvs = document.createElement('canvas');
-      prev.appendChild(cvs);
-      drawMiniCosmeticPreview(cvs, cosmeticsCat, id);
-
-      const left = document.createElement('div');
-      left.className = 'cosmeticsItemLeft';
-      const titleEl = document.createElement('div');
-      titleEl.className = 'cosmeticsItemTitle';
-      // C11: префикс «Территория:» повторялся на всех восьми названиях внутри
-      // одной вкладки — категория уже написана на самой вкладке.
-      titleEl.textContent = variant;
-
-      /* C11: три узла на карточку создавались и прятались CSS-ом —
-         .tierBadge (редкость уже названа разделителем группы),
-         .cosmeticsItemWhere (то же самое стоит один раз в шапке категории,
-         #cosmeticsWhere) и .cosmeticsItemSub.isBlocked («до покупки N» дублирует
-         ценник и подпись кнопки). Больше их не создаём вовсе. */
-      let sub = null;
-      if (!owned && missing > 0) {
-        // текста нет: он целиком в ценнике и на кнопке
-      } else if (owned && !confirmed) {
-        sub = document.createElement('div');
-        sub.className = 'cosmeticsItemSub isUnconfirmed';
-        sub.textContent = t('cosmetics.item_owned_unconfirmed');
-      } else if (!equipped) {
-        // C11: «Экипировано» стояло и в подписи, и на кнопке — оставляем кнопку.
-        sub = document.createElement('div');
-        sub.className = 'cosmeticsItemSub';
-        sub.textContent = owned ? t('cosmetics.item_owned') : t('cosmetics.item_not_owned');
-      }
-      left.appendChild(titleEl);
-      if (sub) left.appendChild(sub);
-
-      // D11: прогресс-бар накопления на заблокированном товаре.
-      if (!owned && price > 0 && missing > 0) {
-        const bar = document.createElement('div');
-        bar.className = 'cosmeticsItemProgress';
-        const fill = document.createElement('div');
-        fill.className = 'cosmeticsItemProgressFill';
-        fill.style.width = `${Math.max(0, Math.min(100, (balance / price) * 100)).toFixed(1)}%`;
-        bar.appendChild(fill);
-        bar.setAttribute('role', 'progressbar');
-        bar.setAttribute('aria-valuemin', '0');
-        bar.setAttribute('aria-valuemax', String(price));
-        bar.setAttribute('aria-valuenow', String(Math.min(balance, price)));
-        bar.setAttribute('aria-label', `${t('cosmetics.missing_prefix')} ${fmtInt(missing)}`);
-        left.appendChild(bar);
-      }
-
-      const right = document.createElement('div');
-      right.className = 'cosmeticsItemRight';
-      if (!owned) {
-        const pr = document.createElement('div');
-        pr.className = 'cosmeticsPrice';
-        setSafeHtml(pr, cosmeticsFormatCost(price));
-        right.appendChild(pr);
-
-        const cat = cosmeticsCat;
-        const pending = cosmeticsOpIsPending(cat, id);
-        const poor = balance < price;
-
-        /* C2/C9: buying needs a live socket and server-confirmed state.
-           C12: нехватка валюты БОЛЬШЕ не делает кнопку disabled — раньше клик
-           не давал вообще ничего. Кнопка живая, клик объясняет, сколько не
-           хватает, и раскрывает блок «Как заработать». */
-        const state = buyButtonState({ pending, online, confirmed, pendingOtherOp: pendingCosmeticsOp, poor });
-
-        const buy = document.createElement('button');
-        buy.type = 'button';
-        buy.disabled = state.disabled;
-        buy.className = state.className;
-        if (state.poor) buy.classList.add('isPoor');
-        // C14: show exactly how much is missing.
-        buy.textContent = state.poor ? `${t('cosmetics.not_enough_short')} ${fmtInt(missing)} ✨` : t('cosmetics.buy');
-        if (state.pending) buy.classList.add('isLoading');
-        if (state.titleKind === 'no_connection') buy.title = t('cosmetics.no_connection');
-        else if (state.titleKind === 'unconfirmed_hint') buy.title = t('cosmetics.unconfirmed_hint');
-        else if (state.titleKind === 'need_more') buy.title = `${t('cosmetics.need_more')} ${fmtInt(missing)} ✨`;
-
-        buy.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (pendingCosmeticsOp) return;
-          if (poor) {
-            // C12: сообщение + подсказка, где взять, + раскрытие «Как заработать».
-            setCosmeticsStatus(
-              () => `${t('cosmetics.need_more')} ${fmtInt(missing)} ✨ — ${t('cosmetics.need_more_hint')}`,
-              'error'
-            );
-            if (!cosmeticsEarnExpanded) cosmeticsEarnExpanded = true;
-            syncCosmeticsUi();
-            try {
-              cosmeticsEarnStyleEl?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
-            } catch {}
-            return;
-          }
-          if (!cosmeticsServerReady()) {
-            setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'error');
-            cosmeticsBuyLocal(cat, id);
-            return;
-          }
-          // C4: lock the button until the server answers (or we time out).
-          buy.disabled = true;
-          buy.classList.add('isLoading');
-          cosmeticsOpBegin(cat, id);
-          setCosmeticsStatus(() => t('cosmetics.op_pending'), 'info');
-          // C5: a silently dropped send must not leave a dead spinner.
-          if (!wsSend('cosmeticsBuy', { cat, id })) {
-            cosmeticsOpClear();
-            setCosmeticsStatus(() => t('cosmetics.no_connection'), 'error');
-            syncCosmeticsUi();
-          }
-        });
-        right.appendChild(buy);
-      } else {
-        const eqBtn = document.createElement('button');
-        eqBtn.type = 'button';
-        const cat = cosmeticsCat;
-        const doEquip = (wantId) => {
-          if (!cosmeticsServerReady()) {
-            cosmeticsEquipLocal(cat, wantId);
-            setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'info');
-            return;
-          }
-          // C5: react to a dropped send instead of pretending it worked.
-          if (!wsSend('cosmeticsEquip', { cat, id: wantId })) {
-            cosmeticsEquipLocal(cat, wantId);
-            setCosmeticsStatus(() => t('cosmetics.no_connection'), 'error');
-          } else {
-            cosmeticsSetDesiredEq(cat, wantId);
-          }
-        };
-
-        const eqState = equipButtonState({ equipped, id });
-        eqBtn.className = eqState.className;
-        eqBtn.disabled = eqState.disabled;
-        if (eqState.kind === 'remove') {
-          eqBtn.textContent = t('cosmetics.remove');
-          eqBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            doEquip(0);
-          });
-        } else {
-          eqBtn.textContent = eqState.kind === 'equipped' ? t('cosmetics.item_equipped') : t('cosmetics.wear');
-          eqBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            doEquip(id);
-          });
-        }
-        right.appendChild(eqBtn);
-      }
-
-      card.appendChild(left);
-      card.appendChild(right);
-      card.insertBefore(prev, left);
-      items.push(card);
-    }
-
-    if (!items.length) {
-      setSafeHtml(
-        cosmeticsItemsEl,
-        `
-        <div class="roomsEmpty">
-          <div class="roomsEmptyTitle">${escapeHtml(t('cosmetics.empty_title'))}</div>
-          <div class="roomsEmptyDesc">${escapeHtml(t('cosmetics.empty_desc'))}</div>
-        </div>
-        `
-      );
-    } else {
-      cosmeticsItemsEl.replaceChildren(...items);
-    }
-  }
-
-  renderCosmeticsPreview();
-  scheduleCosmeticsPreviewAnim();
-}
-
-/* --------------------------------------------------------------------------
-   Большое превью магазина. Ни одной собственной функции отрисовки предметов:
-   всё рисуют drawSegTile / drawHead / drawNamePlate / drawCaptureFx / drawFrameRow,
-   то есть ровно то же, что и игровой цикл.
-   -------------------------------------------------------------------------- */
-
-// Какой id показывать: наведённая карточка важнее выбранной, при уходе курсора
-// превью возвращается к выбранному варианту.
-/* K7: сменить выделение без пересборки списка. Возврат к полному
-   syncCosmeticsUi() — только если карточек с data-cosid в DOM нет (список ещё
-   не строился или отрисован пустой заглушкой). */
-function cosmeticsSelectItem(id) {
-  const next = Number(id) || 0;
-  if (cosmeticsSelId === next) {
-    renderCosmeticsPreview();
-    return;
-  }
-  cosmeticsSelId = next;
-  let patched = false;
-  try {
-    const cards = cosmeticsItemsEl?.querySelectorAll?.('.cosmeticsItem[data-cosid], .titleItem[data-cosid]');
-    if (cards && cards.length) {
-      for (const c of cards) c.classList.toggle('isSelected', Number(c.dataset.cosid) === next);
-      patched = true;
-    }
-  } catch {}
-  if (patched) renderCosmeticsPreview();
-  else syncCosmeticsUi();
-}
-
-function cosmeticsPreviewId() {
-  // У титулов свой потолок id (их 16, а не 8), поэтому клампим по категории.
-  const clamp = cosmeticsCat === 'title'
-    ? (v) => Math.max(0, Math.min(COS_TITLE_MAX, Number(v) || 0))
-    : cosClampId;
-  return clamp(cosmeticsSelId);
-}
-
-/* ==========================================================================
-   ЕДИНАЯ СЦЕНА ПРЕДПРОСМОТРА.
-
-   Было: каждая категория рисовала свою композицию в своём масштабе. У
-   территории зона занимала 62% ширины и 80% высоты — плоский прямоугольник
-   почти во весь кадр, а змейка выдавливалась к самому краю. Игрок видел не
-   «свой облик», а набор фигур. В меню жила третья, ещё одна композиция.
-
-   Стало: одна сцена на всё — кусок игрового поля. Слева своя территория
-   (фон), из неё вправо выезжает змейка нормального размера, над головой
-   плашка с ником. Это буквально то, что игрок видит в матче, и то, чему учит
-   меню: «выйди за свою зону, оставь след». Меняется ровно та деталь, которую
-   игрок сейчас смотрит, остальное берётся из экипированного.
-
-   Масштаб фиксирован относительно кадра, поэтому предмет выглядит одинаково
-   в магазине и в меню. */
-
-/* Пропорции сцены. Территория намеренно НЕ больше половины кадра: она фон,
-   а не главный объект. */
-const COS_SCENE = {
-  pad: 0.07,
-  zoneX: 0.05,
-  zoneY: 0.20,
-  zoneW: 0.46,
-  zoneH: 0.58,
-  cellK: 0.13,
-  cellMin: 14,
-  cellMax: 34,
-  // Панель меню и предпросмотр магазина имеют одинаковую пропорцию, но
-  // разную абсолютную ширину — если считать scell от их собственных fw/fh,
-  // клетки в них получаются разного размера, и одна и та же сцена выглядит
-  // по-разному. Размер клетки — от общего эталона, а не от конкретной
-  // панели, чтобы «меню» и «магазин» рисовали облик в одном масштабе.
-  cellRefMin: 186
-};
-
-function drawCosmeticsScene(ctx2, rect, opts) {
-  const { x: fx, y: fy, w: fw, h: fh } = rect;
-  const {
-    cat = '',
-    label = '',
-    now = 0,
-    reduceMotion = false,
-    highlight = false,
-    ids = {}
-  } = opts || {};
-
-  const baseC = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
-  const scell = Math.max(
-    COS_SCENE.cellMin,
-    Math.min(COS_SCENE.cellMax, Math.round(COS_SCENE.cellRefMin * COS_SCENE.cellK))
-  );
-
-  /* Зона считается ПЕРВОЙ и выравнивается по целому числу клеток: сетка фона
-     рисуется от её origin с тем же шагом, поэтому линии проходят ровно по
-     границам плиток, как на поле. Раньше шаг сетки считался отдельно и
-     не совпадал с клетками — кадр не читался как кусок игры. */
-  const zone = {
-    x: Math.round(fx + fw * COS_SCENE.zoneX),
-    y: Math.round(fy + fh * COS_SCENE.zoneY),
-    w: Math.max(scell * 2, Math.round((fw * COS_SCENE.zoneW) / scell) * scell),
-    h: Math.max(scell * 2, Math.round((fh * COS_SCENE.zoneH) / scell) * scell)
-  };
-
-  drawCosmeticsFieldBackdrop(ctx2, fx, fy, fw, fh, scell, zone.x, zone.y);
-
-  // Сцена не имеет права рисовать за пределами поля: хвост раньше вылезал на
-  // рамку и читался как мусор.
-  ctx2.save();
-  ctx2.beginPath();
-  ctx2.rect(fx, fy, fw, fh);
-  ctx2.clip();
-
-  const plateFont = Math.max(11, Math.round(scell * 0.62));
-  // Голова стоит сразу за кромкой зоны — змейка «только что вышла из дома»,
-  // а хвост ещё внутри. Ровно эта картинка и есть механика игры. Отступ и
-  // ряд — целое число клеток от zone.x/zone.y: это та же сетка, по которой
-  // рисуются фон (drawCosmeticsFieldBackdrop) и территория (drawCosmeticsZone),
-  // дробный отступ раньше уводил голову с растра, и она «плавала» отдельно.
-  const headRow = Math.max(0, Math.floor(zone.h / scell / 2));
-  const headX = Math.round(zone.x + zone.w + scell * 2.5);
-  const headY = Math.round(zone.y + headRow * scell + scell / 2);
-
-  const period = 2400;
-  const p = reduceMotion ? 0.55 : (now % period) / period;
-
-  // --- гибель: змейка едет, потом взрывается ---
-  if (cat === 'death') {
-    drawCosmeticsZone(ctx2, zone, you, 0.55, ids.terr, scell);
-    const dieStart = 0.45;
-    const dieP = p < dieStart ? -1 : Math.min(1, (p - dieStart) / (COS_DEATH_MS / period));
-    if (dieP < 0) {
-      drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, 6, zone);
-      drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
-    } else {
-      drawDeathFx(ctx2, headX, headY, Math.max(16, Math.round(scell * 1.25)), baseC, ids.death, dieP);
-    }
-    ctx2.restore();
-    return { scell, zone, headX, headY };
-  }
-
-  drawCosmeticsZone(ctx2, zone, you, 0.55, ids.terr, scell);
-  drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, cat === 'seg' ? 8 : 6, zone);
-  drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
-
-  /* Захват: вспышка над своей зоной в том же цикле, что и сцена.
-     Фаза считается от фазы сцены, а не от performance.now(): иначе к моменту
-     показа вспышка успевала догореть и покупатель видел пустое поле. */
-  const burstStart = 0.58;
-  const burstP = p < burstStart ? -1 : (p - burstStart) / (650 / period);
-  if (burstP >= 0 && burstP <= 1) {
-    drawCaptureFx(
-      ctx2,
-      zone.x + zone.w * 0.5,
-      zone.y + zone.h * 0.5,
-      Math.max(18, Math.round(scell * 1.35)),
-      baseC,
-      ids.capturefx,
-      burstP
-    );
-  }
-
-  // Пунктир вокруг того, что меняет выбранный предмет.
-  if (highlight) {
-    ctx2.save();
-    ctx2.strokeStyle = 'rgba(46, 230, 160, 0.60)';
-    ctx2.setLineDash([5, 4]);
-    ctx2.lineWidth = 2;
-    if (cat === 'head') {
-      ctx2.beginPath();
-      ctx2.arc(headX, headY, scell * 0.82, 0, Math.PI * 2);
-      ctx2.stroke();
-    } else if (cat === 'nameplate' || cat === 'title') {
-      const ph = Math.round(plateFont * 1.5);
-      ctx2.strokeRect(headX - scell * 2.4, headY - scell * 0.95 - ph - 4, scell * 4.8, ph + 8);
-    } else if (cat === 'seg') {
-      // Раньше бокс был зашит под старую геометрию хвоста (8 тайлов подряд от
-      // headX). Теперь тайлы, ушедшие под территорию, не рисуются вовсе
-      // (см. drawCosmeticsSnake) — обводка обязана останавливаться там же,
-      // где на самом деле кончается видимый хвост, а не залезать на зону.
-      const segRight = headX - scell / 2;
-      const segLeft = Math.max(zone.x + zone.w, segRight - scell * 8);
-      ctx2.strokeRect(segLeft, headY - scell * 0.62, segRight - segLeft, scell * 1.24);
-    } else if (cat === 'terr') {
-      ctx2.strokeRect(zone.x + 1, zone.y + 1, zone.w - 2, zone.h - 2);
-    }
-    ctx2.restore();
-  }
-
-  ctx2.restore();
-  return { scell, zone, headX, headY };
-}
-
-function renderCosmeticsPreview() {
-  if (!cosmeticsPreview) return;
-  const cssW = Math.max(200, Math.round(cosmeticsPreview.clientWidth || 420));
-  const cssH = Math.max(140, Math.round(cosmeticsPreview.clientHeight || 260));
-  const ctx2 = cosPrepCanvas(cosmeticsPreview, cssW, cssH);
-  if (!ctx2) return;
-
-  const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-  const now = reduceMotion ? 0 : performance.now();
-  const selId = cosmeticsPreviewId();
-
-  const setHint = () => {
-    if (!cosmeticsHintEl) return;
-    cosmeticsHintEl.textContent = `${cosmeticsLabel(cosmeticsCat)}: ${cosmeticsVariantName(cosmeticsCat, selId)}`;
-  };
-
-  // Рамка профиля — украшение строки таблицы, а не часть поля: у неё своя сцена.
-  if (cosmeticsCat === 'frame') {
-    drawCosmeticsFramesScene(ctx2, cssW, cssH, selId);
-    setHint();
-    return;
-  }
-
-  const pick = (cat, equipped) => (cosmeticsCat === cat ? selId : equipped);
-  const titleId = pick('title', youTitleId);
-
-  const pad = Math.round(Math.min(cssW, cssH) * COS_SCENE.pad);
-  drawCosmeticsScene(
-    ctx2,
-    { x: pad, y: pad, w: cssW - pad * 2, h: cssH - pad * 2 },
-    {
-      cat: cosmeticsCat,
-      label: `${cosTitlePrefix(titleId)}${t('cosmetics.balance_you')}`,
-      now,
-      reduceMotion,
-      highlight: true,
-      ids: {
-        head: pick('head', youCos.eq.head),
-        seg: pick('seg', youCos.eq.seg),
-        nameplate: pick('nameplate', youCos.eq.nameplate),
-        capturefx: pick('capturefx', youCos.eq.capturefx),
-        terr: pick('terr', youCos.eq.terr),
-        death: pick('death', youCos.eq.death)
-      }
-    }
-  );
-
-  setHint();
-}
-
-function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, headColor, tileCount, zone) {
-  const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
-  const c = headColor || base;
-  const scell = Math.max(14, Math.round(cell));
-  const now = performance.now();
-  const tiles = Math.max(3, Math.min(12, Number(tileCount) || 6));
-  // Хвост кладём строго по той же сетке (шаг scell от headX), что и фон/
-  // территория — раньше стартовая точка была сдвинута на 0.85 клетки, и
-  // тайлы следа не совпадали с растром, из-за чего змейка «плавала».
-  const headLeft = headX - scell / 2;
-  const zoneRight = zone ? zone.x + zone.w : headLeft;
-  for (let i = 0; i < tiles; i++) {
-    const tileLeft = headLeft - (i + 1) * scell;
-    // Тайл целиком лёг на уже занятую территорию — цветом следа его не
-    // красим: след существует только на ещё не захваченной земле, дальше
-    // хвост просто «уходит» под уже нарисованную зону.
-    if (tileLeft + scell <= zoneRight) continue;
-    drawSegTile(ctx2, tileLeft, headY - scell / 2, scell, base, segId, i + 17, 0.88, now);
-  }
-  drawHead(ctx2, headX, headY, scell, c, headId, 1, 0, now);
-}
-
 /* C3 — #menuSkinPreview -----------------------------------------------------
    Панель «Ваш облик» в меню висела пустым канвасом: имя элемента не
    встречалось в JS ни разу, 0 непрозрачных пикселей. Рисуем экипированный
@@ -7138,7 +6332,8 @@ function renderMenuSkinPreview() {
         terr: youCos.eq.terr,
         death: youCos.eq.death
       }
-    }
+    },
+    shopUiDeps()
   );
 }
 
@@ -7189,162 +6384,6 @@ if (menuSkinPreviewEl && typeof ResizeObserver === 'function') {
       scheduleMenuSkinPreview();
     }).observe(menuSkinPreviewEl);
   } catch {}
-}
-
-function cosmeticsFrameSampleName(i) {
-  return i === 1 ? t('cosmetics.balance_you') : `${t('leaderboard.player')} ${i + 2}`;
-}
-
-function drawCosmeticsFramesScene(ctx2, w, h, frameId) {
-  const pad = Math.round(Math.min(w, h) * 0.09);
-  const th = Math.max(22, Math.round(h * 0.12));
-  const rowH = Math.max(22, Math.round(h * 0.12));
-  const rows = 4;
-  const tw = w - pad * 2;
-  const tx = pad;
-  const ty = Math.round((h - (th + rows * rowH)) / 2);
-
-  ctx2.save();
-  ctx2.fillStyle = 'rgba(0,0,0,0.26)';
-  ctx2.fillRect(tx, ty, tw, th + rows * rowH);
-  ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
-  ctx2.lineWidth = 1;
-  ctx2.strokeRect(tx + 0.5, ty + 0.5, tw - 1, th + rows * rowH - 1);
-
-  ctx2.fillStyle = 'rgba(0,0,0,0.34)';
-  ctx2.fillRect(tx, ty, tw, th);
-  ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
-  ctx2.beginPath();
-  ctx2.moveTo(tx, ty + th + 0.5);
-  ctx2.lineTo(tx + tw, ty + th + 0.5);
-  ctx2.stroke();
-
-  ctx2.font = `12px ${COS_FONT}`;
-  ctx2.fillStyle = 'rgba(255,255,255,0.86)';
-  ctx2.textBaseline = 'middle';
-  ctx2.textAlign = 'left';
-  ctx2.fillText('#', tx + 12, ty + th / 2);
-  ctx2.fillText(t('leaderboard.player'), tx + 34, ty + th / 2);
-  ctx2.textAlign = 'right';
-  ctx2.fillText(t('leaderboard.cells'), tx + tw - 12, ty + th / 2);
-  ctx2.restore();
-
-  const youRow = 1;
-  for (let i = 0; i < rows; i++) {
-    drawFrameRow(
-      ctx2,
-      tx,
-      ty + th + i * rowH,
-      tw,
-      rowH,
-      frameId,
-      i + 1,
-      cosmeticsFrameSampleName(i),
-      fmtInt(1200 - i * 180),
-      i === youRow
-    );
-  }
-}
-
-/* Подложка поля. step приходит снаружи и равен размеру клетки сцены: в игре
-   сетка — это и есть решётка клеток, а здесь шаг считался отдельно
-   (16..28px против клетки 14..34px), линии не совпадали с плитками
-   территории, и кадр переставал читаться как кусок поля.
-   Начало отсчёта тоже передаётся, чтобы линии проходили ПО границам клеток,
-   а не наискось через них. */
-function drawCosmeticsFieldBackdrop(ctx2, x, y, w, h, step, originX, originY) {
-  ctx2.save();
-  const bg = ctx2.createLinearGradient(x, y, x + w, y + h);
-  bg.addColorStop(0, '#05100f');
-  bg.addColorStop(0.55, '#060a12');
-  bg.addColorStop(1, '#0a0714');
-  ctx2.fillStyle = bg;
-  ctx2.fillRect(x, y, w, h);
-
-  const cell = Math.max(8, Math.round(Number(step) || 18));
-  const ox = Number.isFinite(originX) ? originX : x;
-  const oy = Number.isFinite(originY) ? originY : y;
-
-  ctx2.strokeStyle = 'rgba(120,220,190,0.055)';
-  ctx2.lineWidth = 1;
-  for (let px = ox - Math.ceil((ox - x) / cell) * cell; px < x + w; px += cell) {
-    if (px <= x) continue;
-    ctx2.beginPath();
-    ctx2.moveTo(Math.round(px) + 0.5, y);
-    ctx2.lineTo(Math.round(px) + 0.5, y + h);
-    ctx2.stroke();
-  }
-  for (let py = oy - Math.ceil((oy - y) / cell) * cell; py < y + h; py += cell) {
-    if (py <= y) continue;
-    ctx2.beginPath();
-    ctx2.moveTo(x, Math.round(py) + 0.5);
-    ctx2.lineTo(x + w, Math.round(py) + 0.5);
-    ctx2.stroke();
-  }
-
-  // Виньетка — как на поле: края кадра глуше центра.
-  const vg = ctx2.createRadialGradient(
-    x + w * 0.5, y + h * 0.5, Math.min(w, h) * 0.20,
-    x + w * 0.5, y + h * 0.5, Math.max(w, h) * 0.72
-  );
-  vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(0,0,0,0.45)');
-  ctx2.fillStyle = vg;
-  ctx2.fillRect(x, y, w, h);
-
-  ctx2.strokeStyle = 'rgba(255,255,255,0.10)';
-  ctx2.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  ctx2.restore();
-}
-
-function drawCosmeticsZone(ctx2, rect, ownerId, alpha, terrId, cellHint) {
-  const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
-  const id = cosClampId(terrId);
-  const a = Math.max(0, Math.min(1, alpha));
-  const now = performance.now();
-  // Территория рисуется теми же плитками, что и в игре: узор выбранного
-  // стиля обязан выглядеть в магазине ровно так же, как на поле.
-  const cell = Math.max(8, Math.round(Number(cellHint) || 16));
-  const cols = Math.max(1, Math.ceil(rect.w / cell));
-  const rows = Math.max(1, Math.ceil(rect.h / cell));
-  ctx2.save();
-  ctx2.beginPath();
-  ctx2.rect(rect.x, rect.y, rect.w, rect.h);
-  ctx2.clip();
-  for (let gy = 0; gy < rows; gy++) {
-    for (let gx = 0; gx < cols; gx++) {
-      drawTerrTile(ctx2, rect.x + gx * cell, rect.y + gy * cell, cell, base, id, gx, gy, a, now);
-    }
-  }
-  /* Блик внутри клетки — как в игре: поверх заливки идёт чуть более яркий
-     вложенный квадрат. Без него база (сплошная заливка) выглядела плоской
-     плитой, а не территорией. */
-  const rgbB = hslToRgb(base);
-  ctx2.globalAlpha = Math.min(0.5, a * 0.42);
-  ctx2.fillStyle = `rgb(${rgbB[0]},${rgbB[1]},${rgbB[2]})`;
-  const inset = Math.max(1, (cell * 0.18) | 0);
-  for (let gy = 0; gy < rows; gy++) {
-    for (let gx = 0; gx < cols; gx++) {
-      ctx2.fillRect(rect.x + gx * cell + inset, rect.y + gy * cell + inset, cell - inset * 2, cell - inset * 2);
-    }
-  }
-  ctx2.globalAlpha = 1;
-  ctx2.restore();
-
-  /* Границы владения в игре не обводятся — территория просто заканчивается
-     там, где кончаются клетки. Прежняя чёрная рамка выдавала «картинку в
-     рамке» вместо куска поля. Исключение — витраж: у него светящийся шов
-     по границе есть и в игре. */
-  if (id === 5) {
-    ctx2.save();
-    const rgb = hslToRgb(base);
-    ctx2.strokeStyle = 'rgba(255,255,255,0.85)';
-    ctx2.shadowColor = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-    ctx2.shadowBlur = 14;
-    ctx2.lineWidth = 3;
-    ctx2.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
-    ctx2.restore();
-  }
 }
 
 const DIR_NAMES = ['up', 'down', 'left', 'right'];
@@ -7701,6 +6740,116 @@ function bindSettingsUi() {
   window.addEventListener('focus', () => {
     soundMutedByBlur = false;
   });
+}
+
+/* Общий набор геттеров/сеттеров и ссылок для DOM-функций магазина в
+   client_shop_ui.js. Построен как функция (не как объект один раз), потому
+   что часть переменных состояния (cosmeticsCat, cosmeticsSelId и т.д.)
+   переприсваивается — деп должен читать/писать их актуальные значения. */
+function shopUiDeps() {
+  return {
+    // DOM-узлы
+    cosmeticsOverlay,
+    cosmeticsEarnStyleEl,
+    cosmeticsTabsEl,
+    cosmeticsItemsEl,
+    cosmeticsHintEl,
+    cosmeticsWhereEl,
+    cosmeticsPreview,
+    cosmeticsStyleEl,
+    cosmeticsFilterAllBtn,
+    cosmeticsFilterOwnedBtn,
+    cosmeticsFilterAvailableBtn,
+    overlayManager,
+    // Геттеры/сеттеры изменяемого состояния client.js
+    getCosmeticsLoaded: () => cosmeticsLoaded,
+    getCosmeticsSource: () => cosmeticsSource,
+    getCosmeticsOpen: () => cosmeticsOpen,
+    setCosmeticsOpen: (v) => { cosmeticsOpen = v; },
+    getCosmeticsCat: () => cosmeticsCat,
+    setCosmeticsCat: (v) => { cosmeticsCat = v; },
+    getCosmeticsSelId: () => cosmeticsSelId,
+    setCosmeticsSelId: (v) => { cosmeticsSelId = v; },
+    getCosmeticsFilter: () => cosmeticsFilter,
+    getCosmeticsEarnExpanded: () => cosmeticsEarnExpanded,
+    setCosmeticsEarnExpanded: (v) => { cosmeticsEarnExpanded = v; },
+    getCosmeticsTabsScrolledCat: () => cosmeticsTabsScrolledCat,
+    setCosmeticsTabsScrolledCat: (v) => { cosmeticsTabsScrolledCat = v; },
+    getCosmeticsPreviewRaf: () => cosmeticsPreviewRaf,
+    setCosmeticsPreviewRaf: (v) => { cosmeticsPreviewRaf = v; },
+    getCosmeticsPreviewLastAt: () => cosmeticsPreviewLastAt,
+    setCosmeticsPreviewLastAt: (v) => { cosmeticsPreviewLastAt = v; },
+    getYouStyle: () => youStyle,
+    getYouTitleId: () => youTitleId,
+    getPendingCosmeticsOp: () => pendingCosmeticsOp,
+    youCos,
+    // Функции/таблицы, общие с остальным client.js
+    t,
+    tfmt,
+    fmtInt,
+    escapeHtml,
+    setSafeHtml,
+    cosTitlePrefix,
+    cosmeticsEnsureLocalReady,
+    cosmeticsServerReady,
+    cosmeticsBuyLocal,
+    cosmeticsEquipLocal,
+    cosmeticsSetDesiredEq,
+    cosmeticsOpBegin,
+    cosmeticsOpClear,
+    cosmeticsOpIsPending,
+    setCosmeticsStatus,
+    wsIsConnected,
+    wsSend,
+    syncOverlayUiState,
+    scheduleMenuSkinPreview,
+    cosmeticsMaskForCat,
+    cosmeticsEqForCat,
+    cosmeticsLabel,
+    cosmeticsVariantName,
+    cosmeticsTierLabel,
+    cosmeticsFormatCost,
+    cosmeticsOwnedCount,
+    renderCosmeticsTitles,
+    cosTitlesUnlockedCount,
+    tierClass,
+    visibleItems,
+    cosmeticsPrices,
+    buyButtonState,
+    equipButtonState,
+    COSMETICS_TABS,
+    COSMETICS_TAB_ICON_BY_CAT,
+    COSMETICS_MAX_ID,
+    COS_TITLE_MAX,
+    cosClampId,
+    colors,
+    boostHsl,
+    hslToRgb,
+    you,
+    drawTerrTile,
+    drawTerrSeam,
+    drawSegTile,
+    drawHead,
+    drawNamePlate,
+    drawCaptureFx,
+    drawDeathFx,
+    drawFrameRow,
+    COS_DEATH_MS,
+    COS_FONT,
+    cosPrepCanvas,
+    syncCosmeticsUi,
+    drawMiniCosmeticPreview: drawMiniCosmeticPreviewImpl
+  };
+}
+
+/* Синхронизация списка/шапки/превью магазина и выбор предмета — DOM-обвязка
+   в client_shop_ui.js. */
+function syncCosmeticsUi() {
+  syncCosmeticsUiImpl(shopUiDeps());
+}
+
+function cosmeticsSelectItem(id) {
+  cosmeticsSelectItemImpl(id, shopUiDeps());
 }
 
 function bindCosmeticsUi() {

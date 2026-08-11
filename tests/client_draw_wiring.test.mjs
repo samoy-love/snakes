@@ -30,6 +30,7 @@ import { maskNonCode, extractDeclared, unknownIdentifiers } from './helpers/js_s
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_JS = readFileSync(path.join(__dirname, '../public/client.js'), 'utf8');
+const CLIENT_SHOP_UI_JS = readFileSync(path.join(__dirname, '../public/client_shop_ui.js'), 'utf8');
 
 function extractFunctionBody(source, name) {
   const start = source.indexOf(`function ${name}(`);
@@ -89,9 +90,11 @@ test('syncCosmeticsUi() не читает идентификаторы, кото
   );
 });
 
-test('renderCosmeticsSkeleton() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client.js', () => {
-  const masked = maskNonCode(CLIENT_JS);
-  const body = extractFunctionBody(masked, 'renderCosmeticsSkeleton');
+// Фаза 4.2: DOM-обвязка магазина (в т.ч. renderCosmeticsSkeletonImpl) переехала
+// в client_shop_ui.js — проверка идёт по её собственному верхнему уровню.
+test('renderCosmeticsSkeletonImpl() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_shop_ui.js', () => {
+  const masked = maskNonCode(CLIENT_SHOP_UI_JS);
+  const body = extractFunctionBody(masked, 'renderCosmeticsSkeletonImpl');
   const topLevel = extractDeclared(masked);
 
   const unknown = unknownIdentifiers(body, [...topLevel]);
@@ -99,7 +102,7 @@ test('renderCosmeticsSkeleton() не читает идентификаторы, 
   assert.deepEqual(
     unknown,
     [],
-    `renderCosmeticsSkeleton() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+    `renderCosmeticsSkeletonImpl() читает необъявленные идентификаторы: ${unknown.join(', ')}`
   );
 });
 
