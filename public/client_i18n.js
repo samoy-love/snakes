@@ -156,12 +156,12 @@ export const I18N = {
     'hud.zone': 'Зона',
 
     'right.match': 'Матч',
-    'right.team': 'Команда',
+    'right.team': 'Игроки',
     'right.events': 'События',
 
     'right.match_empty_title': 'Нет данных',
     'right.match_empty_desc': 'Начните матч, чтобы увидеть прогресс и задания',
-    'right.team_empty_title': 'Нет команды',
+    'right.team_empty_title': 'Пока пусто',
     'right.team_empty_desc': 'Войдите в матч, чтобы увидеть таблицу игроков',
     'right.events_empty_title': 'Тихо',
     'right.events_empty_desc': 'События появятся во время матча',
@@ -580,12 +580,12 @@ export const I18N = {
     'hud.zone': 'Zone',
 
     'right.match': 'Match',
-    'right.team': 'Team',
+    'right.team': 'Players',
     'right.events': 'Events',
 
     'right.match_empty_title': 'No data',
     'right.match_empty_desc': 'Start a match to see progress and tasks',
-    'right.team_empty_title': 'No team',
+    'right.team_empty_title': 'Nothing yet',
     'right.team_empty_desc': 'Join a match to see the player table',
     'right.events_empty_title': 'Quiet',
     'right.events_empty_desc': 'Events will appear during the match',
