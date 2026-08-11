@@ -106,12 +106,7 @@ const MINIMAP_TOP1_SWITCH_COOLDOWN_MS = 4500;
 const MINIMAP_ZONE_ICON_TOP1 = '👑';
 const MINIMAP_ZONE_ICON_BOUNTY = '🎯';
 
-let minimapTop1Zone = null;
-let minimapBountyZone = null;
-
-let minimapTop1PinnedId = 0;
-let minimapTop1NextSwitchAt = 0;
-let minimapLastBountyTarget = 0;
+// Зоны/пины миникарты теперь в clientState (public/client_state.js)
 
 function minimapZoneRadiusCells() {
   const base = Math.round(Math.min(W, H) * 0.085);
@@ -185,69 +180,69 @@ function drawMinimapZones() {
   const ordered = computeTopSorted(clientState.lastState.players);
   const candidateTop1 = ordered.find((p) => p && p.a) || null;
   if (!candidateTop1) {
-    minimapTop1PinnedId = 0;
-    minimapTop1NextSwitchAt = 0;
-    minimapTop1Zone = null;
+    clientState.minimapTop1PinnedId = 0;
+    clientState.minimapTop1NextSwitchAt = 0;
+    clientState.minimapTop1Zone = null;
   } else {
-    if (!minimapTop1PinnedId) {
-      minimapTop1PinnedId = candidateTop1.n;
-      minimapTop1NextSwitchAt = now + MINIMAP_TOP1_SWITCH_COOLDOWN_MS;
+    if (!clientState.minimapTop1PinnedId) {
+      clientState.minimapTop1PinnedId = candidateTop1.n;
+      clientState.minimapTop1NextSwitchAt = now + MINIMAP_TOP1_SWITCH_COOLDOWN_MS;
     }
 
-    const pinned = clientState.lastState.players.find((p) => p && p.a && p.n === minimapTop1PinnedId) || null;
+    const pinned = clientState.lastState.players.find((p) => p && p.a && p.n === clientState.minimapTop1PinnedId) || null;
     if (!pinned) {
-      minimapTop1PinnedId = candidateTop1.n;
-      minimapTop1NextSwitchAt = now + MINIMAP_TOP1_SWITCH_COOLDOWN_MS;
-      minimapTop1Zone = ensureZoneState(minimapTop1Zone, candidateTop1.n, candidateTop1.x, candidateTop1.y, now);
-    } else if (candidateTop1.n === minimapTop1PinnedId) {
-      minimapTop1Zone = ensureZoneState(minimapTop1Zone, pinned.n, pinned.x, pinned.y, now);
+      clientState.minimapTop1PinnedId = candidateTop1.n;
+      clientState.minimapTop1NextSwitchAt = now + MINIMAP_TOP1_SWITCH_COOLDOWN_MS;
+      clientState.minimapTop1Zone = ensureZoneState(clientState.minimapTop1Zone, candidateTop1.n, candidateTop1.x, candidateTop1.y, now);
+    } else if (candidateTop1.n === clientState.minimapTop1PinnedId) {
+      clientState.minimapTop1Zone = ensureZoneState(clientState.minimapTop1Zone, pinned.n, pinned.x, pinned.y, now);
     } else {
-      if (now >= minimapTop1NextSwitchAt) {
-        minimapTop1PinnedId = candidateTop1.n;
-        minimapTop1NextSwitchAt = now + MINIMAP_TOP1_SWITCH_COOLDOWN_MS;
-        minimapTop1Zone = ensureZoneState(minimapTop1Zone, candidateTop1.n, candidateTop1.x, candidateTop1.y, now);
+      if (now >= clientState.minimapTop1NextSwitchAt) {
+        clientState.minimapTop1PinnedId = candidateTop1.n;
+        clientState.minimapTop1NextSwitchAt = now + MINIMAP_TOP1_SWITCH_COOLDOWN_MS;
+        clientState.minimapTop1Zone = ensureZoneState(clientState.minimapTop1Zone, candidateTop1.n, candidateTop1.x, candidateTop1.y, now);
       } else {
-        minimapTop1Zone = ensureZoneState(minimapTop1Zone, pinned.n, pinned.x, pinned.y, now);
+        clientState.minimapTop1Zone = ensureZoneState(clientState.minimapTop1Zone, pinned.n, pinned.x, pinned.y, now);
       }
     }
   }
 
   const btId = Number(bountyTarget) || 0;
-  if (btId !== (minimapLastBountyTarget || 0)) {
-    minimapLastBountyTarget = btId;
-    minimapBountyZone = null;
+  if (btId !== (clientState.minimapLastBountyTarget || 0)) {
+    clientState.minimapLastBountyTarget = btId;
+    clientState.minimapBountyZone = null;
   }
 
   if (btId) {
     const bt = clientState.lastState.players.find((p) => p && p.n === btId) || null;
     if (!bt || !bt.a) {
-      minimapBountyZone = null;
+      clientState.minimapBountyZone = null;
     } else {
-      minimapBountyZone = ensureZoneState(minimapBountyZone, bt.n, bt.x, bt.y, now);
+      clientState.minimapBountyZone = ensureZoneState(clientState.minimapBountyZone, bt.n, bt.x, bt.y, now);
     }
   } else {
-    minimapBountyZone = null;
+    clientState.minimapBountyZone = null;
   }
 
-  if (minimapTop1Zone && minimapBountyZone && minimapTop1Zone.pid === minimapBountyZone.pid) {
-    minimapTop1Zone = null;
+  if (clientState.minimapTop1Zone && clientState.minimapBountyZone && clientState.minimapTop1Zone.pid === clientState.minimapBountyZone.pid) {
+    clientState.minimapTop1Zone = null;
   }
 
-  if (minimapTop1Zone) {
+  if (clientState.minimapTop1Zone) {
     drawZoneCircle(
-      minimapTop1Zone.cx,
-      minimapTop1Zone.cy,
-      minimapTop1Zone.r,
+      clientState.minimapTop1Zone.cx,
+      clientState.minimapTop1Zone.cy,
+      clientState.minimapTop1Zone.r,
       'rgba(255, 215, 0, 0.35)',
       'rgba(255, 215, 0, 0.05)',
       MINIMAP_ZONE_ICON_TOP1
     );
   }
-  if (minimapBountyZone) {
+  if (clientState.minimapBountyZone) {
     drawZoneCircle(
-      minimapBountyZone.cx,
-      minimapBountyZone.cy,
-      minimapBountyZone.r,
+      clientState.minimapBountyZone.cx,
+      clientState.minimapBountyZone.cy,
+      clientState.minimapBountyZone.r,
       'rgba(255, 59, 48, 0.35)',
       'rgba(255, 59, 48, 0.06)',
       MINIMAP_ZONE_ICON_BOUNTY
