@@ -71,7 +71,7 @@ export const I18N = {
     'cosmetics.offline_hint': 'Данные косметики будут синхронизированы после входа в матч.',
 
     'death.title': 'Вы проиграли',
-    'death.hint': 'Enter — снова • Esc — меню',
+    'death.hint': 'Space — снова • Esc — меню',
     'death.play_again': 'Играть снова',
 
     'match.title': 'Матч завершён',
@@ -497,7 +497,7 @@ export const I18N = {
     'cosmetics.offline_hint': 'Cosmetics data will sync after you enter a match.',
 
     'death.title': 'You lost',
-    'death.hint': 'Enter — again • Esc — menu',
+    'death.hint': 'Space — again • Esc — menu',
     'death.play_again': 'Play again',
 
     'match.title': 'Match finished',
