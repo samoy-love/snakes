@@ -3599,9 +3599,67 @@ function beginDeathSlowMo() {
 /* Матч может закончиться (или игрок — выйти) прямо во время паузы: тогда
    оверлей смерти уже не нужен, и таймер обязан быть снят. */
 function cancelDeathSlowMo() {
+  releaseDeathZoom();
   if (!deathSlowMoTimer) return;
   clearTimeout(deathSlowMoTimer);
   deathSlowMoTimer = 0;
+}
+
+/* Драматический наезд камеры на точку гибели.
+   Чисто визуальный эффект: не трогает cellSizeFor()/computeViewportCells() и
+   то, что клиент запрашивает у сервера — только финальный масштаб отрисовки
+   в draw(), уже после cellSizeFor(). Камера на время наезда центрируется на
+   голове в момент смерти, а не на текущей цели followCamera. Уважает
+   prefers-reduced-motion / пресет «Спокойно» через fxHitstopScale(): при 0
+   зум не срабатывает вовсе. */
+const DEATH_ZOOM_MAX = 1.45;
+const DEATH_ZOOM_IN_MS = 900;
+const DEATH_ZOOM_OUT_MS = 600;
+
+let deathZoomActive = false;
+let deathZoomAnchorX = 0;
+let deathZoomAnchorY = 0;
+let deathZoomStartAt = 0;
+let deathZoomReleaseAt = 0;
+let deathZoomAtRelease = 1;
+let deathZoomCurrent = 1;
+
+function beginDeathZoom(x, y) {
+  deathZoomAnchorX = Number(x) || 0;
+  deathZoomAnchorY = Number(y) || 0;
+  deathZoomActive = true;
+  deathZoomStartAt = performance.now();
+}
+
+/* Плавный откат к обычному масштабу: респавн, выход в меню, конец матча. */
+function releaseDeathZoom() {
+  if (!deathZoomActive) return;
+  deathZoomActive = false;
+  deathZoomAtRelease = deathZoomCurrent;
+  deathZoomReleaseAt = performance.now();
+}
+
+/* Вызывается каждый кадр из draw(). Возвращает { zoom, mixToAnchor } —
+   текущий множитель клетки и долю [0..1], на которую камера должна
+   сместиться от обычной цели к точке гибели. */
+function updateDeathZoom(now) {
+  if (prefersReducedMotion() || fxHitstopScale() <= 0) {
+    deathZoomActive = false;
+    deathZoomCurrent = 1;
+    return { zoom: 1, mixToAnchor: 0 };
+  }
+  if (deathZoomActive) {
+    const t = easeOutCubic((now - deathZoomStartAt) / DEATH_ZOOM_IN_MS);
+    deathZoomCurrent = 1 + (DEATH_ZOOM_MAX - 1) * t;
+  } else if (deathZoomCurrent > 1) {
+    const t = easeOutCubic((now - deathZoomReleaseAt) / DEATH_ZOOM_OUT_MS);
+    deathZoomCurrent = deathZoomAtRelease + (1 - deathZoomAtRelease) * t;
+    if (deathZoomCurrent <= 1.001) deathZoomCurrent = 1;
+  } else {
+    deathZoomCurrent = 1;
+  }
+  const mixToAnchor = (deathZoomCurrent - 1) / (DEATH_ZOOM_MAX - 1);
+  return { zoom: deathZoomCurrent, mixToAnchor };
 }
 
 function showDeathOverlay() {
@@ -9869,6 +9927,9 @@ function onState(s) {
       youAlive = false;
       lastDirSent = null;
       youStreak = 0;
+      // Драматический наезд камеры на голову в точке гибели — до того, как
+      // сервер уберёт игрока из состояния и координаты станут недоступны.
+      beginDeathZoom((Number(me.x) || 0) + 0.5, (Number(me.y) || 0) + 0.5);
       // Момент смерти стоит увидеть: модалка мгновенно накрывала кадр, в
       // котором игрока убили. Держим паузу, пока идёт hitstop + вспышка.
       beginDeathSlowMo();
@@ -10072,7 +10133,16 @@ function draw() {
      чтобы экран никогда не был больше фактического ROI. На десктопе
      (cw/viewH ≈ 1.6) обе поправки меньше базового значения и ничего не
      меняют. */
-  const cell = cellSizeFor({ cw, viewH, roi: lastRoi, roiGrant });
+  const baseCell = cellSizeFor({ cw, viewH, roi: lastRoi, roiGrant });
+
+  /* Драматический наезд на точку гибели: чистый визуальный множитель поверх
+     baseCell, не влияющий на ROI/сетевой запрос вьюпорта (см. beginDeathZoom
+     / updateDeathZoom выше). Камера на время наезда смешивается с точкой
+     гибели, а не с текущей целью followCamera. */
+  const { zoom: deathZoom, mixToAnchor: deathZoomMix } = updateDeathZoom(performance.now());
+  const cell = baseCell * deathZoom;
+  const camXForZoom = camX + (deathZoomAnchorX - camX) * deathZoomMix;
+  const camYForZoom = camY + (deathZoomAnchorY - camY) * deathZoomMix;
 
   /* Камера жёстко зафиксирована на игроке: никакого сдвига по направлению
      движения. Так просил заказчик — «взгляд» не должен уезжать вперёд при
@@ -10092,7 +10162,7 @@ function draw() {
 
   const screenBounds = visibleBounds({
     cw, viewH, cell,
-    camX: camX + camLeadX, camY: camY + camLeadY,
+    camX: camXForZoom + camLeadX, camY: camYForZoom + camLeadY,
     shakeX, shakeY, W, H
   });
   const { offsetX, offsetY, minX, minY, maxX, maxY } = screenBounds;
