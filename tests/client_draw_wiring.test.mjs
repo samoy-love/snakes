@@ -177,6 +177,23 @@ test('paintFieldFx() не читает идентификаторы, котор�
   );
 });
 
+// paintPowerUps() — вынесена из draw() (§ шаг «Отрисовка пауэрапов поля»).
+// Как и остальные paint*() этого файла, не тянет ничего из client.js через
+// замыкание — powerUps/approxNowTick/OFFSCREEN_MARGIN_CELLS приходят deps.
+test('paintPowerUps() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_draw.js', () => {
+  const masked = maskNonCode(CLIENT_DRAW_JS);
+  const body = extractFunctionBody(masked, 'paintPowerUps');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `paintPowerUps() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
 // renderPerfPanel() — вынесена из конца draw() (§ шаг «Панель #perf в конце
 // draw()»). Как и остальные функции этого файла, не тянет ничего из
 // client.js через замыкание — метрики и t() приходят параметрами.

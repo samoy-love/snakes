@@ -616,6 +616,149 @@ export function paintFieldFx(ctx, cameraFrame, now, deps) {
   }
 }
 
+/* Пауэрапы поля: иконка-форма по типу (ромб/молния/звезда/крест) с пульсацией
+   и предупреждающим морганием у истекающих. Возвращает screenPos — список
+   экранных координат нарисованных значков, нужен вызывающему для хит-теста
+   тултипов/кликов (раньше жил как powerUpScreenPos в draw()). deps — те же
+   модульные значения client.js, что и у соседних paint*(), по той же причине
+   держит tests/client_draw_wiring.test.mjs зелёным. */
+export function paintPowerUps(ctx, cameraFrame, now, deps) {
+  const { powerUps, approxNowTick, OFFSCREEN_MARGIN_CELLS } = deps;
+  const { offsetX, offsetY, cell, minX, maxX, minY, maxY } = cameraFrame;
+
+  if (!powerUps || !powerUps.size) return [];
+
+  const nt = approxNowTick();
+  const screenPos = [];
+  for (const pu of powerUps.values()) {
+    const x = Number(pu.x) || 0;
+    const y = Number(pu.y) || 0;
+    if (
+      x < minX - OFFSCREEN_MARGIN_CELLS ||
+      x > maxX + OFFSCREEN_MARGIN_CELLS ||
+      y < minY - OFFSCREEN_MARGIN_CELLS ||
+      y > maxY + OFFSCREEN_MARGIN_CELLS
+    ) {
+      continue;
+    }
+
+    const cx = offsetX + (x + 0.5) * cell;
+    const cy = offsetY + (y + 0.5) * cell;
+    screenPos.push({ cx, cy, r: cell * 0.34, type: pu.type });
+
+    let pulse = 1;
+    let alpha = 1;
+    if (nt != null && pu.expires) {
+      const rem = Number(pu.expires) - nt;
+      if (rem < 30) {
+        const blink = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(now * 0.020));
+        alpha *= Math.max(0.15, blink);
+        pulse *= 0.96 + 0.10 * (0.5 + 0.5 * Math.sin(now * 0.016));
+      } else {
+        pulse *= 0.98 + 0.06 * (0.5 + 0.5 * Math.sin(now * 0.008));
+      }
+    }
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(cx, cy);
+    ctx.scale(pulse, pulse);
+    ctx.translate(-cx, -cy);
+
+    const r = cell * 0.34;
+    if (pu.type === 1) {
+      ctx.save();
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = -Math.PI / 2 + (i * Math.PI) / 3;
+        const px = cx + Math.cos(a) * r;
+        const py = cy + Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(0,255,255,0.18)';
+      ctx.strokeStyle = 'rgba(0,255,255,0.92)';
+      ctx.lineWidth = Math.max(1, cell * 0.10);
+      ctx.shadowColor = 'rgba(0,255,255,0.55)';
+      ctx.shadowBlur = 16;
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    } else if (pu.type === 2) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.35, cy - r * 0.65);
+      ctx.lineTo(cx + r * 0.05, cy - r * 0.10);
+      ctx.lineTo(cx - r * 0.05, cy - r * 0.10);
+      ctx.lineTo(cx + r * 0.35, cy + r * 0.65);
+      ctx.lineTo(cx - r * 0.05, cy + r * 0.15);
+      ctx.lineTo(cx + r * 0.05, cy + r * 0.15);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,215,0,0.20)';
+      ctx.strokeStyle = 'rgba(255,215,0,0.92)';
+      ctx.lineWidth = Math.max(1, cell * 0.10);
+      ctx.shadowColor = 'rgba(255,215,0,0.55)';
+      ctx.shadowBlur = 16;
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    } else if (pu.type === 3) {
+      ctx.save();
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + (i * Math.PI) / 5;
+        const rr = i % 2 === 0 ? r * 0.95 : r * 0.42;
+        const px = cx + Math.cos(a) * rr;
+        const py = cy + Math.sin(a) * rr;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,80,80,0.18)';
+      ctx.strokeStyle = 'rgba(255,80,80,0.95)';
+      ctx.lineWidth = Math.max(1, cell * 0.10);
+      ctx.shadowColor = 'rgba(255,80,80,0.65)';
+      ctx.shadowBlur = 18;
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.22, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.90)';
+      ctx.fill();
+      ctx.restore();
+    } else if (pu.type === 4) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.55, cy - r * 0.05);
+      ctx.lineTo(cx - r * 0.10, cy - r * 0.70);
+      ctx.lineTo(cx - r * 0.05, cy - r * 0.22);
+      ctx.lineTo(cx + r * 0.55, cy + r * 0.05);
+      ctx.lineTo(cx + r * 0.10, cy + r * 0.70);
+      ctx.lineTo(cx + r * 0.05, cy + r * 0.22);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(170,120,255,0.20)';
+      ctx.strokeStyle = 'rgba(190,150,255,0.96)';
+      ctx.lineWidth = Math.max(1, cell * 0.10);
+      ctx.shadowColor = 'rgba(190,150,255,0.70)';
+      ctx.shadowBlur = 18;
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.90, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(190,150,255,0.22)';
+      ctx.lineWidth = Math.max(1, cell * 0.06);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+  return screenPos;
+}
+
 function perfValueSpan(text, bad) {
   const cls = bad ? 'perfBad' : 'perfOk';
   return `<span class="perfValue ${cls}">${text}</span>`;
