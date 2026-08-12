@@ -91,3 +91,23 @@ test('handleCosmeticsMessage() не читает идентификаторы, �
     `handleCosmeticsMessage() читает необъявленные идентификаторы: ${unknown.join(', ')}`
   );
 });
+
+test('onError() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_ws_handlers.js', () => {
+  const masked = maskNonCode(CLIENT_WS_HANDLERS_JS);
+  const body = extractFunctionBody(masked, 'onError');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(unknown, [], `onError() читает необъявленные идентификаторы: ${unknown.join(', ')}`);
+});
+
+test('onState() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_ws_handlers.js', () => {
+  const masked = maskNonCode(CLIENT_WS_HANDLERS_JS);
+  const body = extractFunctionBody(masked, 'onState');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(unknown, [], `onState() читает необъявленные идентификаторы: ${unknown.join(', ')}`);
+});

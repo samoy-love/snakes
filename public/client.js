@@ -26,7 +26,14 @@ import {
   updateRoomInfoImpl
 } from './client_rooms_ui.js';
 import { PLAYER_RECORD_SIZES, pickPlayerRecordSize } from './client_protocol.js';
-import { handlePlayersMessage, handleMinimapMessage, handleEventsMessage, handleCosmeticsMessage } from './client_ws_handlers.js';
+import {
+  handlePlayersMessage,
+  handleMinimapMessage,
+  handleEventsMessage,
+  handleCosmeticsMessage,
+  onError as onErrorImpl,
+  onState as onStateImpl
+} from './client_ws_handlers.js';
 import { trailVisualState } from './client_trail_style.js';
 import { DEATH_REASON, deathReasonSuffix } from './client_death.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
@@ -2509,57 +2516,20 @@ function updateRoomsCreateUi(errMsg) {
 }
 
 function onError(d) {
-  const code = String(d?.message || '').trim();
-  createRoomPending = false;
-  updateRoomsCreateUi();
-
-  if (code === 'room_title_invalid') {
-    setRoomsCreateOpen(true);
-    updateRoomsCreateUi(t('rooms.invalid_title'));
-    try {
-      roomsCreateNameInput?.focus();
-    } catch {}
-    return;
-  }
-
-  const msgFor = () =>
-    code === 'room_full'
-      ? t('rooms.full')
-      : code === 'room_not_found'
-        ? t('rooms.not_found')
-        : code === 'cosmetics_invalid_id'
-          ? t('cosmetics.err_invalid_id')
-          : code === 'cosmetics_invalid_cat'
-            ? t('cosmetics.err_invalid_cat')
-            : code === 'cosmetics_not_owned'
-              ? t('cosmetics.err_not_owned')
-              : code === 'cosmetics_not_enough_style'
-                ? t('cosmetics.err_not_enough_style')
-                : code === 'cosmetics_unavailable'
-                  ? t('cosmetics.err_unavailable')
-        : t('common.error');
-  const msg = msgFor();
-
-  // K7: если не удалось вернуться в свою комнату после обрыва — комнаты уже
-  // нет или она заполнилась. Тогда честно отправляем в меню.
-  // C9: любая ошибка во время ожидания возврата — повод честно уйти в меню,
-  // а не только room_not_found / room_full.
-  if (rejoinPending) {
-    rejoinGiveUp(msg);
-    return;
-  }
-
-  // C1/C4: shop errors must land inside the overlay — toasts are hidden while it is open.
-  if (code.startsWith('cosmetics_')) {
-    cosmeticsOpClear();
-    if (cosmeticsOpen) {
-      setCosmeticsStatus(msgFor, 'error');
-      syncCosmeticsUi();
-      return;
-    }
-  }
-
-  addToast('⚠', msg, null);
+  const res = onErrorImpl(d, {
+    setRoomsCreateOpen,
+    updateRoomsCreateUi,
+    t,
+    roomsCreateNameInput,
+    rejoinPending,
+    rejoinGiveUp,
+    cosmeticsOpClear,
+    cosmeticsOpen,
+    setCosmeticsStatus,
+    syncCosmeticsUi,
+    addToast
+  });
+  createRoomPending = res.createRoomPending;
 }
 
 updateMenuNameUi();
@@ -6117,124 +6087,58 @@ function applyPackedDeltaGridWithAnim(buf, now) {
 }
 
 function onState(s) {
-  clientState.lastState = s;
-
-  // K1: прямоугольник ROI приходил и молча выбрасывался. Он — единственный
-  // источник правды о том, какая часть сетки вообще свежая.
-  const r = s?.roi;
-  if (r && Number(r.rw) > 0 && Number(r.rh) > 0) {
-    lastRoi = {
-      rx: Math.max(0, Number(r.rx) || 0),
-      ry: Math.max(0, Number(r.ry) || 0),
-      rw: Number(r.rw) || 0,
-      rh: Number(r.rh) || 0
-    };
-  } else if (s?.full) {
-    // Полный снапшот освежает всю карту — тумана в этом кадре нет.
-    lastRoi = null;
-  }
-
-  const now = performance.now();
-
-  // J15: якоря должны быть готовы до применения дельты сетки — именно в этом
-  // снапшоте голова стоит там, где петля замкнулась.
-  refreshCaptureAnchors(s.players);
-
-  if (s.full) {
-    const prev = gridOwner;
-    gridOwner = new Uint16Array(s.grid);
-    trailOwner = new Uint16Array(s.trail);
-    if (!gridFillAt || gridFillAt.length !== gridOwner.length) gridFillAt = new Float32Array(gridOwner.length);
-    if (!coolSeenAt || coolSeenAt.length !== gridOwner.length) coolSeenAt = new Float32Array(gridOwner.length);
-    if (prev && prev.length === gridOwner.length) {
-      for (let i = 0; i < gridOwner.length; i++) {
-        const n = gridOwner[i];
-        if (prev[i] !== n) markCoolSeen(i, n, now);
-        if (n !== 0 && !gridCellIsCooling(n) && prev[i] !== n) {
-          gridFillAt[i] = now + fillDelayFor(i, n);
-        }
-      }
-    } else {
-      for (let i = 0; i < gridOwner.length; i++) markCoolSeen(i, gridOwner[i], now);
-    }
-  } else {
-    applyPackedDeltaGridWithAnim(s.dg, now);
-    applyPackedDelta(trailOwner, s.dt);
-  }
-
-  // minimap is updated by server-sent chunk updates
-
-  const tmpPlayers = prevPlayers;
-  prevPlayers = currPlayers;
-  currPlayers = tmpPlayers;
-  currPlayers.clear();
-  let nameChanged = false;
-  for (const p of s.players) {
-    currPlayers.set(p.n, p);
-    // K2: номера игроков переиспользуются (аллокатор отдаёт первый свободный,
-    // боты пересоздаются при каждом входе/выходе человека). Кэш «номер → цвет»
-    // раньше писался один раз и никогда не обновлялся: номер 7 оставался
-    // красным даже после того, как его получил новый синий бот. Сравниваем
-    // цвет каждый кадр и сбрасываем зависимые кэши при расхождении.
-    if (colors.get(p.n) !== p.c) {
-      colors.set(p.n, p.c);
-      ownerFillStyleCache.delete(p.n);
-      minimapOwnerRgbCache.delete(p.n);
-      minimapDirty = true;
-    }
-    if (p.nm && nameById.get(p.n) !== p.nm) {
-      nameById.set(p.n, p.nm);
-      nameChanged = true;
-    }
-  }
-
-  if (nameChanged && clientState.chatMessages.length) renderChat();
-
-  headIndexByOwner.clear();
-  for (const p of s.players) {
-    headIndexByOwner.set(p.n, p.y * W + p.x);
-  }
-
-  lastPacketAt = performance.now();
-
-  if (clientState.lastStateAt != null) {
-    const dt = lastPacketAt - clientState.lastStateAt;
-    if (dt > 0) tickrate = lerp(tickrate || 0, 1000 / dt, 0.15);
-  }
-  clientState.lastStateAt = lastPacketAt;
-
-  try {
-    refreshOwnGeometry(false);
-  } catch {}
-
-  const me = s.players?.find((p) => p.n === you);
-  if (me) {
-    const alive = !!me.a;
-    if (alive) {
-      const ordered = computeTopSorted(s.players);
-      const idx = ordered.findIndex((p) => p.n === you);
-      const cells = Number(me?.s) || 0;
-      const pct = mapCells ? (cells / mapCells) * 100 : 0;
-      const points = Number(me?.p) || 0;
-      const place = idx >= 0 ? `${idx + 1}/${ordered.length}` : '—';
-      lastYouStats = { cells, pct, points, place };
-    }
-    if (alive && !youAlive) {
-      youAlive = true;
-      lastDirSent = null;
-      hideOverlays();
-    } else if (!alive && youAlive) {
-      youAlive = false;
-      lastDirSent = null;
-      youStreak = 0;
-      // Драматический наезд камеры на голову в точке гибели — до того, как
-      // сервер уберёт игрока из состояния и координаты станут недоступны.
-      beginDeathZoom((Number(me.x) || 0) + 0.5, (Number(me.y) || 0) + 0.5);
-      // Момент смерти стоит увидеть: модалка мгновенно накрывала кадр, в
-      // котором игрока убили. Держим паузу, пока идёт hitstop + вспышка.
-      beginDeathSlowMo();
-    }
-  }
+  const res = onStateImpl(s, {
+    clientState,
+    W,
+    mapCells,
+    you,
+    colors,
+    nameById,
+    ownerFillStyleCache,
+    minimapOwnerRgbCache,
+    headIndexByOwner,
+    refreshCaptureAnchors,
+    markCoolSeen,
+    gridCellIsCooling,
+    fillDelayFor,
+    applyPackedDeltaGridWithAnim,
+    applyPackedDelta,
+    renderChat,
+    refreshOwnGeometry,
+    computeTopSorted,
+    hideOverlays,
+    beginDeathZoom,
+    beginDeathSlowMo,
+    lerp,
+    lastRoi,
+    gridOwner,
+    trailOwner,
+    gridFillAt,
+    coolSeenAt,
+    prevPlayers,
+    currPlayers,
+    minimapDirty,
+    lastPacketAt,
+    tickrate,
+    lastYouStats,
+    youAlive,
+    lastDirSent,
+    youStreak
+  });
+  lastRoi = res.lastRoi;
+  gridOwner = res.gridOwner;
+  trailOwner = res.trailOwner;
+  gridFillAt = res.gridFillAt;
+  coolSeenAt = res.coolSeenAt;
+  prevPlayers = res.prevPlayers;
+  currPlayers = res.currPlayers;
+  minimapDirty = res.minimapDirty;
+  lastPacketAt = res.lastPacketAt;
+  tickrate = res.tickrate;
+  lastYouStats = res.lastYouStats;
+  youAlive = res.youAlive;
+  lastDirSent = res.lastDirSent;
+  youStreak = res.youStreak;
 }
 
 setInterval(() => {
