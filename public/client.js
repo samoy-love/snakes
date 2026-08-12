@@ -12,8 +12,19 @@ import { createFxModule } from './client_fx.js';
 import { createNetModule } from './client_net.js';
 import { BOT_NAMES_EN, BOT_NAMES_RU, EN, I18N, RU } from './client_i18n.js';
 import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
-import { filterAndSortRooms } from './client_rooms.js';
-import { renderRoomsList, renderRoomsEmpty, updateRoomsStats } from './client_rooms_ui.js';
+import {
+  renderRoomsList,
+  renderRoomsEmpty,
+  updateRoomsStats,
+  syncRoomsSearchClearUiImpl,
+  clearRoomsSearchImpl,
+  attemptJoinRoomImpl,
+  setRoomsCreateOpenImpl,
+  updateRoomsCreateUiImpl,
+  applyRoomsFilterSortImpl,
+  updateRoomsUiImpl,
+  updateRoomInfoImpl
+} from './client_rooms_ui.js';
 import { PLAYER_RECORD_SIZES, pickPlayerRecordSize } from './client_protocol.js';
 import { handlePlayersMessage, handleMinimapMessage, handleEventsMessage } from './client_ws_handlers.js';
 import { trailVisualState } from './client_trail_style.js';
@@ -2461,62 +2472,40 @@ function applyRandomNick() {
 }
 
 function syncRoomsSearchClearUi() {
-  if (!roomsSearchClearBtn) return;
-  const q = String(roomsSearchInput?.value || '').trim();
-  roomsSearchClearBtn.classList.toggle('hidden', !q);
+  syncRoomsSearchClearUiImpl({ roomsSearchClearBtn, roomsSearchInput });
 }
 
 function clearRoomsSearch() {
-  if (!roomsSearchInput) return;
-  roomsSearchInput.value = '';
-  syncRoomsSearchClearUi();
-  updateRoomsUi();
-  try {
-    roomsSearchInput.focus();
-  } catch {}
+  clearRoomsSearchImpl({ roomsSearchInput, syncRoomsSearchClearUi, updateRoomsUi });
 }
 
 function attemptJoinRoom(rid) {
-  const roomId = rid == null ? null : Number(rid);
-  if (roomId == null) return;
-  const nm = submitNameFromInput(menuNameInput);
-  if (!nm) {
-    updateMenuNameUi();
-    menuNameInput?.focus();
-    return;
-  }
-  trackEvent('join_room');
-  wsSend('join', { roomId, mode: 'id' });
+  attemptJoinRoomImpl(rid, { menuNameInput, submitNameFromInput, updateMenuNameUi, trackEvent, wsSend });
 }
 
 function setRoomsCreateOpen(v) {
-  const on = !!v;
-  roomsCreateOpen = on;
-  if (roomsCreateEl) roomsCreateEl.classList.toggle('hidden', !on);
-  if (toggleCreateRoomBtn) {
-    toggleCreateRoomBtn.textContent = on ? t('rooms.hide') : t('rooms.create');
-    toggleCreateRoomBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
-  }
-  if (on) {
-    try {
-      roomsCreateNameInput?.focus();
-    } catch {}
-  }
-  updateRoomsCreateUi();
+  setRoomsCreateOpenImpl(v, {
+    setRoomsCreateOpen: (on) => {
+      roomsCreateOpen = on;
+    },
+    roomsCreateEl,
+    toggleCreateRoomBtn,
+    t,
+    roomsCreateNameInput,
+    updateRoomsCreateUi
+  });
 }
 
 function updateRoomsCreateUi(errMsg) {
-  if (!roomsCreateOpen) {
-    if (roomsCreateError) roomsCreateError.textContent = '';
-    if (createRoomBtn) createRoomBtn.disabled = true;
-    return;
-  }
-
-  const title = sanitizeRoomTitleClient(roomsCreateNameInput?.value);
-  const ok = !!title;
-  const err = String(errMsg || '').trim();
-  if (roomsCreateError) roomsCreateError.textContent = err ? err : ok ? '' : t('rooms.name_placeholder');
-  if (createRoomBtn) createRoomBtn.disabled = !ok || createRoomPending;
+  updateRoomsCreateUiImpl(errMsg, {
+    getRoomsCreateOpen: () => roomsCreateOpen,
+    roomsCreateError,
+    createRoomBtn,
+    sanitizeRoomTitleClient,
+    roomsCreateNameInput,
+    t,
+    getCreateRoomPending: () => createRoomPending
+  });
 }
 
 function onError(d) {
@@ -3752,44 +3741,25 @@ function updateRoomsStatsLocal(rawRooms) {
    Здесь остаётся единственное, что действительно принадлежит этому файлу:
    откуда взять режим сортировки и строку поиска. */
 function applyRoomsFilterSort() {
-  return filterAndSortRooms(lastRooms, {
-    query: roomsSearchInput?.value,
-    sort: roomsSortSelect?.value
-  });
+  return applyRoomsFilterSortImpl({ lastRooms, roomsSearchInput, roomsSortSelect });
 }
 
 function updateRoomsUi() {
-  syncRoomsSearchClearUi();
-  const rawAll = Array.isArray(lastRooms) ? lastRooms : [];
-  if (selectedRoomId != null) {
-    const exists = rawAll.some((r) => Number(r?.id) === Number(selectedRoomId));
-    if (!exists) selectedRoomId = null;
-  }
-
-  if (joinRoomBtn) {
-    joinRoomBtn.disabled = selectedRoomId == null;
-  }
-  updateRoomsStatsLocal(lastRooms);
-  const raw = Array.isArray(lastRooms) ? lastRooms : [];
-  const filtered = applyRoomsFilterSort();
-
-  if (roomsLoading && raw.length === 0) {
-    renderRoomsEmptyLocal('loading');
-    return;
-  }
-  if (roomsLoadError && raw.length === 0) {
-    renderRoomsEmptyLocal('error', roomsLoadError);
-    return;
-  }
-  if (raw.length === 0) {
-    renderRoomsEmptyLocal('empty');
-    return;
-  }
-  if (filtered.length === 0) {
-    renderRoomsEmptyLocal('noMatch');
-    return;
-  }
-  renderRoomsListLocal(filtered);
+  updateRoomsUiImpl({
+    syncRoomsSearchClearUi,
+    getLastRooms: () => lastRooms,
+    getSelectedRoomId: () => selectedRoomId,
+    setSelectedRoomId: (v) => {
+      selectedRoomId = v;
+    },
+    joinRoomBtn,
+    updateRoomsStatsLocal,
+    applyRoomsFilterSort,
+    getRoomsLoading: () => roomsLoading,
+    getRoomsLoadError: () => roomsLoadError,
+    renderRoomsEmptyLocal,
+    renderRoomsListLocal
+  });
 }
 
 playBtn?.addEventListener('click', () => {
@@ -3903,13 +3873,14 @@ roomsSortSelect?.addEventListener('change', () => {
 });
 
 function updateRoomInfo() {
-  if (!roomInfoEl) return;
-  const rid = roomId == null ? '…' : String(roomId);
-  const lim = roomLimit == null ? '' : ` / ${roomLimit}`;
-  roomInfoEl.textContent = `${t('perf.room')}: ${rid}${lim}${wsStatusSuffix()}`;
-  try {
-    updateChatHeaderStatus();
-  } catch {}
+  updateRoomInfoImpl({
+    roomInfoEl,
+    getRoomId: () => roomId,
+    getRoomLimit: () => roomLimit,
+    t,
+    wsStatusSuffix,
+    updateChatHeaderStatus
+  });
 }
 
 function computeTopSorted(players) {
