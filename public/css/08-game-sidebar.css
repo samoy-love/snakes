@@ -2,6 +2,15 @@
    (#rightSidebar, #emojiPanel). См. 03-game-fx.css — общее примечание про
    разрез бывшего 03-game.css. */
 
+/* Правая колонка. Раскладка задаётся здесь ОДИН раз; ниже её меняют только
+   медиазапросы. Раньше она собиралась из семи объявлений в трёх файлах:
+   display переключался grid -> flex, max-height переписывался трижды, и
+   какое значение победило, можно было узнать только в devtools.
+
+   Флекс-колонка, а не сетка: при display:grid строки с auto-размером
+   ужимались под высоту контейнера, поэтому панели обрезались по контенту и
+   прокрутка не появлялась вовсе (scrollHeight === clientHeight).
+   Высоту ограничивает --right-bottom-reserve — место, занятое чатом. */
 #rightSidebar {
   position: fixed;
   right: calc(12px + var(--sa-right));
@@ -363,14 +372,15 @@ img.emoji {
      row-gap: 0;
    }
 
+   /* grid-template-columns отсюда убран: строка выложена flex-ом
+      (04-game-hud.css), сетка на ней не действует. Остальное — уплотнение
+      под узкий экран, которое до переноса базы в 04 не работало вовсе. */
    .topHudRight {
-     grid-template-columns: auto auto;
      align-items: center;
      gap: 0 8px;
    }
 
    .topHudTime {
-     grid-column: auto;
      font-size: var(--fs-12);
    }
 
@@ -388,10 +398,9 @@ img.emoji {
      display: none;
    }
 
-   #hud:not(.lbPinned) #stats,
-   #hud:not(.lbPinned) #help {
-     display: none;
-   }
+   /* Правило `#hud:not(.lbPinned) #stats, … #help { display: none }` удалено:
+      #stats и так безусловно скрыт в 10-ux-waves.css (U5), а #help лежит вне
+      #hud (index.html) — вторая половина селектора не совпадала ни с чем. */
 
    #title {
      margin-bottom: 4px;

@@ -34,44 +34,24 @@ html, body {
   overscroll-behavior: none;
  }
 
- @media (min-width: 1401px), (min-height: 821px) {
-   #hud:not(.lbPinned) #stats,
-   #hud:not(.lbPinned) #help {
-     display: block;
-   }
- }
+ /* Блок «показать #stats и #help на большом экране» удалён как мёртвый вдвойне:
+    #stats безусловно скрыт правилом `#hud:not(.lbPinned) #stats` в
+    10-ux-waves.css (волна 7, U5 — рейтинг не дублируется трижды), а #help
+    вообще не лежит внутри #hud (см. index.html: подсказки вынесены наружу,
+    потому что filter/backdrop-filter на #hud ломает position: fixed внутри).
+    Селектор `#hud … #help` не может совпасть ни с чем. */
 
  html {
    color-scheme: dark;
  }
 
+ /* Кнопка языка всегда несёт и класс .iconBtn (см. index.html), а .iconBtn
+    объявлен позже по каскаду (02-cosmetics.css) — размеры, рамка, фон, радиус,
+    hover, :active и фокус-кольцо приходили оттуда, а копии здесь были мёртвыми
+    (border-radius: 999px не действовал ни разу — кнопка всегда была скруглённым
+    квадратом). Остаётся единственное, чем она отличается от прочих иконок. */
  .langToggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--control-h);
-  height: var(--control-h);
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.42);
-  color: var(--text);
-  cursor: pointer;
-  box-shadow: 0 8px 22px rgba(0,0,0,0.35);
-  -webkit-tap-highlight-color: transparent;
- }
-
- .langToggle:hover {
-  background: var(--btn2);
- }
-
- .langToggle:active {
-   transform: translateY(1px);
- }
-
- .langToggle:focus-visible {
-  outline: none;
-  border-color: var(--focus);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
  }
 
  /* H19: кнопка языка живёт в футере карточки меню, а не поверх её угла.
@@ -103,14 +83,6 @@ html, body {
    --btn: rgba(255, 255, 255, 0.07);
    --btn2: rgba(255, 255, 255, 0.11);
    --focus: rgba(76, 201, 240, 0.92);
-   --fs-11: 11px;
-   --fs-12: 12px;
-   --fs-13: 13px;
-   --fs-14: 14px;
-   --fs-16: 16px;
-   --fs-18: 18px;
-   --fs-20: 20px;
-   --fs-22: 22px;
    --lh-tight: 1.15;
    --lh-body: 1.35;
    --r-sm: 10px;
@@ -126,13 +98,27 @@ html, body {
    /* Тач-минимум 44px как единая база всех контролов: раньше 40px давало
       фактические 39–43px и ни одна цель, кроме «Играть», не проходила порог. */
    --control-h: 44px;
-   /* Типографическая шкала оверлеев: ровно пять ступеней вместо 13 комбинаций.
-      display → lead → title → body → meta. Начертания: 800 / 700 / 600. */
+   /* Типографическая шкала: ровно пять ступеней вместо 13 комбинаций.
+      display → lead → title → body → meta. Начертания: 800 / 700 / 600.
+      Волна 7 распространила её с оверлеев на весь продукт (HUD жил на 47
+      хардкодах и восьми переменных --fs-11…--fs-22), но переопределяла
+      значения ещё раз в 10-ux-waves.css — те объявления были дословными
+      копиями этих и убраны, шкала задаётся здесь и только здесь. */
    --fs-display: clamp(30px, 6.4vw, 52px);
    --fs-lead: clamp(22px, 3.2vw, 26px);
    --fs-title: 18px;
    --fs-body: 15px;
-   --fs-meta: 13px;
+   --fs-meta: 12px;
+   /* Старые кегли схлопнуты в те же пять ступеней. Псевдонимы оставлены,
+      чтобы не править 200+ мест разом; новые правила берут шкалу напрямую. */
+   --fs-11: var(--fs-meta);
+   --fs-12: var(--fs-meta);
+   --fs-13: var(--fs-meta);
+   --fs-14: var(--fs-body);
+   --fs-16: var(--fs-body);
+   --fs-18: var(--fs-title);
+   --fs-20: var(--fs-title);
+   --fs-22: var(--fs-lead);
    /* Акцентный display-шрифт — только для крупных чисел и заголовков,
       не для всего сайта (см. @font-face выше). */
    --font-display: "Exo 2", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
@@ -1053,7 +1039,7 @@ html, body {
     title, поэтому лейбл рисуется отдельным элементом у курсора. */
  .powerupTooltip {
    position: fixed;
-   z-index: var(--z-overlay, 9000);
+   z-index: var(--z-overlay);
    pointer-events: none;
    padding: 4px 8px;
    border-radius: 6px;

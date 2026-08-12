@@ -65,9 +65,12 @@
   max-width: 108px;
  }
 
- body.inGame #hud:not(.lbPinned) .hudMid,
- body.inGame #hud:not(.lbPinned) #help {
-  display: none !important;
+ /* #help из этого правила убран: подсказки вынесены из #hud в index.html
+    (внутри они раздували панель до 340px, а filter/backdrop-filter на #hud
+    ломает position: fixed у потомков), поэтому селектор `#hud #help` не
+    совпадал ни с чем. Заодно снят !important — перекрывать правило некому. */
+ body.inGame #hud:not(.lbPinned) .hudMid {
+  display: none;
  }
 
  .hudTop {
@@ -270,17 +273,43 @@
   color: var(--muted2);
  }
 
- .topHudRight {
-  display: grid;
-  grid-template-columns: 1fr auto;
+ /* --- Раскладка полосы: ОДНА строка вместо четырёх ---------------------------
+    Замер (волна 9): 135px высоты на 368px ширины. Причина — .topHudRight был
+    вложенной сеткой, где таймер и контракт занимали `grid-column: 1 / -1`,
+    то есть каждый вставал на свою строку; сверху добавлялся ряд «место + зона».
+    Для полосы состояния поверх поля это непозволительно много — она закрывала
+    верх карты.
+
+    Стало: всё в одну flex-строку с переносом по необходимости. Порядок слева
+    направо — по убыванию важности: место, зона, время, фаза, киллы, контракт.
+
+    Объявления перенесены сюда из 11-redesign.css. Там они стояли ПОСЛЕ
+    мобильных правил (08-game-sidebar.css, 10-ux-waves.css) и при равной
+    специфичности перекрывали их: `.topHudRow { align-items: center }`,
+    `row-gap: 2px`, `.topHudRight { gap: 0 8px }` и `.topHudBar { margin-top }`
+    для телефона не действовали вовсе. Теперь база — здесь, а медиазапросы
+    ниже по каскаду её действительно уточняют. */
+ .topHudRow {
+  display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  justify-items: end;
-  gap: 6px 10px;
+  column-gap: 14px;
+  row-gap: 4px;
+ }
+
+ .topHudRight {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 4px;
   min-width: 0;
+  /* Забирает остаток строки, чтобы контракт прижимался вправо. */
+  flex: 1 1 auto;
+  justify-content: flex-end;
  }
 
  .topHudTime {
-  grid-column: 1 / -1;
   font-size: var(--fs-meta);
   font-weight: 800;
   color: rgba(255, 255, 255, 0.90);
@@ -291,21 +320,26 @@
   text-overflow: ellipsis;
  }
 
- /* УХ16: таймер матча предупреждает цветом о приближении конца — жёлтый на
-    последних 30 с, красный (с лёгкой пульсацией) на последних 15 с. Класс
-    isUrgent уже выставлялся из client.js, но правила для него не было. */
+ /* УХ16: таймер матча предупреждает цветом о приближении конца — золотой на
+    последних 30 с, красный с пульсацией на последних 15 с (client_hud.js
+    вешает isUrgent при <= 30, isCritical при <= 15, то есть на последних
+    15 секундах оба класса стоят одновременно — порядок объявлений здесь и
+    решает, что победит).
+
+    Обе ступени раньше не работали: 09-hud-details.css объявлял .isUrgent
+    второй раз, позже по каскаду, сразу в красном и с пульсацией — жёлтой
+    ступени не было ни разу, а .isCritical перекрывался целиком, потому что
+    стоял в более раннем файле. Дубль убран, обе ступени живут здесь, и
+    .isCritical идёт после .isUrgent. Цвета — из токенов: красный по правилу
+    редизайна закреплён за опасностью. Пульсация переиспользует общий
+    @keyframes urgentPulse (09-hud-details.css) вместо своей копии. */
  .topHudTime.isUrgent {
-  color: #ffd166;
+  color: var(--gold);
  }
 
  .topHudTime.isCritical {
-  color: #ff4d4d;
-  animation: topHudTimeCritical 1s ease-in-out infinite;
- }
-
- @keyframes topHudTimeCritical {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
+  color: var(--accent);
+  animation: urgentPulse 1.2s ease-in-out infinite;
  }
 
  .topHudKills {
@@ -320,7 +354,11 @@
  }
 
  .topHudContract {
-  grid-column: 1 / -1;
+  /* Контракт длиннее всех: пусть ужимается он, а не цифры слева.
+     min-width: 0 обязателен — иначе flex-элемент не ужимается ниже
+     max-content и ellipsis не срабатывает. */
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--muted2);
   white-space: nowrap;
   overflow: hidden;
@@ -332,7 +370,7 @@
  }
 
  .topHudBar {
-  margin-top: 8px;
+  margin-top: 6px;
   height: 6px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.08);
