@@ -160,8 +160,7 @@
 .overlay .card .cosmeticsItemSub,
 .overlay .card .cosmeticsItemWhere,
 .overlay .card .cosmeticsPrice,
-.overlay .card .cosmeticsStatus,
-.overlay .card .tierBadge {
+.overlay .card .cosmeticsStatus {
   font-size: var(--fs-meta);
   font-weight: 600;
 }
@@ -269,15 +268,10 @@
   display: none;
 }
 
-/* Редкость названа разделителем группы («ОБЫЧНЫЙ») — бейдж в заголовке лишний. */
-.cosmeticsItemTitle .tierBadge {
-  display: none;
-}
-
-/* «До покупки N стиль» дублирует и ценник, и подпись кнопки покупки. */
-.cosmeticsItemSub.isBlocked {
-  display: none;
-}
+/* Правила «спрятать бейдж редкости в заголовке» (.tierBadge) и «спрятать
+   „до покупки N стиль“» (.cosmeticsItemSub.isBlocked) удалены: с той же волны
+   клиент перестал создавать оба элемента, и правила гасили пустоту. Вместе с
+   ними убрано их оформление в 02-cosmetics.css и 01-base.css. */
 
 .cosmeticsWhere {
   margin-top: 10px;
@@ -326,28 +320,14 @@
    переменные по всему файлу, а старые переменные схлопнуты сюда, на пять
    ступеней: meta 12 / body 15 / title 18 / lead / display.
    Вес 900 снят везде (54 объявления → 800); 900 возвращён ниже только тем
-   элементам, чей кегль заведомо >= 18px. */
-:root {
-  --fs-meta: 12px;
-  --fs-body: 15px;
-  --fs-title: 18px;
-  --fs-11: var(--fs-meta);
-  --fs-12: var(--fs-meta);
-  --fs-13: var(--fs-meta);
-  --fs-14: var(--fs-body);
-  --fs-16: var(--fs-body);
-  --fs-18: var(--fs-title);
-  --fs-20: var(--fs-title);
-  --fs-22: var(--fs-lead);
+   элементам, чей кегль заведомо >= 18px.
 
-  /* U10. Контраст вторичного текста на blur-панелях над яркой территорией:
-     было ~1.9:1 (0.60 поверх rgba(0,0,0,0.376)). Поднимаем текст.
-     --hud-panel-alpha остаётся пользовательской настройкой (ползунок в
-     «Настройках» пишет её инлайном), поэтому усиливаем базовый --panel —
-     но сама переменная --panel/--panel2 объявляется один раз, в
-     11-redesign.css, см. комментарий там про волну 8. */
-  --muted2: rgba(229, 231, 235, 0.78);
-}
+   Сами значения шкалы (и псевдонимы --fs-11…--fs-22) переехали в :root
+   01-base.css: здесь стояло второе, дословно совпадающее объявление, из-за
+   которого «единственная точка правды» существовала в двух файлах. Туда же
+   отправился --muted2 (U10, контраст вторичного текста на blur-панелях над
+   яркой территорией: было ~1.9:1) — он тоже задавался в 01-base.css тем же
+   значением. */
 
 /* Тяжёлое начертание — только крупному кеглю. */
 .overlayTitle,
@@ -485,7 +465,7 @@ body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
 }
 
 /* --- U6. Иерархия верхнего HUD --------------------------------------------
-   Место — первым и крупным. Раскладку строки задаёт 06-redesign.css (flex);
+   Место — первым и крупным. Раскладку строки задаёт 04-game-hud.css (flex);
    grid-template-columns, стоявший здесь, под flex не действует вовсе. */
 .topHudPlace {
   font-size: var(--fs-title);
@@ -516,7 +496,7 @@ body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
 
 /* На телефоне строка узкая: место крупнее, ряды плотнее. Явная расстановка
    по колонкам и рядам отсюда убрана — строка выкладывается flex-ом
-   (06-redesign.css), и grid-column/grid-row в ней не действуют. */
+   (04-game-hud.css), и grid-column/grid-row в ней не действуют. */
 @media (max-width: 720px) {
   .topHudRow {
     row-gap: 2px;
@@ -585,14 +565,13 @@ body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
   display: none;
 }
 
-/* Подсказка по управлению обязана быть видна именно в матче. */
-body.inGame #hud:not(.lbPinned) #help {
-  display: block !important;
-  padding-top: 6px;
-  max-width: 320px;
-  font-size: var(--fs-meta);
-  color: var(--muted2);
-}
+/* Правило «подсказка по управлению видна в матче» (`body.inGame
+   #hud:not(.lbPinned) #help { display: block !important }`) удалено: #help
+   вынесен из #hud в index.html, и селектор не совпадал ни с чем. Видимостью
+   подсказки распоряжается 11-redesign.css — там она скрыта по умолчанию,
+   показывается по body.inGame и гасится оверлеем, развёрнутым чатом и
+   (pointer: coarse). Именно из-за мёртвого правила ниже по файлу копились
+   встречные !important. */
 
 /* Свайп нигде не был назван: на тач-устройстве показываем свою строку вместо
    «WASD / Enter / Esc / M», которых на телефоне нет. */
@@ -609,10 +588,6 @@ body.inGame #hud:not(.lbPinned) #help {
 }
 
 @media (pointer: coarse) {
-  #help {
-    display: none !important;
-  }
-
   body.inGame #helpTouch {
     display: block;
     position: fixed;
@@ -983,19 +958,12 @@ body.inGame #hud:not(.lbPinned) #help {
 }
 
 /* --- V4. На тач-устройстве видны обе подсказки сразу ------------------------
-   Найдено исполнением (эмуляция: объявления из @media (pointer: coarse)
-   инжектированы инлайновым <style>, вьюпорт 390×844): правило
-   `@media (pointer: coarse) { #help { display: none !important } }`
-   проигрывало по специфичности более раннему
-   `body.inGame #hud:not(.lbPinned) #help { display: block !important }`
-   (0,1,0 против 0,3,1) — на телефоне игрок видел и «WASD/Enter/Esc/M», и
-   «Свайп по экрану». Поднимаем специфичность до сопоставимой. */
-@media (pointer: coarse) {
-  body.inGame #hud:not(.lbPinned) #help,
-  #hud #help {
-    display: none !important;
-  }
-}
+   Симптом (эмуляция, вьюпорт 390×844): игрок видел и «WASD/Enter/Esc/M», и
+   «Свайп по экрану». Лечили гонкой специфичностей между двумя !important, но
+   настоящая причина была в том, что оба спорящих правила адресовали #help
+   через #hud, откуда он давно вынесен. Мёртвые правила убраны, встречный
+   !important-блок вместе с ними: подсказку гасит `body.inGame #help` из
+   11-redesign.css в том же @media (pointer: coarse). */
 
 /* V3 (продолжение). Замер: на двухколоночной сетке магазина карточка титула
    ≈254px, из них .titleItemLeft получала 85.2px — полоса прогресса ужималась

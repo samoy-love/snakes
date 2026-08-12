@@ -1,7 +1,7 @@
 /* Игровой экран, часть 4/6: чат (#chat и его содержимое).
    См. 03-game-fx.css — общее примечание про разрез бывшего 03-game.css. */
 
- #chat {
+#chat {
   position: fixed;
   right: calc(12px + var(--sa-right));
   bottom: calc(12px + var(--sa-bottom));
@@ -18,34 +18,34 @@
   min-height: 0;
   max-height: calc(100dvh - 24px - var(--sa-top) - var(--sa-bottom));
   filter: var(--hud-filter);
- }
+}
 
- #chatHeader {
-   padding: var(--pad-md);
-   font-size: var(--fs-meta);
-   color: var(--muted);
-   user-select: none;
-   cursor: pointer;
-   border-bottom: 1px solid var(--border2);
-   display: flex;
-   align-items: center;
-   justify-content: space-between;
-   gap: 10px;
- }
+#chatHeader {
+  padding: var(--pad-md);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  user-select: none;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 
- #chatHeaderLeft {
+#chatHeaderLeft {
   display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
- }
+}
 
- #chatHeaderTitle {
+#chatHeaderTitle {
   color: rgba(255, 255, 255, 0.90);
   font-weight: 800;
- }
+}
 
- .chatHeaderStatus {
+.chatHeaderStatus {
   font-size: var(--fs-meta);
   font-weight: 700;
   color: var(--muted);
@@ -53,21 +53,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 220px;
- }
+}
 
- #chatHeaderRight {
+#chatHeaderRight {
   display: flex;
   align-items: center;
   gap: 8px;
- }
+}
 
- .chatCollapseBtn {
+.chatCollapseBtn {
   width: var(--control-h);
   height: var(--control-h);
   font-size: var(--fs-body);
- }
+}
 
- #chatLog {
+#chatLog {
   height: auto;
   flex: 1;
   min-height: 140px;
@@ -78,108 +78,108 @@
   line-height: 1.45;
   white-space: normal;
   -webkit-overflow-scrolling: touch;
- }
+}
 
- #chat.chatEmpty #chatLog {
+#chat.chatEmpty #chatLog {
   min-height: 80px;
- }
+}
 
- .chatLine {
+.chatLine {
   display: grid;
   gap: 4px;
   padding: 8px 10px;
   border-radius: var(--r-md);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(0, 0, 0, 0.14);
- }
+}
 
- .chatLine + .chatLine {
+.chatLine + .chatLine {
   margin-top: 8px;
- }
+}
 
- .chatMeta {
+.chatMeta {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
- }
+}
 
- .chatName {
+.chatName {
   font-weight: 800;
   color: rgba(255, 255, 255, 0.92);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
- }
+}
 
- .chatTime {
+.chatTime {
   flex: 0 0 auto;
   font-size: var(--fs-meta);
   font-variant-numeric: tabular-nums;
   color: rgba(229, 231, 235, 0.62);
- }
+}
 
- .chatText {
+.chatText {
   color: rgba(255, 255, 255, 0.86);
   word-break: break-word;
- }
+}
 
- #chatForm {
-   display: flex;
-   gap: 8px;
-   padding: var(--pad-md);
-   border-top: 1px solid var(--border2);
- }
+#chatForm {
+  display: flex;
+  gap: 8px;
+  padding: var(--pad-md);
+  border-top: 1px solid var(--border2);
+}
 
- #emojiBtn {
-   padding: 8px 10px;
-   border-radius: var(--r-sm);
-   border: 1px solid var(--border);
-   background: var(--btn);
- }
+#emojiBtn {
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--btn);
+}
 
- #chatInputWrap {
-   flex: 1;
-   position: relative;
-   border-radius: var(--r-sm);
-   border: 1px solid var(--border);
-   background: var(--panel2);
- }
+#chatInputWrap {
+  flex: 1;
+  position: relative;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--panel2);
+}
 
- #chatInput {
-   width: 100%;
-   padding: 8px 10px;
-   border-radius: var(--r-sm);
-   border: none;
-   background: transparent;
-   color: var(--text);
-   outline: none;
-   resize: none;
-   min-height: 36px;
-   line-height: 1.35;
- }
+#chatInput {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  border: none;
+  background: transparent;
+  color: var(--text);
+  outline: none;
+  resize: none;
+  min-height: 36px;
+  line-height: 1.35;
+}
 
- #chatInput:focus-visible {
+#chatInput:focus-visible {
   border-color: var(--focus);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
- }
+}
 
- #chatBtn {
-   width: 36px;
-   height: 36px;
-   padding: 0;
-   display: inline-flex;
-   align-items: center;
-   justify-content: center;
- }
+#chatBtn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 
- #chatBtn:focus-visible {
+#chatBtn:focus-visible {
   outline: none;
   border-color: var(--focus);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
- }
+}
 
- .badge {
+.badge {
   min-width: 18px;
   height: 18px;
   padding: 0 6px;
@@ -192,46 +192,46 @@
   align-items: center;
   justify-content: center;
   line-height: 1;
- }
+}
 
- .badge.hidden {
+.badge.hidden {
   display: none;
- }
+}
 
- #rightInfo .rightDetailsSummary {
+#rightInfo .rightDetailsSummary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
- }
+}
 
- #rightInfo .rightDetailsSummary .badge {
+#rightInfo .rightDetailsSummary .badge {
   flex: 0 0 auto;
- }
+}
 
- .rightEmpty {
+.rightEmpty {
   padding: 10px 10px 12px;
   display: grid;
   gap: 4px;
- }
+}
 
- .rightEmptyTitle {
+.rightEmptyTitle {
   font-size: var(--fs-meta);
   font-weight: 800;
   color: rgba(255, 255, 255, 0.86);
- }
+}
 
- .rightEmptyDesc {
+.rightEmptyDesc {
   font-size: var(--fs-meta);
   font-weight: 700;
   color: var(--muted);
- }
+}
 
- .rightEmpty.hidden {
+.rightEmpty.hidden {
   display: none;
- }
+}
 
- #emojiPanel {
+#emojiPanel {
   display: none;
   padding: 8px 8px 10px;
   border-top: 1px solid var(--border2);
@@ -239,11 +239,11 @@
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   position: relative;
- }
+}
 
- #chat.collapsed #chatLog,
- #chat.collapsed #chatForm,
- #chat.collapsed #emojiPanel {
+#chat.collapsed #chatLog,
+#chat.collapsed #chatForm,
+#chat.collapsed #emojiPanel {
   display: none;
 }
 

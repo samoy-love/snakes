@@ -8,466 +8,453 @@
    Цвет тира живёт ТОЛЬКО здесь — в полоске карточки, бейдже и цвете цены.
    В самом предмете (превью, канвас) он не появляется: иначе игрок читает
    «фиолетовый = дорогой», а не «предмет интересный».
-   client.js вешает модификатор тира и на .cosmeticsItem, и на .tierBadge.
+   Модификатор тира клиент вешает на .cosmeticsItem и на разделитель группы
+   .cosmeticsTierSep — цвет приходит оттуда через --tier-color.
    ========================================================================== */
 
- .tierBase {
-   --tier-color: var(--tier-base);
- }
- .tierCommon {
-   --tier-color: var(--tier-common);
- }
- .tierRare {
-   --tier-color: var(--tier-rare);
- }
- .tierEpic {
-   --tier-color: var(--tier-epic);
- }
- .tierLegendary {
-   --tier-color: var(--tier-legendary);
- }
- .tierMythic {
-   --tier-color: var(--tier-mythic);
- }
+.tierBase {
+  --tier-color: var(--tier-base);
+}
+.tierCommon {
+  --tier-color: var(--tier-common);
+}
+.tierRare {
+  --tier-color: var(--tier-rare);
+}
+.tierEpic {
+  --tier-color: var(--tier-epic);
+}
+.tierLegendary {
+  --tier-color: var(--tier-legendary);
+}
+.tierMythic {
+  --tier-color: var(--tier-mythic);
+}
 
- .tierBadge {
-   display: inline-flex;
-   align-items: center;
-   justify-content: center;
-   flex: 0 0 auto;
-   /* .cosmeticsItemLeft — grid, поэтому без justify-self бейдж растянется на строку */
-   justify-self: start;
-   width: fit-content;
-   padding: 1px 7px;
-   border-radius: 999px;
-   font-size: var(--fs-11);
-   font-weight: 800;
-   letter-spacing: 0.4px;
-   text-transform: uppercase;
-   line-height: 1.6;
-   white-space: nowrap;
-   color: var(--tier-color, var(--tier-base));
-   border: 1px solid color-mix(in srgb, var(--tier-color, var(--tier-base)) 55%, transparent);
-   background: color-mix(in srgb, var(--tier-color, var(--tier-base)) 16%, rgba(0, 0, 0, 0.35));
- }
+/* .tierBadge удалён целиком. Бейдж редкости в заголовке карточки перестал
+   существовать ещё в волне 6 (U8: редкость названа разделителем группы
+   «ОБЫЧНЫЙ», второй раз повторять её в каждой карточке незачем) — клиент
+   такой элемент не создаёт ни в одной ветке рендера. Оформление осталось
+   висеть вместе с правилом `display: none` на него же в 10-ux-waves.css:
+   сорок строк красили и тут же гасили то, чего нет. */
 
- /* --- Полоса тира и цвет цены ---------------------------------------------- */
- .cosmeticsItem {
-   position: relative;
-   border-left-width: 4px;
-   border-left-color: var(--tier-color, rgba(255, 255, 255, 0.10));
- }
+/* --- Полоса тира и цвет цены ---------------------------------------------- */
+.cosmeticsItem {
+  position: relative;
+  border-left-width: 4px;
+  border-left-color: var(--tier-color, rgba(255, 255, 255, 0.10));
+}
 
- .cosmeticsItem .cosmeticsPrice .num {
-   color: var(--tier-color, rgba(255, 255, 255, 0.88));
- }
+.cosmeticsItem .cosmeticsPrice .num {
+  color: var(--tier-color, rgba(255, 255, 255, 0.88));
+}
 
- /* Legendary: внутреннее свечение карточки (background-image, чтобы не
-    конфликтовать с box-shadow состояний .isSelected/.isEquipped) */
- .cosmeticsItem.tierLegendary {
-   background-image: radial-gradient(130% 120% at 0% 50%, color-mix(in srgb, var(--tier-legendary) 18%, transparent), transparent 62%);
- }
+/* Legendary: внутреннее свечение карточки (background-image, чтобы не
+   конфликтовать с box-shadow состояний .isSelected/.isEquipped) */
+.cosmeticsItem.tierLegendary {
+  background-image: radial-gradient(130% 120% at 0% 50%, color-mix(in srgb, var(--tier-legendary) 18%, transparent), transparent 62%);
+}
 
- /* Mythic: анимированная градиентная рамка (переиспользует @keyframes shimmer)
-    + «дыхание» 6с */
- .cosmeticsItem.tierMythic {
-   border-color: transparent;
-   animation: tierBreathe 6s ease-in-out infinite;
- }
+/* Mythic: анимированная градиентная рамка (переиспользует @keyframes shimmer)
+   + «дыхание» 6с */
+.cosmeticsItem.tierMythic {
+  border-color: transparent;
+  animation: tierBreathe 6s ease-in-out infinite;
+}
 
- .cosmeticsItem.tierMythic::before {
-   content: '';
-   position: absolute;
-   /* растягиваем на область рамки (1px сверху/справа/снизу, 4px — полоса тира) */
-   inset: -1px -1px -1px -4px;
-   border-radius: inherit;
-   padding: 1px 1px 1px 4px;
-   background: linear-gradient(90deg, var(--tier-mythic), var(--tier-epic), var(--tier-legendary), var(--tier-mythic));
-   background-size: 220% 100%;
-   animation: shimmer 2600ms linear infinite;
-   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-   -webkit-mask-composite: xor;
-   mask-composite: exclude;
-   pointer-events: none;
- }
+.cosmeticsItem.tierMythic::before {
+  content: '';
+  position: absolute;
+  /* растягиваем на область рамки (1px сверху/справа/снизу, 4px — полоса тира) */
+  inset: -1px -1px -1px -4px;
+  border-radius: inherit;
+  padding: 1px 1px 1px 4px;
+  background: linear-gradient(90deg, var(--tier-mythic), var(--tier-epic), var(--tier-legendary), var(--tier-mythic));
+  background-size: 220% 100%;
+  animation: shimmer 2600ms linear infinite;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
 
- @keyframes tierBreathe {
-   0%,
-   100% {
-     filter: brightness(1);
-   }
-   50% {
-     filter: brightness(1.14);
-   }
- }
+@keyframes tierBreathe {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.14);
+  }
+}
 
- /* --- Три состояния карточки ------------------------------------------------
-    Порядок важен: .isEquipped объявлен последним и перебивает .isOwned. */
- .cosmeticsItem.isLocked {
-   background-color: rgba(0, 0, 0, 0.26);
- }
+/* --- Три состояния карточки ------------------------------------------------
+   Порядок важен: .isEquipped объявлен последним и перебивает .isOwned. */
+.cosmeticsItem.isLocked {
+  background-color: rgba(0, 0, 0, 0.26);
+}
 
- .cosmeticsItem.isLocked .cosmeticsItemTitle {
-   color: rgba(255, 255, 255, 0.80);
- }
+.cosmeticsItem.isLocked .cosmeticsItemTitle {
+  color: rgba(255, 255, 255, 0.80);
+}
 
- /* Превью НЕ глушим в серость: именно оно — мотивация купить */
- .cosmeticsItem.isLocked .cosmeticsItemPreview::after {
-   content: '🔒';
-   position: absolute;
-   right: 1px;
-   bottom: 0;
-   padding: 1px 3px;
-   border-radius: 6px;
-   font-size: var(--fs-meta);
-   line-height: 1.2;
-   background: rgba(0, 0, 0, 0.66);
-   color: rgba(255, 255, 255, 0.94);
-   pointer-events: none;
- }
+/* Превью НЕ глушим в серость: именно оно — мотивация купить */
+.cosmeticsItem.isLocked .cosmeticsItemPreview::after {
+  content: '🔒';
+  position: absolute;
+  right: 1px;
+  bottom: 0;
+  padding: 1px 3px;
+  border-radius: 6px;
+  font-size: var(--fs-meta);
+  line-height: 1.2;
+  background: rgba(0, 0, 0, 0.66);
+  color: rgba(255, 255, 255, 0.94);
+  pointer-events: none;
+}
 
- .cosmeticsItem.isOwned {
-   background-color: color-mix(in srgb, var(--brand) 7%, transparent);
-   border-top-color: color-mix(in srgb, var(--brand) 22%, transparent);
-   border-right-color: color-mix(in srgb, var(--brand) 22%, transparent);
-   border-bottom-color: color-mix(in srgb, var(--brand) 22%, transparent);
- }
+.cosmeticsItem.isOwned {
+  background-color: color-mix(in srgb, var(--brand) 7%, transparent);
+  border-top-color: color-mix(in srgb, var(--brand) 22%, transparent);
+  border-right-color: color-mix(in srgb, var(--brand) 22%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--brand) 22%, transparent);
+}
 
- .cosmeticsItem.isOwned .cosmeticsItemTitle::before {
-   content: '✓ ';
-   color: var(--brand);
-   font-weight: 800;
- }
+.cosmeticsItem.isOwned .cosmeticsItemTitle::before {
+  content: '✓ ';
+  color: var(--brand);
+  font-weight: 800;
+}
 
- .cosmeticsItem.isEquipped {
-   background-color: color-mix(in srgb, var(--brand2) 14%, transparent);
-   border-top-color: color-mix(in srgb, var(--accent2) 62%, transparent);
-   border-right-color: color-mix(in srgb, var(--accent2) 62%, transparent);
-   border-bottom-color: color-mix(in srgb, var(--accent2) 62%, transparent);
-   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent2) 26%, transparent);
- }
+.cosmeticsItem.isEquipped {
+  background-color: color-mix(in srgb, var(--brand2) 14%, transparent);
+  border-top-color: color-mix(in srgb, var(--accent2) 62%, transparent);
+  border-right-color: color-mix(in srgb, var(--accent2) 62%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--accent2) 62%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent2) 26%, transparent);
+}
 
- .cosmeticsItem.isEquipped .cosmeticsItemTitle::before {
-   content: '★ ';
-   color: var(--accent2);
-   font-weight: 800;
- }
+.cosmeticsItem.isEquipped .cosmeticsItemTitle::before {
+  content: '★ ';
+  color: var(--accent2);
+  font-weight: 800;
+}
 
- /* --- Прогресс до покупки на заблокированном товаре ------------------------- */
- .cosmeticsItemProgress {
-   position: relative;
-   height: 5px;
-   margin-top: 5px;
-   border-radius: 999px;
-   border: 1px solid rgba(255, 255, 255, 0.08);
-   background: rgba(0, 0, 0, 0.30);
-   overflow: hidden;
- }
+/* --- Прогресс до покупки на заблокированном товаре ------------------------- */
+.cosmeticsItemProgress {
+  position: relative;
+  height: 5px;
+  margin-top: 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.30);
+  overflow: hidden;
+}
 
- /* Ширину заливки client.js задаёт инлайном на единственном дочернем элементе */
- .cosmeticsItemProgress > * {
-   display: block;
-   height: 100%;
-   width: 0%;
-   max-width: 100%;
-   border-radius: 999px;
-   background: linear-gradient(90deg, color-mix(in srgb, var(--tier-color, var(--accent2)) 85%, transparent), color-mix(in srgb, var(--tier-color, var(--accent2)) 35%, transparent));
-   transition: width 260ms ease;
- }
+/* Ширину заливки client.js задаёт инлайном на единственном дочернем элементе */
+.cosmeticsItemProgress > * {
+  display: block;
+  height: 100%;
+  width: 0%;
+  max-width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tier-color, var(--accent2)) 85%, transparent), color-mix(in srgb, var(--tier-color, var(--accent2)) 35%, transparent));
+  transition: width 260ms ease;
+}
 
- /* ==========================================================================
-    Вкладка титулов. Титул — не товар: он не покупается, а выдаётся за ачивку.
-    Поэтому карточка намеренно не похожа на товарную: золотой акцент вместо
-    синего, медаль вместо превью-канваса, «условие получения» вместо цены и
-    полное отсутствие значков валюты. Тировые цвета сюда НЕ приходят.
-    ========================================================================== */
- .cosmeticsItems.isTitles {
-   --title-accent: var(--gold);
- }
+/* ==========================================================================
+   Вкладка титулов. Титул — не товар: он не покупается, а выдаётся за ачивку.
+   Поэтому карточка намеренно не похожа на товарную: золотой акцент вместо
+   синего, медаль вместо превью-канваса, «условие получения» вместо цены и
+   полное отсутствие значков валюты. Тировые цвета сюда НЕ приходят.
+   ========================================================================== */
+.cosmeticsItems.isTitles {
+  --title-accent: var(--gold);
+}
 
- .titleItem {
-   position: relative;
-   display: flex;
-   align-items: center;
-   gap: 10px;
-   flex-wrap: wrap;
-   row-gap: 8px;
-   padding: 10px;
-   border-radius: var(--r-md);
-   border: 1px solid color-mix(in srgb, var(--title-accent, var(--gold)) 22%, var(--border2));
-   border-left: 4px solid color-mix(in srgb, var(--title-accent, var(--gold)) 45%, transparent);
-   background:
-     radial-gradient(120% 140% at 0% 50%, color-mix(in srgb, var(--title-accent, var(--gold)) 10%, transparent), transparent 60%),
-     rgba(0, 0, 0, 0.18);
- }
+.titleItem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  row-gap: 8px;
+  padding: 10px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--title-accent, var(--gold)) 22%, var(--border2));
+  border-left: 4px solid color-mix(in srgb, var(--title-accent, var(--gold)) 45%, transparent);
+  background:
+    radial-gradient(120% 140% at 0% 50%, color-mix(in srgb, var(--title-accent, var(--gold)) 10%, transparent), transparent 60%),
+    rgba(0, 0, 0, 0.18);
+}
 
- .titleItem:focus-visible {
-   outline: 2px solid var(--focus);
-   outline-offset: 2px;
- }
+.titleItem:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
 
- /* Медаль вместо канваса-превью — сразу читается как «награда» */
- .titleMedal {
-   flex: 0 0 auto;
-   display: inline-flex;
-   align-items: center;
-   justify-content: center;
-   width: 40px;
-   height: 40px;
-   border-radius: 999px;
-   font-size: var(--fs-18);
-   line-height: 1;
-   border: 1px solid color-mix(in srgb, var(--title-accent, var(--gold)) 42%, transparent);
-   background: color-mix(in srgb, var(--title-accent, var(--gold)) 14%, rgba(0, 0, 0, 0.35));
- }
+/* Медаль вместо канваса-превью — сразу читается как «награда» */
+.titleMedal {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  font-size: var(--fs-18);
+  line-height: 1;
+  border: 1px solid color-mix(in srgb, var(--title-accent, var(--gold)) 42%, transparent);
+  background: color-mix(in srgb, var(--title-accent, var(--gold)) 14%, rgba(0, 0, 0, 0.35));
+}
 
- .titleItemLeft {
-   display: grid;
-   gap: 2px;
-   min-width: 0;
-   flex: 1 1 0;
- }
+.titleItemLeft {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 0;
+}
 
- .titleName {
-   font-weight: 800;
-   font-size: var(--fs-13);
-   letter-spacing: 0.2px;
-   min-width: 0;
-   overflow: hidden;
-   text-overflow: ellipsis;
-   white-space: nowrap;
- }
+.titleName {
+  font-weight: 800;
+  font-size: var(--fs-13);
+  letter-spacing: 0.2px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
- .titleDesc {
-   font-size: var(--fs-12);
-   color: var(--muted);
-   min-width: 0;
-   overflow: hidden;
-   text-overflow: ellipsis;
-   white-space: nowrap;
- }
+.titleDesc {
+  font-size: var(--fs-12);
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
- /* Условие получения вместо цены. Валюта здесь не упоминается принципиально. */
- .titleReq {
-   display: inline-flex;
-   align-items: center;
-   gap: 6px;
-   font-size: var(--fs-11);
-   font-weight: 800;
-   line-height: 1.35;
-   color: color-mix(in srgb, var(--title-accent, var(--gold)) 72%, var(--text));
- }
+/* Условие получения вместо цены. Валюта здесь не упоминается принципиально. */
+.titleReq {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-11);
+  font-weight: 800;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--title-accent, var(--gold)) 72%, var(--text));
+}
 
- .titleReq::before {
-   content: '🎯';
-   font-size: var(--fs-meta);
- }
+.titleReq::before {
+  content: '🎯';
+  font-size: var(--fs-meta);
+}
 
- .titleItemRight {
-   display: flex;
-   align-items: center;
-   gap: 8px;
-   flex: 0 0 auto;
- }
+.titleItemRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
 
- .titleItem.isLocked {
-   border-left-color: var(--border);
-   background: rgba(0, 0, 0, 0.26);
- }
+.titleItem.isLocked {
+  border-left-color: var(--border);
+  background: rgba(0, 0, 0, 0.26);
+}
 
- .titleItem.isLocked .titleMedal {
-   border-color: var(--border);
-   background: rgba(0, 0, 0, 0.35);
-   /* Медаль глушим — в отличие от превью товара, здесь она ничего не продаёт */
-   filter: grayscale(1);
-   opacity: 0.7;
- }
+.titleItem.isLocked .titleMedal {
+  border-color: var(--border);
+  background: rgba(0, 0, 0, 0.35);
+  /* Медаль глушим — в отличие от превью товара, здесь она ничего не продаёт */
+  filter: grayscale(1);
+  opacity: 0.7;
+}
 
- .titleItem.isLocked .titleName {
-   color: rgba(255, 255, 255, 0.78);
- }
+.titleItem.isLocked .titleName {
+  color: rgba(255, 255, 255, 0.78);
+}
 
- .titleItem.isUnlocked .titleName::before {
-   content: '✓ ';
-   color: var(--gold);
- }
+.titleItem.isUnlocked .titleName::before {
+  content: '✓ ';
+  color: var(--gold);
+}
 
- .titleItem.isEquipped {
-   border-color: color-mix(in srgb, var(--title-accent, var(--gold)) 60%, transparent);
-   box-shadow: 0 0 0 2px color-mix(in srgb, var(--title-accent, var(--gold)) 24%, transparent);
-   background:
-     radial-gradient(120% 140% at 0% 50%, color-mix(in srgb, var(--title-accent, var(--gold)) 20%, transparent), transparent 66%),
-     rgba(0, 0, 0, 0.18);
- }
+.titleItem.isEquipped {
+  border-color: color-mix(in srgb, var(--title-accent, var(--gold)) 60%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--title-accent, var(--gold)) 24%, transparent);
+  background:
+    radial-gradient(120% 140% at 0% 50%, color-mix(in srgb, var(--title-accent, var(--gold)) 20%, transparent), transparent 66%),
+    rgba(0, 0, 0, 0.18);
+}
 
- .titleItem.isEquipped .titleName::before {
-   content: '★ ';
-   color: var(--gold);
- }
+.titleItem.isEquipped .titleName::before {
+  content: '★ ';
+  color: var(--gold);
+}
 
- /* Прогресс к ачивке — та же механика, что у товара, но в золоте */
- .titleItem .cosmeticsItemProgress {
-   --tier-color: var(--title-accent, var(--gold));
- }
+/* Прогресс к ачивке — та же механика, что у товара, но в золоте */
+.titleItem .cosmeticsItemProgress {
+  --tier-color: var(--title-accent, var(--gold));
+}
 
- /* Вкладка титулов в ленте категорий: золотой акцент вместо синего */
- .cosmeticsTabBtn.isTitles[aria-selected="true"] {
-   border-color: color-mix(in srgb, var(--gold) 60%, var(--border2));
-   background: linear-gradient(180deg, color-mix(in srgb, var(--gold) 18%, transparent), rgba(0, 0, 0, 0.18));
-   color: #fffbeb;
- }
+/* Вкладка титулов в ленте категорий: золотой акцент вместо синего */
+.cosmeticsTabBtn.isTitles[aria-selected="true"] {
+  border-color: color-mix(in srgb, var(--gold) 60%, var(--border2));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--gold) 18%, transparent), rgba(0, 0, 0, 0.18));
+  color: #fffbeb;
+}
 
- /* Титул перед ником: в таблице лидеров и в итогах матча.
-    Компактный inline-блок, не влияет на высоту строки и ширину колонок. */
- .playerTitle {
-   display: inline-block;
-   max-width: 10ch;
-   overflow: hidden;
-   text-overflow: ellipsis;
-   white-space: nowrap;
-   vertical-align: baseline;
-   margin-right: 5px;
-   padding: 0 5px;
-   border-radius: 6px;
-   font-size: var(--fs-11);
-   font-weight: 800;
-   letter-spacing: 0.2px;
-   text-transform: uppercase;
-   line-height: 1.5;
-   color: color-mix(in srgb, var(--gold) 80%, #fff);
-   border: 1px solid color-mix(in srgb, var(--gold) 38%, transparent);
-   background: color-mix(in srgb, var(--gold) 14%, rgba(0, 0, 0, 0.3));
- }
+/* Титул перед ником: в таблице лидеров и в итогах матча.
+   Компактный inline-блок, не влияет на высоту строки и ширину колонок. */
+.playerTitle {
+  display: inline-block;
+  max-width: 10ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: baseline;
+  margin-right: 5px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: var(--fs-11);
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--gold) 80%, #fff);
+  border: 1px solid color-mix(in srgb, var(--gold) 38%, transparent);
+  background: color-mix(in srgb, var(--gold) 14%, rgba(0, 0, 0, 0.3));
+}
 
- @media (max-width: 720px) {
-   .playerTitle {
-     max-width: 7ch;
-   }
+@media (max-width: 720px) {
+  .playerTitle {
+    max-width: 7ch;
+  }
 
-   .titleItemRight {
-     flex: 1 0 100%;
-   }
+  .titleItemRight {
+    flex: 1 0 100%;
+  }
 
-   .titleItemRight > button {
-     flex: 1;
-     min-height: 48px;
-   }
- }
+  .titleItemRight > button {
+    flex: 1;
+    min-height: 48px;
+  }
+}
 
- /* --- Контракт п.4: подсветка числа во время count-up ----------------------- */
- .counting {
-   display: inline-block;
-   color: var(--gold);
-   text-shadow: 0 0 10px color-mix(in srgb, var(--gold) 55%, transparent), 0 0 2px color-mix(in srgb, var(--gold) 70%, transparent);
-   transform: scale(1.08);
-   transition: transform 140ms ease, text-shadow 140ms ease, color 140ms ease;
- }
+/* --- Контракт п.4: подсветка числа во время count-up ----------------------- */
+.counting {
+  display: inline-block;
+  color: var(--gold);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--gold) 55%, transparent), 0 0 2px color-mix(in srgb, var(--gold) 70%, transparent);
+  transform: scale(1.08);
+  transition: transform 140ms ease, text-shadow 140ms ease, color 140ms ease;
+}
 
- .cosmeticsPreviewWrap {
-   margin-top: 10px;
-   border-radius: var(--r-lg);
-   border: 1px solid rgba(255, 255, 255, 0.10);
-   background: radial-gradient(600px 280px at 50% 35%, color-mix(in srgb, var(--brand2) 10%, transparent), rgba(0, 0, 0, 0.22));
-   overflow: hidden;
- }
+.cosmeticsPreviewWrap {
+  margin-top: 10px;
+  border-radius: var(--r-lg);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: radial-gradient(600px 280px at 50% 35%, color-mix(in srgb, var(--brand2) 10%, transparent), rgba(0, 0, 0, 0.22));
+  overflow: hidden;
+}
 
- #cosmeticsPreview {
-   width: 100%;
-   /* Пропорция задаётся здесь, а не атрибутами width/height: их значение теперь
-      выставляет JS под devicePixelRatio (иначе превью мылится на retina). */
-   aspect-ratio: 420 / 260;
-   height: auto;
-   display: block;
- }
+#cosmeticsPreview {
+  width: 100%;
+  /* Пропорция задаётся здесь, а не атрибутами width/height: их значение теперь
+     выставляет JS под devicePixelRatio (иначе превью мылится на retina). */
+  aspect-ratio: 420 / 260;
+  height: auto;
+  display: block;
+}
 
- .menuPanelBody {
-   display: grid;
-   gap: 10px;
-   margin-top: 10px;
- }
+.menuPanelBody {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
 
- .menuActions {
-   display: flex;
-   justify-content: flex-start;
-   gap: var(--pad-md);
-   flex-wrap: wrap;
- }
+.menuActions {
+  display: flex;
+  justify-content: flex-start;
+  gap: var(--pad-md);
+  flex-wrap: wrap;
+}
 
- /* H4: «Играть» — отдельной строкой и доминирует, «Косметика» — ниже и второстепенна */
- .menuActionsStacked {
-   flex-direction: column;
-   align-items: stretch;
- }
+/* H4: «Играть» — отдельной строкой и доминирует, «Косметика» — ниже и второстепенна */
+.menuActionsStacked {
+  flex-direction: column;
+  align-items: stretch;
+}
 
- .btnPlay {
-   min-height: 56px;
-   font-size: var(--fs-18);
-   font-weight: 800;
-   letter-spacing: 0.3px;
-   border-radius: var(--btn-play-radius);
-   border-color: color-mix(in srgb, var(--brand) 65%, transparent);
-   background: linear-gradient(135deg, var(--brand), var(--brand2));
-   box-shadow: var(--btn-play-shadow);
- }
+.btnPlay {
+  min-height: 56px;
+  font-size: var(--fs-18);
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  border-radius: var(--btn-play-radius);
+  border-color: color-mix(in srgb, var(--brand) 65%, transparent);
+  background: linear-gradient(135deg, var(--brand), var(--brand2));
+  box-shadow: var(--btn-play-shadow);
+}
 
- .btnPlay:hover {
-   filter: brightness(1.08);
-   box-shadow: var(--btn-play-shadow-hover);
- }
+.btnPlay:hover {
+  filter: brightness(1.08);
+  box-shadow: var(--btn-play-shadow-hover);
+}
 
- .btnPlay:disabled {
-   box-shadow: none;
- }
+.btnPlay:disabled {
+  box-shadow: none;
+}
 
- .btnMenuSecondary {
-   font-weight: 700;
-   color: var(--muted);
- }
+.btnMenuSecondary {
+  font-weight: 700;
+  color: var(--muted);
+}
 
- .menuPanelPrimary .menuActions {
-   justify-content: stretch;
- }
+.menuPanelPrimary .menuActions {
+  justify-content: stretch;
+}
 
- .menuPanelPrimary .menuActions > * {
-   width: 100%;
- }
+.menuPanelPrimary .menuActions > * {
+  width: 100%;
+}
 
- .menuPanelBody input {
-   flex: 1;
-   padding: var(--pad-md) var(--pad-lg);
-   border-radius: var(--r-md);
-   border: 1px solid var(--border);
-   background: var(--panel2);
-   color: var(--text);
-   outline: none;
-   min-height: var(--control-h);
-   min-width: 0;
- }
+.menuPanelBody input {
+  flex: 1;
+  padding: var(--pad-md) var(--pad-lg);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  outline: none;
+  min-height: var(--control-h);
+  min-width: 0;
+}
 
- /* Пресет эффектов (#fxPresetSelect) и любые другие select в панелях настроек */
- .menuPanelBody select {
-   flex: 1;
-   min-width: 0;
-   padding: var(--pad-sm) var(--pad-md);
-   border-radius: var(--r-md);
-   border: 1px solid var(--border);
-   background: var(--panel2);
-   color: var(--text);
-   outline: none;
-   min-height: var(--control-h);
-   cursor: pointer;
- }
+/* Пресет эффектов (#fxPresetSelect) и любые другие select в панелях настроек */
+.menuPanelBody select {
+  flex: 1;
+  min-width: 0;
+  padding: var(--pad-sm) var(--pad-md);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  outline: none;
+  min-height: var(--control-h);
+  cursor: pointer;
+}
 
- .menuPanelBody input:focus-visible,
- .menuPanelBody select:focus-visible {
-   border-color: var(--focus);
-   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
- }
+.menuPanelBody input:focus-visible,
+.menuPanelBody select:focus-visible {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
+}
 
- .btnPrimary,
- .btnSecondary,
- .btnGhost {
+.btnPrimary,
+.btnSecondary,
+.btnGhost {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -475,9 +462,9 @@
   font-weight: 800;
   line-height: 1;
   -webkit-tap-highlight-color: transparent;
- }
+}
 
- .btnPrimary {
+.btnPrimary {
   padding: var(--pad-md) 14px;
   border-radius: var(--r-md);
   border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent);
@@ -486,38 +473,38 @@
   cursor: pointer;
   min-height: var(--control-h);
   transition: transform 120ms ease, filter 120ms ease, border-color 120ms ease;
- }
+}
 
- .btnPrimary:active {
-   transform: translateY(1px);
- }
+.btnPrimary:active {
+  transform: translateY(1px);
+}
 
- .btnPrimary:focus-visible {
-   outline: none;
-   border-color: var(--focus);
-   box-shadow: var(--btn-focus-shadow);
- }
+.btnPrimary:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: var(--btn-focus-shadow);
+}
 
- .btnPrimary:disabled {
-   opacity: 0.55;
-   cursor: not-allowed;
-   filter: saturate(0.75);
- }
+.btnPrimary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: saturate(0.75);
+}
 
- .btnPrimary:disabled:hover,
- .btnPrimary:disabled:active {
-   transform: none;
-   filter: saturate(0.75);
- }
+.btnPrimary:disabled:hover,
+.btnPrimary:disabled:active {
+  transform: none;
+  filter: saturate(0.75);
+}
 
- .fieldError {
-   font-size: var(--fs-12);
-   font-weight: 700;
-   color: rgba(255, 140, 200, 0.92);
-   min-height: 16px;
- }
+.fieldError {
+  font-size: var(--fs-12);
+  font-weight: 700;
+  color: rgba(255, 140, 200, 0.92);
+  min-height: 16px;
+}
 
- .btnSecondary {
+.btnSecondary {
   padding: var(--pad-md) 14px;
   border-radius: var(--r-md);
   border: 1px solid var(--border);
@@ -526,63 +513,63 @@
   cursor: pointer;
   min-height: var(--control-h);
   transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
- }
+}
 
- .btnSecondary:hover {
+.btnSecondary:hover {
   background: var(--btn2);
- }
+}
 
- .btnSecondary:active {
+.btnSecondary:active {
   transform: translateY(1px);
- }
+}
 
- .btnSecondary:focus-visible {
+.btnSecondary:focus-visible {
   outline: none;
   border-color: var(--focus);
   box-shadow: var(--btn-focus-shadow);
- }
+}
 
- .btnSecondary:disabled {
+.btnSecondary:disabled {
   opacity: 0.55;
   cursor: not-allowed;
- }
+}
 
- .btnGhost {
-   padding: 8px 10px;
-   border-radius: var(--r-md);
-   border: 1px solid var(--border);
-   background: rgba(255, 255, 255, 0.06);
-   color: var(--text);
-   cursor: pointer;
-   min-height: var(--control-h);
-   transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
- }
+.btnGhost {
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  cursor: pointer;
+  min-height: var(--control-h);
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
 
- .btnGhost:disabled {
-   opacity: 0.55;
-   cursor: not-allowed;
- }
+.btnGhost:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
- .btnGhost:disabled:hover,
- .btnGhost:disabled:active {
-   transform: none;
- }
+.btnGhost:disabled:hover,
+.btnGhost:disabled:active {
+  transform: none;
+}
 
- .btnGhost:hover {
-   background: var(--btn2);
- }
+.btnGhost:hover {
+  background: var(--btn2);
+}
 
- .btnGhost:active {
-   transform: translateY(1px);
- }
+.btnGhost:active {
+  transform: translateY(1px);
+}
 
- .btnGhost:focus-visible {
-   outline: none;
-   border-color: var(--focus);
-   box-shadow: var(--btn-focus-shadow);
- }
+.btnGhost:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: var(--btn-focus-shadow);
+}
 
- .iconBtn {
+.iconBtn {
   width: var(--control-h);
   height: var(--control-h);
   padding: 0;
@@ -598,229 +585,229 @@
   line-height: 1;
   transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
   -webkit-tap-highlight-color: transparent;
- }
+}
 
- .iconBtn:hover {
+.iconBtn:hover {
   background: var(--btn2);
- }
+}
 
- .iconBtn:active {
+.iconBtn:active {
   transform: translateY(1px);
- }
+}
 
- .iconBtn:focus-visible {
+.iconBtn:focus-visible {
   outline: none;
   border-color: var(--focus);
   box-shadow: var(--btn-focus-shadow);
- }
+}
 
- .iconBtn:disabled {
+.iconBtn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
- }
+}
 
- @media (max-width: 720px) {
-   .overlay .card {
-     width: min(560px, calc(100vw - 24px));
-     padding: var(--pad-lg);
-   }
+@media (max-width: 720px) {
+  .overlay .card {
+    width: min(560px, calc(100vw - 24px));
+    padding: var(--pad-lg);
+  }
 
-   .menuGrid {
-     grid-template-columns: 1fr;
-   }
+  .menuGrid {
+    grid-template-columns: 1fr;
+  }
 
-   .cosmeticsGrid {
-     grid-template-columns: 1fr;
-   }
+  .cosmeticsGrid {
+    grid-template-columns: 1fr;
+  }
 
-   .menuPanel {
-     padding: 12px;
-   }
+  .menuPanel {
+    padding: 12px;
+  }
 
-   .roomsToolbar {
-     flex-direction: column;
-     align-items: stretch;
-   }
+  .roomsToolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
 
-   .roomsControls {
-     width: 100%;
-     flex-direction: column;
-     align-items: stretch;
-   }
+  .roomsControls {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
 
-   .roomsSearchWrap {
-     width: 100%;
-   }
+  .roomsSearchWrap {
+    width: 100%;
+  }
 
-   /* H12: хит-зона не уменьшается на мобильном, компактнее только сама иконка */
-   .roomsSearchWrap .iconBtn {
-     width: var(--control-h);
-     height: var(--control-h);
-     min-height: var(--control-h);
-     font-size: var(--fs-body);
-   }
+  /* H12: хит-зона не уменьшается на мобильном, компактнее только сама иконка */
+  .roomsSearchWrap .iconBtn {
+    width: var(--control-h);
+    height: var(--control-h);
+    min-height: var(--control-h);
+    font-size: var(--fs-body);
+  }
 
-   .roomsControls input,
-   .roomsControls select {
-     font-size: 16px;
-     width: 100%;
-     max-width: 100%;
-     min-width: 0;
-   }
+  .roomsControls input,
+  .roomsControls select {
+    font-size: 16px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
 
-   /* C16: тач-цели не меньше 44px (в т.ч. фильтры/вкладки магазина и вторичные кнопки) */
-   .cosmeticsFilters {
-     --filter-btn-h: 44px;
-   }
+  /* C16: тач-цели не меньше 44px (в т.ч. фильтры/вкладки магазина и вторичные кнопки) */
+  .cosmeticsFilters {
+    --filter-btn-h: 44px;
+  }
 
-   .btnPrimary,
-   .btnGhost,
-   .btnSecondary,
-   .cosmeticsFilters .btnGhost,
-   .cosmeticsTabBtn,
-   #roomsList button {
-     min-height: 44px;
-   }
+  .btnPrimary,
+  .btnGhost,
+  .btnSecondary,
+  .cosmeticsFilters .btnGhost,
+  .cosmeticsTabBtn,
+  #roomsList button {
+    min-height: 44px;
+  }
 
-   #roomsList {
-     max-height: min(320px, 46dvh);
-   }
+  #roomsList {
+    max-height: min(320px, 46dvh);
+  }
 
-   /* H11: действия панели комнат — отдельной строкой под заголовком */
-   .menuPanelHeader > .roomsHeaderActions {
-     width: 100%;
-     flex-wrap: wrap;
-     justify-content: flex-start;
-   }
+  /* H11: действия панели комнат — отдельной строкой под заголовком */
+  .menuPanelHeader > .roomsHeaderActions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
 
-   .menuPanelHeader > .roomsHeaderActions > * {
-     flex: 1 1 auto;
-   }
+  .menuPanelHeader > .roomsHeaderActions > * {
+    flex: 1 1 auto;
+  }
 
-   .roomRowTop {
-     align-items: flex-start;
-   }
+  .roomRowTop {
+    align-items: flex-start;
+  }
 
-   .roomRowLeft {
-     flex-wrap: wrap;
-   }
+  .roomRowLeft {
+    flex-wrap: wrap;
+  }
 
-   .roomsControls input {
-     width: auto;
-     flex: 1;
-     min-width: 0;
-   }
+  .roomsControls input {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+  }
 
-   .roomsControls select {
-     flex: 1;
-     min-width: 0;
-     overflow: hidden;
-     text-overflow: ellipsis;
-     white-space: nowrap;
-   }
+  .roomsControls select {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-   button,
-   input,
-   select {
-     touch-action: manipulation;
-   }
+  button,
+  input,
+  select {
+    touch-action: manipulation;
+  }
 
-   input,
-   select {
-     font-size: 16px;
-   }
- }
+  input,
+  select {
+    font-size: 16px;
+  }
+}
 
- /* H7: заголовок оверлея — верхний уровень иерархии */
- .overlayTitle {
-   font-family: var(--font-display);
-   font-weight: 800;
-   font-size: clamp(32px, 7vw, 56px);
-   line-height: 1.05;
-   letter-spacing: -0.5px;
-   margin-bottom: 8px;
-   background: linear-gradient(120deg, #f8fafc 0%, var(--brand) 55%, var(--brand2) 100%);
-   -webkit-background-clip: text;
-   background-clip: text;
-   color: transparent;
-   -webkit-text-fill-color: transparent;
- }
+/* H7: заголовок оверлея — верхний уровень иерархии */
+.overlayTitle {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(32px, 7vw, 56px);
+  line-height: 1.05;
+  letter-spacing: -0.5px;
+  margin-bottom: 8px;
+  background: linear-gradient(120deg, #f8fafc 0%, var(--brand) 55%, var(--brand2) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
 
- .overlayKicker {
-   display: inline-flex;
-   align-items: center;
-   gap: 8px;
-   padding: 2px 8px;
-   border-radius: 999px;
-   border: 1px solid var(--border2);
-   background: rgba(255, 255, 255, 0.06);
-   font-size: var(--fs-12);
-   color: var(--muted);
-   margin-bottom: 10px;
- }
+.overlayKicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border2);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: var(--fs-12);
+  color: var(--muted);
+  margin-bottom: 10px;
+}
 
- .overlaySub {
-   opacity: 0.8;
-   margin-bottom: 14px;
-   font-size: var(--fs-13);
- }
+.overlaySub {
+  opacity: 0.8;
+  margin-bottom: 14px;
+  font-size: var(--fs-13);
+}
 
- .overlayHint {
-   margin-top: 10px;
-   font-size: var(--fs-12);
-   color: var(--muted);
- }
+.overlayHint {
+  margin-top: 10px;
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
 
- .fieldInline {
-   display: flex;
-   align-items: center;
-   gap: 10px;
-   flex: 1;
-   min-width: 0;
- }
+.fieldInline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
 
- .fieldHint {
+.fieldHint {
   margin-top: -6px;
   font-size: var(--fs-12);
   color: var(--muted);
   line-height: 1.25;
- }
+}
 
- .settingsGroupTitle {
+.settingsGroupTitle {
   margin-top: 8px;
   font-size: var(--fs-meta);
   font-weight: 800;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--muted);
- }
+}
 
- .settingsFooterActions {
+.settingsFooterActions {
   margin-top: var(--pad-lg);
   gap: var(--pad-md);
- }
+}
 
- .settingsFooterActions > * {
+.settingsFooterActions > * {
   flex: 1;
- }
+}
 
- /* Переключатель языка в футере оверлея — круглая иконка, а не растянутая
-    кнопка: flex:1 из правила выше её бы размазало на треть строки. */
- .settingsFooterActions > .langToggle,
- .menuFooterActions > .langToggle {
+/* Переключатель языка в футере оверлея — круглая иконка, а не растянутая
+   кнопка: flex:1 из правила выше её бы размазало на треть строки. */
+.settingsFooterActions > .langToggle,
+.menuFooterActions > .langToggle {
   flex: 0 0 auto;
   margin-left: auto;
- }
+}
 
- /* Нативный чекбокс без appearance:none в паре с фоном/радиусом .menuPanelBody
-    input (11-redesign.css) рендерился по-разному в checked/unchecked: у
-    отмеченных ("Включить", "Глушить в фоне") accent-color рисовал бирюзовую
-    заливку с галочкой, а у неотмеченных ("Статистика (FPS)", "Компактно")
-    браузер показывал плоский серый квадрат без скругления и рамки — тот же
-    контрол выглядел как из другого интерфейса. appearance:none убирает
-    нативную отрисовку целиком, оба состояния теперь рисует один и тот же
-    набор правил ниже. */
- .menuPanelBody input[type="checkbox"] {
+/* Нативный чекбокс без appearance:none в паре с фоном/радиусом .menuPanelBody
+   input (11-redesign.css) рендерился по-разному в checked/unchecked: у
+   отмеченных ("Включить", "Глушить в фоне") accent-color рисовал бирюзовую
+   заливку с галочкой, а у неотмеченных ("Статистика (FPS)", "Компактно")
+   браузер показывал плоский серый квадрат без скругления и рамки — тот же
+   контрол выглядел как из другого интерфейса. appearance:none убирает
+   нативную отрисовку целиком, оба состояния теперь рисует один и тот же
+   набор правил ниже. */
+.menuPanelBody input[type="checkbox"] {
   -webkit-appearance: none;
   appearance: none;
   width: 20px;
@@ -832,18 +819,18 @@
   background: rgba(3, 8, 16, 0.55);
   cursor: pointer;
   transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
- }
+}
 
- .menuPanelBody input[type="checkbox"]:hover {
+.menuPanelBody input[type="checkbox"]:hover {
   border-color: rgba(148, 163, 184, 0.4);
- }
+}
 
- .menuPanelBody input[type="checkbox"]:focus-visible {
+.menuPanelBody input[type="checkbox"]:focus-visible {
   outline: none;
   box-shadow: var(--btn-focus-shadow);
- }
+}
 
- .menuPanelBody input[type="checkbox"]:checked {
+.menuPanelBody input[type="checkbox"]:checked {
   border-color: color-mix(in srgb, var(--brand) 55%, transparent);
   background: linear-gradient(135deg, var(--brand), var(--brand2));
   background-image:
@@ -852,24 +839,24 @@
   background-repeat: no-repeat, no-repeat;
   background-position: center, center;
   background-size: cover, 12px 12px;
- }
+}
 
- .menuPanelBody input[type="range"] {
+.menuPanelBody input[type="range"] {
   flex: 1;
   min-width: 120px;
- }
+}
 
- .menuPanelBody input[type="range"]:focus-visible {
+.menuPanelBody input[type="range"]:focus-visible {
   outline: none;
- }
+}
 
- .menuPanelBody input[type="range"]::-webkit-slider-runnable-track {
+.menuPanelBody input[type="range"]::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 999px;
   background: rgba(255,255,255,0.12);
- }
+}
 
- .menuPanelBody input[type="range"]::-webkit-slider-thumb {
+.menuPanelBody input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 16px;
@@ -878,53 +865,53 @@
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,0.22);
   background: linear-gradient(135deg, var(--brand), var(--brand2));
- }
+}
 
- .menuPanelBody input[type="range"]:focus-visible::-webkit-slider-thumb {
+.menuPanelBody input[type="range"]:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
- }
+}
 
- .menuPanelBody input[type="range"]::-moz-range-track {
+.menuPanelBody input[type="range"]::-moz-range-track {
   height: 6px;
   border-radius: 999px;
   background: rgba(255,255,255,0.12);
- }
+}
 
- .menuPanelBody input[type="range"]::-moz-range-thumb {
+.menuPanelBody input[type="range"]::-moz-range-thumb {
   width: 16px;
   height: 16px;
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,0.22);
   background: linear-gradient(135deg, var(--brand), var(--brand2));
- }
+}
 
- body {
+body {
   --hud-filter: brightness(var(--hud-brightness)) contrast(var(--hud-contrast));
- }
+}
 
- .fieldLabel {
-   font-size: var(--fs-13);
-   font-weight: 800;
-   line-height: 1;
-   color: var(--muted);
-   flex: 0 0 auto;
- }
+.fieldLabel {
+  font-size: var(--fs-13);
+  font-weight: 800;
+  line-height: 1;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
 
- .toast {
-   position: fixed;
-   left: 50%;
-   bottom: calc(16px + var(--sa-bottom));
-   transform: translateX(-50%);
-   z-index: var(--z-modal);
-   width: min(640px, calc(100vw - 24px));
-   pointer-events: none;
-   display: none;
- }
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + var(--sa-bottom));
+  transform: translateX(-50%);
+  z-index: var(--z-modal);
+  width: min(640px, calc(100vw - 24px));
+  pointer-events: none;
+  display: none;
+}
 
- /* Общая подложка для обоих режимов экрана «конец жизни» (смерть/итоги
-    матча) — раньше это были два отдельных position:fixed-оверлея с разным
-    z-index, теперь один #endOverlay, режимы внутри него взаимоисключающие. */
- .endOverlay {
+/* Общая подложка для обоих режимов экрана «конец жизни» (смерть/итоги
+   матча) — раньше это были два отдельных position:fixed-оверлея с разным
+   z-index, теперь один #endOverlay, режимы внутри него взаимоисключающие. */
+.endOverlay {
   position: fixed;
   inset: 0;
   display: flex;
@@ -934,48 +921,48 @@
   background: radial-gradient(1200px 600px at 50% 40%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%), rgba(0, 0, 0, 0.62);
   backdrop-filter: blur(8px);
   z-index: var(--z-modal2);
- }
+}
 
- .matchCard {
-   width: min(760px, calc(100vw - 24px));
-   max-height: calc(100dvh - 24px - var(--sa-top) - var(--sa-bottom));
-   overflow: hidden;
-   border-radius: var(--r-lg);
-   border: 1px solid color-mix(in srgb, var(--brand2) 40%, var(--border2));
-   background: linear-gradient(135deg, color-mix(in srgb, var(--brand2) 14%, transparent), rgba(0, 0, 0, 0.45));
-   box-shadow: var(--shadow-float-strong);
-   animation: deathIn 220ms ease;
-   display: flex;
-   flex-direction: column;
-   min-width: 0;
- }
+.matchCard {
+  width: min(760px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px - var(--sa-top) - var(--sa-bottom));
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  border: 1px solid color-mix(in srgb, var(--brand2) 40%, var(--border2));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand2) 14%, transparent), rgba(0, 0, 0, 0.45));
+  box-shadow: var(--shadow-float-strong);
+  animation: deathIn 220ms ease;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 
- .matchHeader {
-   padding: var(--pad-lg) var(--pad-lg) var(--pad-md);
- }
+.matchHeader {
+  padding: var(--pad-lg) var(--pad-lg) var(--pad-md);
+}
 
- /* Ряд действий — общий для итогов матча и (теперь) экрана смерти: обе
-    карточки не скроллятся целиком (overflow: hidden на .matchCard), поэтому
-    в отличие от старого .toastRow ряду не нужна sticky-подложка. */
- .matchActions {
-   display: flex;
-   gap: 8px;
-   padding: var(--pad-md) var(--pad-lg) var(--pad-lg);
- }
+/* Ряд действий — общий для итогов матча и (теперь) экрана смерти: обе
+   карточки не скроллятся целиком (overflow: hidden на .matchCard), поэтому
+   в отличие от старого .toastRow ряду не нужна sticky-подложка. */
+.matchActions {
+  display: flex;
+  gap: 8px;
+  padding: var(--pad-md) var(--pad-lg) var(--pad-lg);
+}
 
- .matchTitle {
-   font-size: var(--fs-title);
-   font-weight: 800;
-   letter-spacing: 0.2px;
-   margin-bottom: 6px;
- }
+.matchTitle {
+  font-size: var(--fs-title);
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  margin-bottom: 6px;
+}
 
- .matchSub {
-   font-size: var(--fs-meta);
-   color: rgba(229, 231, 235, 0.80);
- }
+.matchSub {
+  font-size: var(--fs-meta);
+  color: rgba(229, 231, 235, 0.80);
+}
 
- .matchResults {
+.matchResults {
   padding: 0 var(--pad-lg) var(--pad-lg);
   overflow: hidden;
   max-height: calc(100dvh - 220px - var(--sa-top) - var(--sa-bottom));
@@ -984,23 +971,23 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
- }
+}
 
- .matchSummary {
+.matchSummary {
   border-radius: var(--r-lg);
   border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.18);
   padding: var(--pad-lg);
- }
+}
 
- .matchSummaryTop {
+.matchSummaryTop {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   margin-bottom: 10px;
- }
+}
 
- .matchResultPill {
+.matchResultPill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1012,76 +999,76 @@
   text-transform: uppercase;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(0, 0, 0, 0.25);
- }
+}
 
- .matchResultLose {
+.matchResultLose {
   border-color: color-mix(in srgb, var(--accent) 55%, rgba(255,255,255,0.12));
   box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--accent) 10%, transparent);
- }
+}
 
- .matchKpiGrid {
+.matchKpiGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 10px;
- }
+}
 
- .matchKpi {
+.matchKpi {
   padding: 10px;
   border-radius: var(--r-md);
   border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.16);
   min-width: 0;
- }
+}
 
- .matchKpiLabel {
+.matchKpiLabel {
   font-size: var(--fs-meta);
   font-weight: 800;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--muted);
   margin-bottom: 4px;
- }
+}
 
- .matchKpiValue {
+.matchKpiValue {
   font-family: var(--font-display);
   font-size: var(--fs-lead);
   font-weight: 800;
   letter-spacing: 0.2px;
   line-height: var(--lh-tight);
   font-variant-numeric: tabular-nums;
- }
+}
 
- .matchKpiOf {
+.matchKpiOf {
   font-size: var(--fs-meta);
   font-weight: 800;
   color: var(--muted2);
- }
+}
 
- .matchMiniGrid {
+.matchMiniGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
- }
+}
 
- .matchMini {
+.matchMini {
   padding: 8px 10px;
   border-radius: var(--r-md);
   border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.14);
   min-width: 0;
- }
+}
 
- .matchMiniLabel {
+.matchMiniLabel {
   font-size: var(--fs-meta);
   font-weight: 800;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--muted);
   margin-bottom: 2px;
- }
+}
 
- .matchMiniValue {
+.matchMiniValue {
   font-family: var(--font-display);
   font-size: var(--fs-body);
   font-weight: 800;
@@ -1089,54 +1076,54 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
- }
+}
 
- .matchMiniReward .matchMiniValue {
+.matchMiniReward .matchMiniValue {
   color: rgba(229, 231, 235, 0.92);
- }
+}
 
- .matchNextGap {
+.matchNextGap {
   margin-top: 10px;
   font-size: var(--fs-meta);
   color: rgba(229, 231, 235, 0.86);
- }
+}
 
- .matchNextActions {
+.matchNextActions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--pad-md);
   margin-top: 12px;
- }
+}
 
- .matchNextActions > * {
+.matchNextActions > * {
   min-height: var(--control-h);
   width: 100%;
- }
+}
 
- .matchTableWrap {
+.matchTableWrap {
   flex: 1;
   min-height: 0;
   overflow: auto;
   border-radius: var(--r-lg);
   border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.14);
- }
+}
 
- /* border-collapse: separate (значение по умолчанию) не рендерит бордюр <tr>,
-    поэтому купленная рамка не была видна в итогах матча вовсе. */
- .matchTable {
+/* border-collapse: separate (значение по умолчанию) не рендерит бордюр <tr>,
+   поэтому купленная рамка не была видна в итогах матча вовсе. */
+.matchTable {
   width: 100%;
   border-collapse: collapse;
- }
+}
 
- .matchTable td,
- .matchTable th {
+.matchTable td,
+.matchTable th {
   padding: 5px 8px;
   font-variant-numeric: tabular-nums;
- }
+}
 
 
- @media (max-width: 520px) {
+@media (max-width: 520px) {
   .matchKpiGrid {
     grid-template-columns: 1fr;
   }
@@ -1148,62 +1135,62 @@
   .matchNextActions {
     grid-template-columns: 1fr;
   }
- }
+}
 
- .deathReason {
-   font-size: var(--fs-meta);
-   color: var(--muted);
-   margin-bottom: 6px;
-   font-weight: 700;
- }
+.deathReason {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  margin-bottom: 6px;
+  font-weight: 700;
+}
 
- @keyframes toastIn {
-   from {
-     opacity: 0;
-     transform: translateY(10px);
-   }
-   to {
-     opacity: 1;
-     transform: translateY(0);
-   }
- }
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
- @keyframes deathIn {
-   from {
-     opacity: 0;
-     transform: translateY(10px) scale(0.985);
-   }
-   to {
-     opacity: 1;
-     transform: translateY(0) scale(1);
-   }
- }
+@keyframes deathIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 
- @media (prefers-reduced-motion: reduce) {
-   .deathOverlay.matchCard {
-     animation: none;
-   }
-   .btnPrimary.isLoading::before,
-   .btnSecondary.isLoading::before,
-   .btnGhost.isLoading::before,
-   .skeletonLine,
-   .skeletonBlock {
+@media (prefers-reduced-motion: reduce) {
+  .deathOverlay.matchCard {
     animation: none;
-   }
-   *,
-   *::before,
-   *::after {
+  }
+  .btnPrimary.isLoading::before,
+  .btnSecondary.isLoading::before,
+  .btnGhost.isLoading::before,
+  .skeletonLine,
+  .skeletonBlock {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
-   }
- }
+  }
+}
 
- #game {
+#game {
   display: block;
   width: 100vw;
   height: 100vh;
   height: 100dvh;
- }
+}
 

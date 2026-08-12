@@ -32,6 +32,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_JS = readFileSync(path.join(__dirname, '../public/client.js'), 'utf8');
 const CLIENT_SHOP_UI_JS = readFileSync(path.join(__dirname, '../public/client_shop_ui.js'), 'utf8');
 const CLIENT_DRAW_JS = readFileSync(path.join(__dirname, '../public/client_draw.js'), 'utf8');
+const CLIENT_ROOMS_UI_JS = readFileSync(path.join(__dirname, '../public/client_rooms_ui.js'), 'utf8');
+const CLIENT_MATCH_JS = readFileSync(path.join(__dirname, '../public/client_match.js'), 'utf8');
+const CLIENT_INPUT_JS = readFileSync(path.join(__dirname, '../public/client_input.js'), 'utf8');
 
 function extractFunctionBody(source, name) {
   const start = source.indexOf(`function ${name}(`);
@@ -104,6 +107,23 @@ test('renderCosmeticsSkeletonImpl() не читает идентификатор
     unknown,
     [],
     `renderCosmeticsSkeletonImpl() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
+// renderCosmeticsTitlesImpl() — раздел «Титулы» магазина косметики, вынесен
+// из client.js вместе с остальной DOM-обвязкой магазина (renderCosmeticsTitles
+// в client.js теперь тонкая обёртка над этой функцией с deps).
+test('renderCosmeticsTitlesImpl() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_shop_ui.js', () => {
+  const masked = maskNonCode(CLIENT_SHOP_UI_JS);
+  const body = extractFunctionBody(masked, 'renderCosmeticsTitlesImpl');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `renderCosmeticsTitlesImpl() читает необъявленные идентификаторы: ${unknown.join(', ')}`
   );
 });
 
@@ -245,3 +265,97 @@ test('handleStateBinary() не читает идентификаторы, кот
     `handleStateBinary() читает необъявленные идентификаторы: ${unknown.join(', ')}`
   );
 });
+
+// updateRoomsUi() и связанная orchestration-логика панели «Комнаты» переехали
+// в client_rooms_ui.js (updateRoomsUiImpl и т.д.) — тот же класс риска, что и
+// draw()/syncCosmeticsUi(): изменяемое состояние client.js (lastRooms,
+// selectedRoomId, roomsCreateOpen...) приходит через геттеры/сеттеры в deps,
+// а не через замыкание, поэтому верхний уровень у этих функций свой,
+// собственный (client_rooms_ui.js), без доступа к client.js.
+for (const fn of [
+  'syncRoomsSearchClearUiImpl',
+  'clearRoomsSearchImpl',
+  'attemptJoinRoomImpl',
+  'setRoomsCreateOpenImpl',
+  'updateRoomsCreateUiImpl',
+  'applyRoomsFilterSortImpl',
+  'updateRoomsUiImpl',
+  'updateRoomInfoImpl'
+]) {
+  test(`${fn}() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_rooms_ui.js`, () => {
+    const masked = maskNonCode(CLIENT_ROOMS_UI_JS);
+    const body = extractFunctionBody(masked, fn);
+    const topLevel = extractDeclared(masked);
+
+    const unknown = unknownIdentifiers(body, [...topLevel]);
+
+    assert.deepEqual(
+      unknown,
+      [],
+      `${fn}() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+    );
+  });
+}
+
+// Жизненный цикл матча (applyMatchPhase/onMatchStart/onMatchEnd/
+// resetClientForNewMatch/updateMatchCountdown/runMatchResultsCascade)
+// переехал в client_match.js — тот же класс риска, что и у остальных Impl-
+// функций: изменяемое состояние client.js (matchPhase, botIds, powerUps...)
+// приходит через deps и возвращается объектом res, который тонкая обёртка в
+// client.js раскладывает обратно по переменным, поэтому верхний уровень у
+// этих функций собственный (client_match.js), без доступа к client.js.
+for (const fn of [
+  'applyMatchPhaseImpl',
+  'updateMatchCountdownImpl',
+  'resetClientForNewMatchImpl',
+  'onMatchEndImpl',
+  'onMatchStartImpl',
+  'runMatchResultsCascadeImpl'
+]) {
+  test(`${fn}() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_match.js`, () => {
+    const masked = maskNonCode(CLIENT_MATCH_JS);
+    const body = extractFunctionBody(masked, fn);
+    const topLevel = extractDeclared(masked);
+
+    const unknown = unknownIdentifiers(body, [...topLevel]);
+
+    assert.deepEqual(
+      unknown,
+      [],
+      `${fn}() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+    );
+  });
+}
+
+// Управление змейкой (setDir/движение клавиатурой/свайпы на канвасе)
+// переехало в client_input.js — тот же класс риска, что и у остальных Impl-
+// функций: изменяемое состояние client.js (lastDirSent, swipeActive,
+// swipeX0/Y0, swipePointerId, swipeIndicatorEl) приходит через deps и
+// возвращается объектом res, который тонкая обёртка в client.js раскладывает
+// обратно по переменным, поэтому верхний уровень у этих функций собственный
+// (client_input.js), без доступа к client.js.
+for (const fn of [
+  'setDirImpl',
+  'handleMovementKeydownImpl',
+  'getSwipeIndicatorImpl',
+  'showSwipeIndicatorImpl',
+  'moveSwipeIndicatorImpl',
+  'hideSwipeIndicatorImpl',
+  'handleSwipePointerDownImpl',
+  'handleSwipePointerMoveImpl',
+  'endSwipeImpl'
+]) {
+  test(`${fn}() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_input.js`, () => {
+    const masked = maskNonCode(CLIENT_INPUT_JS);
+    const body = extractFunctionBody(masked, fn);
+    const topLevel = extractDeclared(masked);
+
+    const unknown = unknownIdentifiers(body, [...topLevel]);
+
+    assert.deepEqual(
+      unknown,
+      [],
+      `${fn}() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+    );
+  });
+}

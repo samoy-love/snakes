@@ -12,10 +12,48 @@ import { createFxModule } from './client_fx.js';
 import { createNetModule } from './client_net.js';
 import { BOT_NAMES_EN, BOT_NAMES_RU, EN, I18N, RU } from './client_i18n.js';
 import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
-import { filterAndSortRooms } from './client_rooms.js';
-import { renderRoomsList, renderRoomsEmpty, updateRoomsStats } from './client_rooms_ui.js';
+import {
+  renderRoomsList,
+  renderRoomsEmpty,
+  updateRoomsStats,
+  syncRoomsSearchClearUiImpl,
+  clearRoomsSearchImpl,
+  attemptJoinRoomImpl,
+  setRoomsCreateOpenImpl,
+  updateRoomsCreateUiImpl,
+  applyRoomsFilterSortImpl,
+  updateRoomsUiImpl,
+  updateRoomInfoImpl
+} from './client_rooms_ui.js';
 import { PLAYER_RECORD_SIZES, pickPlayerRecordSize } from './client_protocol.js';
-import { handlePlayersMessage, handleMinimapMessage, handleEventsMessage } from './client_ws_handlers.js';
+import {
+  handlePlayersMessage,
+  handleMinimapMessage,
+  handleEventsMessage,
+  handleCosmeticsMessage,
+  onError as onErrorImpl,
+  onState as onStateImpl,
+  onInit as onInitImpl
+} from './client_ws_handlers.js';
+import {
+  applyMatchPhaseImpl,
+  updateMatchCountdownImpl,
+  resetClientForNewMatchImpl,
+  onMatchEndImpl,
+  onMatchStartImpl,
+  runMatchResultsCascadeImpl
+} from './client_match.js';
+import {
+  setDirImpl,
+  handleMovementKeydownImpl,
+  getSwipeIndicatorImpl,
+  showSwipeIndicatorImpl,
+  moveSwipeIndicatorImpl,
+  hideSwipeIndicatorImpl,
+  handleSwipePointerDownImpl,
+  handleSwipePointerMoveImpl,
+  endSwipeImpl
+} from './client_input.js';
 import { trailVisualState } from './client_trail_style.js';
 import { DEATH_REASON, deathReasonSuffix } from './client_death.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
@@ -78,10 +116,16 @@ import { buyButtonState, equipButtonState, visibleItems } from './client_cos_ui.
 import { renderMenuMetaImpl, showMenuOverlayImpl, updateMenuNameUiImpl } from './client_menu_ui.js';
 import {
   COS_SCENE,
+  cosFormatCountImpl,
   cosmeticsSelectItemImpl,
+  cosTitleEquipImpl,
+  cosTitleProgressImpl,
+  cosTitlesUnlockedCountImpl,
+  cosTitleUnlockedImpl,
   drawCosmeticsScene,
   drawMiniCosmeticPreview as drawMiniCosmeticPreviewImpl,
   hideCosmeticsOverlayImpl,
+  renderCosmeticsTitlesImpl,
   scheduleCosmeticsPreviewAnimImpl,
   showCosmeticsOverlayImpl,
   syncCosmeticsUiImpl
@@ -845,38 +889,25 @@ function phaseIcon(ph) {
 /* Применяет фазу. announce=true только для реальной смены фазы по ходу матча —
    при входе в комнату посреди финала баннер не нужен. */
 function applyMatchPhase(ph, until, announce, seq) {
-  const next = Math.max(0, Math.min(2, Number(ph) || 0));
-  const prev = matchPhase;
-  matchPhase = next;
-  matchPhaseUntil = Math.max(0, Number(until) || 0);
-
-  if (announce && next === PHASE_FINAL && prev !== PHASE_FINAL && started) {
-    const s = Number.isFinite(Number(seq)) ? Number(seq) : matchSeq;
-    if (matchPhaseBannerSeq !== s) {
-      matchPhaseBannerSeq = s;
-      const title = t('phase.final_banner').replace('×2', `×${matchFinalMult}`);
-      if (!showBigBanner('🔥', title, phaseDesc(PHASE_FINAL), 'jackpot')) {
-        addToast('🔥', title, 'big', phaseDesc(PHASE_FINAL), {
-          tab: 'match',
-          key: 'match_phase_final',
-          prio: 'jackpot'
-        });
-      }
-      try {
-        sfx.jackpot?.();
-      } catch {}
-    }
-  } else if (announce && next !== prev && started) {
-    addToast(phaseIcon(next), `${t('phase.label')}: ${phaseLabel(next)}`, null, phaseDesc(next), {
-      tab: 'match',
-      key: 'match_phase',
-      prio: 'important'
-    });
-  }
-
-  try {
-    renderTopHud();
-  } catch {}
+  const res = applyMatchPhaseImpl(ph, until, announce, seq, {
+    matchPhase,
+    started,
+    matchPhaseBannerSeq,
+    matchSeq,
+    matchFinalMult,
+    t,
+    showBigBanner,
+    phaseDesc,
+    addToast,
+    sfx,
+    phaseLabel,
+    phaseIcon,
+    renderTopHud,
+    PHASE_FINAL
+  });
+  matchPhase = res.matchPhase;
+  matchPhaseUntil = res.matchPhaseUntil;
+  matchPhaseBannerSeq = res.matchPhaseBannerSeq;
 }
 
 function onMatchPhase(d) {
@@ -2455,116 +2486,57 @@ function applyRandomNick() {
 }
 
 function syncRoomsSearchClearUi() {
-  if (!roomsSearchClearBtn) return;
-  const q = String(roomsSearchInput?.value || '').trim();
-  roomsSearchClearBtn.classList.toggle('hidden', !q);
+  syncRoomsSearchClearUiImpl({ roomsSearchClearBtn, roomsSearchInput });
 }
 
 function clearRoomsSearch() {
-  if (!roomsSearchInput) return;
-  roomsSearchInput.value = '';
-  syncRoomsSearchClearUi();
-  updateRoomsUi();
-  try {
-    roomsSearchInput.focus();
-  } catch {}
+  clearRoomsSearchImpl({ roomsSearchInput, syncRoomsSearchClearUi, updateRoomsUi });
 }
 
 function attemptJoinRoom(rid) {
-  const roomId = rid == null ? null : Number(rid);
-  if (roomId == null) return;
-  const nm = submitNameFromInput(menuNameInput);
-  if (!nm) {
-    updateMenuNameUi();
-    menuNameInput?.focus();
-    return;
-  }
-  trackEvent('join_room');
-  wsSend('join', { roomId, mode: 'id' });
+  attemptJoinRoomImpl(rid, { menuNameInput, submitNameFromInput, updateMenuNameUi, trackEvent, wsSend });
 }
 
 function setRoomsCreateOpen(v) {
-  const on = !!v;
-  roomsCreateOpen = on;
-  if (roomsCreateEl) roomsCreateEl.classList.toggle('hidden', !on);
-  if (toggleCreateRoomBtn) {
-    toggleCreateRoomBtn.textContent = on ? t('rooms.hide') : t('rooms.create');
-    toggleCreateRoomBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
-  }
-  if (on) {
-    try {
-      roomsCreateNameInput?.focus();
-    } catch {}
-  }
-  updateRoomsCreateUi();
+  setRoomsCreateOpenImpl(v, {
+    setRoomsCreateOpen: (on) => {
+      roomsCreateOpen = on;
+    },
+    roomsCreateEl,
+    toggleCreateRoomBtn,
+    t,
+    roomsCreateNameInput,
+    updateRoomsCreateUi
+  });
 }
 
 function updateRoomsCreateUi(errMsg) {
-  if (!roomsCreateOpen) {
-    if (roomsCreateError) roomsCreateError.textContent = '';
-    if (createRoomBtn) createRoomBtn.disabled = true;
-    return;
-  }
-
-  const title = sanitizeRoomTitleClient(roomsCreateNameInput?.value);
-  const ok = !!title;
-  const err = String(errMsg || '').trim();
-  if (roomsCreateError) roomsCreateError.textContent = err ? err : ok ? '' : t('rooms.name_placeholder');
-  if (createRoomBtn) createRoomBtn.disabled = !ok || createRoomPending;
+  updateRoomsCreateUiImpl(errMsg, {
+    getRoomsCreateOpen: () => roomsCreateOpen,
+    roomsCreateError,
+    createRoomBtn,
+    sanitizeRoomTitleClient,
+    roomsCreateNameInput,
+    t,
+    getCreateRoomPending: () => createRoomPending
+  });
 }
 
 function onError(d) {
-  const code = String(d?.message || '').trim();
-  createRoomPending = false;
-  updateRoomsCreateUi();
-
-  if (code === 'room_title_invalid') {
-    setRoomsCreateOpen(true);
-    updateRoomsCreateUi(t('rooms.invalid_title'));
-    try {
-      roomsCreateNameInput?.focus();
-    } catch {}
-    return;
-  }
-
-  const msgFor = () =>
-    code === 'room_full'
-      ? t('rooms.full')
-      : code === 'room_not_found'
-        ? t('rooms.not_found')
-        : code === 'cosmetics_invalid_id'
-          ? t('cosmetics.err_invalid_id')
-          : code === 'cosmetics_invalid_cat'
-            ? t('cosmetics.err_invalid_cat')
-            : code === 'cosmetics_not_owned'
-              ? t('cosmetics.err_not_owned')
-              : code === 'cosmetics_not_enough_style'
-                ? t('cosmetics.err_not_enough_style')
-                : code === 'cosmetics_unavailable'
-                  ? t('cosmetics.err_unavailable')
-        : t('common.error');
-  const msg = msgFor();
-
-  // K7: если не удалось вернуться в свою комнату после обрыва — комнаты уже
-  // нет или она заполнилась. Тогда честно отправляем в меню.
-  // C9: любая ошибка во время ожидания возврата — повод честно уйти в меню,
-  // а не только room_not_found / room_full.
-  if (rejoinPending) {
-    rejoinGiveUp(msg);
-    return;
-  }
-
-  // C1/C4: shop errors must land inside the overlay — toasts are hidden while it is open.
-  if (code.startsWith('cosmetics_')) {
-    cosmeticsOpClear();
-    if (cosmeticsOpen) {
-      setCosmeticsStatus(msgFor, 'error');
-      syncCosmeticsUi();
-      return;
-    }
-  }
-
-  addToast('⚠', msg, null);
+  const res = onErrorImpl(d, {
+    setRoomsCreateOpen,
+    updateRoomsCreateUi,
+    t,
+    roomsCreateNameInput,
+    rejoinPending,
+    rejoinGiveUp,
+    cosmeticsOpClear,
+    cosmeticsOpen,
+    setCosmeticsStatus,
+    syncCosmeticsUi,
+    addToast
+  });
+  createRoomPending = res.createRoomPending;
 }
 
 updateMenuNameUi();
@@ -3299,30 +3271,8 @@ function firstSkinHookHtml() {
       </div>`;
 }
 
-// J6: каскад чисел — место → очки → зона → киллы → награда,
-// по 250 мс со сдвигом 180 мс, каждое со своим восходящим бипом.
-const MATCH_CASCADE_ORDER = ['place', 'points', 'zone', 'kills', 'reward'];
-
 function runMatchResultsCascade() {
-  if (!matchResultsEl) return;
-  if (!fxCountUpEnabled()) return;
-  let step = 0;
-  for (const key of MATCH_CASCADE_ORDER) {
-    const el = matchResultsEl.querySelector(`[data-count="${key}"]`);
-    if (!el) continue;
-    const to = Number(el.dataset.to) || 0;
-    if (to <= 0) continue;
-    const prefix = String(el.dataset.prefix || '');
-    const delay = step * 180;
-    animateNumber(el, 0, to, 250, {
-      delay,
-      prefix,
-      onDone: () => {}
-    });
-    const i = step;
-    setTimeout(() => sfx.countStep(i), delay);
-    step++;
-  }
+  runMatchResultsCascadeImpl({ matchResultsEl, fxCountUpEnabled, animateNumber, sfx });
 }
 
 function renderMatchResults(results) {
@@ -3387,199 +3337,133 @@ function styleBreakdownText(sb) {
 }
 
 function updateMatchCountdown() {
-  if (!matchCountdownEl) return;
-  if (!matchEnded || !matchResetAt) {
-    matchCountdownEl.textContent = '—';
-    syncMatchOverlayActions();
-    return;
-  }
-  const nt = approxNowTick();
-  if (nt == null) {
-    matchCountdownEl.textContent = '—';
-    syncMatchOverlayActions();
-    return;
-  }
-  const remTicks = Math.max(0, matchResetAt - nt);
-  const remMs = tickMs ? remTicks * tickMs : 0;
-  const sec = Math.max(0, Math.ceil(remMs / 1000));
-  matchCountdownEl.textContent = `${sec}s`;
-  syncMatchOverlayActions();
+  updateMatchCountdownImpl({ matchCountdownEl, matchEnded, matchResetAt, approxNowTick, tickMs, syncMatchOverlayActions });
 }
 
 function resetClientForNewMatch() {
-  matchContinuePending = false;
-  if (matchContinueTimeout) {
-    clearTimeout(matchContinueTimeout);
-    matchContinueTimeout = 0;
-  }
-
-  matchStyleEarned = 0;
-
-  // K2: номера игроков в новом матче раздаются заново — кэши по номеру нужно
-  // обнулить, иначе враг ещё несколько минут рисуется цветом прошлого хозяина
-  // номера, а два игрока могут оказаться одного цвета.
-  colors.clear();
-  ownerFillStyleCache.clear();
-  minimapOwnerRgbCache.clear();
-  botIds = new Set();
-  coolDeadlineByOwner.clear();
-  lastRoi = null;
-  /* C7: карты «по номеру игрока» здесь НЕ чистятся намеренно. Сервер при
-     matchStart не пересылает ни nameUpdateBatch, ни cosExtra (main.go: обе
-     рассылки привязаны к входу в комнату), поэтому очистка оставила бы всех
-     без имён и косметики до следующего события. Номера внутри комнаты между
-     матчами не переигрываются — переигрываются они при входе, там очистка и
-     стоит (см. onInit). Ограничены по размеру: ключ — номер игрока, а их в
-     комнате не больше roomLimit + ботов. */
-  captureAnchorByOwner.clear();
-
-  eventFeed.length = 0;
-  lastEventsTick = 0;
-  lastEventsAt = 0;
-  bigToastCooldownUntil = 0;
-
-  try {
-    for (const it of toastByKey.values()) {
-      if (it?.timer) clearTimeout(it.timer);
-    }
-  } catch {}
-  toastByKey.clear();
-  toastQueue.length = 0;
-
-  lastDeathInfo = null;
-  lastYouStats = null;
-
-  mutatorType = 0;
-  mutatorUntil = 0;
-  bountyTarget = 0;
-  bountyUntil = 0;
-  powerUps = new Map();
-
-  youKills = 0;
-  youStreak = 0;
-  youTrailLen = 0;
-  youInOwnZone = true;
-  youNearestHomeX = -1;
-  youNearestHomeY = -1;
-  youNearestHomeAt = 0;
-  comboReset();
-  youContractType = 0;
-  youContractGoal = 0;
-  youContractProgress = 0;
-  youContractUntil = 0;
-  youShield = false;
-  youSpeedUntilTick = 0;
-  youSpeedType = 0;
-  // keep youStyle; it is a persistent currency, not match-scoped
-
-  try {
-    if (killfeedEl) killfeedEl.replaceChildren();
-    if (eventToastsEl) eventToastsEl.replaceChildren();
-  } catch {}
-  // C8: DOM киллфида очищен вручную — подпись обязана протухнуть.
-  renderKillfeed._sig = null;
-  // C7: у мета-панели теперь такая же подпись — сбрасываем по той же причине.
-  renderMetaHudImpl._sig = null;
-  renderTopHudImpl._placeSig = null;
-
-  clientState.lastState = null;
-  prevPlayers = new Map();
-  currPlayers = new Map();
-  headIndexByOwner = new Map();
-  lastPacketAt = performance.now();
-  clientState.camX = null;
-  clientState.camY = null;
-  clientState.camLeadX = 0;
-  clientState.camLeadY = 0;
-
-  shakeX = 0;
-  shakeY = 0;
-  shakeVelX = 0;
-  shakeVelY = 0;
-
-  minimapDirty = true;
-  minimapHadChunkUpdate = false;
-  lastMinimapDrawAt = 0;
-
-  resetLeaderboardUi();
-
-  renderKillfeed();
-  renderMetaHud();
-  renderTopHud();
-  syncMatchOverlayActions();
+  const res = resetClientForNewMatchImpl({
+    matchContinueTimeout,
+    colors,
+    ownerFillStyleCache,
+    minimapOwnerRgbCache,
+    coolDeadlineByOwner,
+    captureAnchorByOwner,
+    eventFeed,
+    toastByKey,
+    toastQueue,
+    powerUps,
+    comboReset,
+    killfeedEl,
+    eventToastsEl,
+    renderKillfeed,
+    renderMetaHudImpl,
+    renderTopHudImpl,
+    clientState,
+    resetLeaderboardUi,
+    renderMetaHud,
+    renderTopHud,
+    syncMatchOverlayActions
+  });
+  matchContinuePending = res.matchContinuePending;
+  matchContinueTimeout = res.matchContinueTimeout;
+  matchStyleEarned = res.matchStyleEarned;
+  botIds = res.botIds;
+  lastRoi = res.lastRoi;
+  lastEventsTick = res.lastEventsTick;
+  lastEventsAt = res.lastEventsAt;
+  bigToastCooldownUntil = res.bigToastCooldownUntil;
+  lastDeathInfo = res.lastDeathInfo;
+  lastYouStats = res.lastYouStats;
+  mutatorType = res.mutatorType;
+  mutatorUntil = res.mutatorUntil;
+  bountyTarget = res.bountyTarget;
+  bountyUntil = res.bountyUntil;
+  powerUps = res.powerUps;
+  youKills = res.youKills;
+  youStreak = res.youStreak;
+  youTrailLen = res.youTrailLen;
+  youInOwnZone = res.youInOwnZone;
+  youNearestHomeX = res.youNearestHomeX;
+  youNearestHomeY = res.youNearestHomeY;
+  youNearestHomeAt = res.youNearestHomeAt;
+  youContractType = res.youContractType;
+  youContractGoal = res.youContractGoal;
+  youContractProgress = res.youContractProgress;
+  youContractUntil = res.youContractUntil;
+  youShield = res.youShield;
+  youSpeedUntilTick = res.youSpeedUntilTick;
+  youSpeedType = res.youSpeedType;
+  prevPlayers = res.prevPlayers;
+  currPlayers = res.currPlayers;
+  headIndexByOwner = res.headIndexByOwner;
+  lastPacketAt = res.lastPacketAt;
+  shakeX = res.shakeX;
+  shakeY = res.shakeY;
+  shakeVelX = res.shakeVelX;
+  shakeVelY = res.shakeVelY;
+  minimapDirty = res.minimapDirty;
+  minimapHadChunkUpdate = res.minimapHadChunkUpdate;
+  lastMinimapDrawAt = res.lastMinimapDrawAt;
 }
 
 function onMatchEnd(d) {
-  if (typeof d?.tick === 'number' && Number.isFinite(d.tick)) {
-    lastEventsTick = d.tick;
-    lastEventsAt = Date.now();
-  }
-  matchSeq = Number(d?.seq) || matchSeq;
-  matchEndTick = Number(d?.endTick) || matchEndTick;
-  matchResetAt = Number(d?.resetAt) || 0;
-  matchEnded = true;
-
-  matchContinuePending = false;
-  if (matchContinueTimeout) {
-    clearTimeout(matchContinueTimeout);
-    matchContinueTimeout = 0;
-  }
-
-  youAlive = false;
-  lastDirSent = null;
-  started = false;
-
-  hideOverlays();
-
-  lastMatchResults = d?.results || null;
-
-  bumpMatchesPlayed();
-  renderMatchResults(lastMatchResults);
-  updateMatchCountdown();
-  showMatchOverlay();
+  const res = onMatchEndImpl(d, {
+    lastEventsTick,
+    lastEventsAt,
+    matchSeq,
+    matchEndTick,
+    matchContinueTimeout,
+    hideOverlays,
+    bumpMatchesPlayed,
+    renderMatchResults,
+    updateMatchCountdown,
+    showMatchOverlay
+  });
+  lastEventsTick = res.lastEventsTick;
+  lastEventsAt = res.lastEventsAt;
+  matchSeq = res.matchSeq;
+  matchEndTick = res.matchEndTick;
+  matchResetAt = res.matchResetAt;
+  matchEnded = res.matchEnded;
+  matchContinuePending = res.matchContinuePending;
+  matchContinueTimeout = res.matchContinueTimeout;
+  youAlive = res.youAlive;
+  lastDirSent = res.lastDirSent;
+  started = res.started;
+  lastMatchResults = res.lastMatchResults;
 }
 
 function onMatchStart(d) {
-  if (typeof d?.tick === 'number' && Number.isFinite(d.tick)) {
-    lastEventsTick = d.tick;
-    lastEventsAt = Date.now();
-  }
-  matchSeq = Number(d?.seq) || matchSeq;
-  matchEndTick = Number(d?.endTick) || 0;
-  matchResetAt = 0;
-  matchEnded = false;
-  // C2: новый матч всегда начинается с фазы расширения; сервер дублирует её в
-  // payload matchStart.
-  matchPhaseBannerSeq = -1;
-  applyMatchPhase(d?.phase ?? PHASE_EXPANSION, d?.phaseUntil, false, matchSeq);
-
-  matchContinuePending = false;
-  if (matchContinueTimeout) {
-    clearTimeout(matchContinueTimeout);
-    matchContinueTimeout = 0;
-  }
-
-  youAlive = false;
-  lastDirSent = null;
-
-  if (matchAutoJoin) {
-    resetClientForNewMatch();
-    hideMatchOverlay();
-    hideOverlays();
-    toggleEmojiPanel(false);
-    syncMatchOverlayActions();
-    started = true;
-    obResetMatch();
-    obAnnounceShop();
-    try {
-      document.body.classList.add('inGame');
-    } catch {}
-  } else {
-    // stay in results overlay until user clicks "Играть дальше"
-    started = false;
-    updateMatchCountdown();
-    showMatchOverlay();
-  }
+  const res = onMatchStartImpl(d, {
+    lastEventsTick,
+    lastEventsAt,
+    matchSeq,
+    matchContinueTimeout,
+    matchAutoJoin,
+    applyMatchPhase,
+    resetClientForNewMatch,
+    hideMatchOverlay,
+    hideOverlays,
+    toggleEmojiPanel,
+    syncMatchOverlayActions,
+    obResetMatch,
+    obAnnounceShop,
+    updateMatchCountdown,
+    showMatchOverlay,
+    PHASE_EXPANSION
+  });
+  lastEventsTick = res.lastEventsTick;
+  lastEventsAt = res.lastEventsAt;
+  matchSeq = res.matchSeq;
+  matchEndTick = res.matchEndTick;
+  matchResetAt = res.matchResetAt;
+  matchEnded = res.matchEnded;
+  matchPhaseBannerSeq = res.matchPhaseBannerSeq;
+  matchContinuePending = res.matchContinuePending;
+  matchContinueTimeout = res.matchContinueTimeout;
+  youAlive = res.youAlive;
+  lastDirSent = res.lastDirSent;
+  started = res.started;
 }
 
 function hideOverlays() {
@@ -3746,44 +3630,25 @@ function updateRoomsStatsLocal(rawRooms) {
    Здесь остаётся единственное, что действительно принадлежит этому файлу:
    откуда взять режим сортировки и строку поиска. */
 function applyRoomsFilterSort() {
-  return filterAndSortRooms(lastRooms, {
-    query: roomsSearchInput?.value,
-    sort: roomsSortSelect?.value
-  });
+  return applyRoomsFilterSortImpl({ lastRooms, roomsSearchInput, roomsSortSelect });
 }
 
 function updateRoomsUi() {
-  syncRoomsSearchClearUi();
-  const rawAll = Array.isArray(lastRooms) ? lastRooms : [];
-  if (selectedRoomId != null) {
-    const exists = rawAll.some((r) => Number(r?.id) === Number(selectedRoomId));
-    if (!exists) selectedRoomId = null;
-  }
-
-  if (joinRoomBtn) {
-    joinRoomBtn.disabled = selectedRoomId == null;
-  }
-  updateRoomsStatsLocal(lastRooms);
-  const raw = Array.isArray(lastRooms) ? lastRooms : [];
-  const filtered = applyRoomsFilterSort();
-
-  if (roomsLoading && raw.length === 0) {
-    renderRoomsEmptyLocal('loading');
-    return;
-  }
-  if (roomsLoadError && raw.length === 0) {
-    renderRoomsEmptyLocal('error', roomsLoadError);
-    return;
-  }
-  if (raw.length === 0) {
-    renderRoomsEmptyLocal('empty');
-    return;
-  }
-  if (filtered.length === 0) {
-    renderRoomsEmptyLocal('noMatch');
-    return;
-  }
-  renderRoomsListLocal(filtered);
+  updateRoomsUiImpl({
+    syncRoomsSearchClearUi,
+    getLastRooms: () => lastRooms,
+    getSelectedRoomId: () => selectedRoomId,
+    setSelectedRoomId: (v) => {
+      selectedRoomId = v;
+    },
+    joinRoomBtn,
+    updateRoomsStatsLocal,
+    applyRoomsFilterSort,
+    getRoomsLoading: () => roomsLoading,
+    getRoomsLoadError: () => roomsLoadError,
+    renderRoomsEmptyLocal,
+    renderRoomsListLocal
+  });
 }
 
 playBtn?.addEventListener('click', () => {
@@ -3897,13 +3762,14 @@ roomsSortSelect?.addEventListener('change', () => {
 });
 
 function updateRoomInfo() {
-  if (!roomInfoEl) return;
-  const rid = roomId == null ? '…' : String(roomId);
-  const lim = roomLimit == null ? '' : ` / ${roomLimit}`;
-  roomInfoEl.textContent = `${t('perf.room')}: ${rid}${lim}${wsStatusSuffix()}`;
-  try {
-    updateChatHeaderStatus();
-  } catch {}
+  updateRoomInfoImpl({
+    roomInfoEl,
+    getRoomId: () => roomId,
+    getRoomLimit: () => roomLimit,
+    t,
+    wsStatusSuffix,
+    updateChatHeaderStatus
+  });
 }
 
 function computeTopSorted(players) {
@@ -4410,15 +4276,15 @@ resize();
 let lastDirSent = null;
 
 function setDir(dir) {
-  if (!youAlive) return;
-  if (dir === lastDirSent) return;
-  // F13: подсказка про управление гаснет по факту действия, а не по факту входа.
-  if (!getMenuControlsSeen()) {
-    setMenuControlsSeen();
-    syncMenuOnboardingUi();
-  }
-  lastDirSent = dir;
-  wsSend('input', { dir });
+  const res = setDirImpl(dir, {
+    youAlive,
+    lastDirSent,
+    getMenuControlsSeen,
+    setMenuControlsSeen,
+    syncMenuOnboardingUi,
+    wsSend
+  });
+  lastDirSent = res.lastDirSent;
 }
 
 window.addEventListener(
@@ -4525,15 +4391,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
-  // C6: never steer the snake while an overlay is on top of the game.
-  if (overlayManager.getTop()) return;
-
-  const ae = document.activeElement;
-  if (ae && (ae === nameInput || chat.contains(ae))) return;
-  if (e.code === 'ArrowUp' || e.code === 'KeyW') setDir('up');
-  else if (e.code === 'ArrowDown' || e.code === 'KeyS') setDir('down');
-  else if (e.code === 'ArrowLeft' || e.code === 'KeyA') setDir('left');
-  else if (e.code === 'ArrowRight' || e.code === 'KeyD') setDir('right');
+  handleMovementKeydownImpl(e, { overlayManager, nameInput, chat, setDir });
 });
 
 // Mobile / touch: swipe on the canvas to change direction
@@ -4555,60 +4413,35 @@ const SWIPE_PX = 22;
 // граница срабатывания, и терял змейку на "случайных" срабатываниях.
 let swipeIndicatorEl = null;
 function getSwipeIndicator() {
-  if (swipeIndicatorEl) return swipeIndicatorEl;
-  const el = document.createElement('div');
-  el.id = 'swipeIndicator';
-  el.setAttribute('aria-hidden', 'true');
-  const dead = document.createElement('div');
-  dead.className = 'swipeIndicator-deadzone';
-  const dot = document.createElement('div');
-  dot.className = 'swipeIndicator-dot';
-  el.appendChild(dead);
-  el.appendChild(dot);
-  document.body.appendChild(el);
-  swipeIndicatorEl = el;
-  return el;
+  swipeIndicatorEl = getSwipeIndicatorImpl({ swipeIndicatorEl });
+  return swipeIndicatorEl;
 }
 function showSwipeIndicator(x0, y0) {
-  const el = getSwipeIndicator();
-  el.style.left = `${x0}px`;
-  el.style.top = `${y0}px`;
-  el.classList.add('isOn');
+  showSwipeIndicatorImpl(x0, y0, { getSwipeIndicator });
 }
 function moveSwipeIndicator(dx, dy) {
-  if (!swipeIndicatorEl) return;
-  const dot = swipeIndicatorEl.querySelector('.swipeIndicator-dot');
-  if (dot) dot.style.transform = `translate(${dx}px, ${dy}px)`;
+  moveSwipeIndicatorImpl(dx, dy, { swipeIndicatorEl });
 }
 function hideSwipeIndicator() {
-  if (!swipeIndicatorEl) return;
-  swipeIndicatorEl.classList.remove('isOn');
-  const dot = swipeIndicatorEl.querySelector('.swipeIndicator-dot');
-  if (dot) dot.style.transform = 'translate(0, 0)';
-}
-
-function swipeDir(dx, dy) {
-  if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'right' : 'left';
-  return dy > 0 ? 'down' : 'up';
+  hideSwipeIndicatorImpl({ swipeIndicatorEl });
 }
 
 canvas.addEventListener(
   'pointerdown',
   (e) => {
-    if (!youAlive) return;
-    if (e.pointerType !== 'touch') return;
-    swipeActive = true;
-    swipePointerId = e.pointerId;
-    swipeX0 = e.clientX;
-    swipeY0 = e.clientY;
-    showSwipeIndicator(swipeX0, swipeY0);
-    try {
-      canvas.setPointerCapture?.(e.pointerId);
-    } catch {
-      // Захват — оптимизация: свайп работает и без него, а setPointerCapture
-      // кидает NotFoundError, если указатель уже отпущен.
-    }
-    e.preventDefault();
+    const res = handleSwipePointerDownImpl(e, {
+      youAlive,
+      swipeActive,
+      swipeX0,
+      swipeY0,
+      swipePointerId,
+      showSwipeIndicator,
+      canvas
+    });
+    swipeActive = res.swipeActive;
+    swipeX0 = res.swipeX0;
+    swipeY0 = res.swipeY0;
+    swipePointerId = res.swipePointerId;
   },
   { passive: false }
 );
@@ -4616,26 +4449,26 @@ canvas.addEventListener(
 canvas.addEventListener(
   'pointermove',
   (e) => {
-    if (!swipeActive) return;
-    if (swipePointerId != null && e.pointerId !== swipePointerId) return;
-    const dx = e.clientX - swipeX0;
-    const dy = e.clientY - swipeY0;
-    moveSwipeIndicator(dx, dy);
-    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return;
-    setDir(swipeDir(dx, dy));
-    swipeX0 = e.clientX;
-    swipeY0 = e.clientY;
-    showSwipeIndicator(swipeX0, swipeY0);
-    e.preventDefault();
+    const res = handleSwipePointerMoveImpl(e, {
+      swipeActive,
+      swipeX0,
+      swipeY0,
+      swipePointerId,
+      SWIPE_PX,
+      moveSwipeIndicator,
+      showSwipeIndicator,
+      setDir
+    });
+    swipeX0 = res.swipeX0;
+    swipeY0 = res.swipeY0;
   },
   { passive: false }
 );
 
 function endSwipe(e) {
-  if (swipePointerId != null && e.pointerId !== swipePointerId) return;
-  swipeActive = false;
-  swipePointerId = null;
-  hideSwipeIndicator();
+  const res = endSwipeImpl(e, { swipePointerId, hideSwipeIndicator });
+  swipeActive = res.swipeActive;
+  swipePointerId = res.swipePointerId;
 }
 
 canvas.addEventListener('pointerup', endSwipe);
@@ -4731,235 +4564,152 @@ function markJoinFunnelFirstState() {
 }
 
 function onInit(msg) {
-  markJoinFunnelInit();
-  W = msg.w;
-  H = msg.h;
-  N = W * H;
-  tickMs = msg.tickMs;
-  if (typeof msg?.tick === 'number' && Number.isFinite(msg.tick)) {
-    lastEventsTick = msg.tick;
-    lastEventsAt = Date.now();
-  }
-  you = Number(msg.you) || 0;
-  mapCells = msg.mapCells || N;
-  roomId = msg.room ?? null;
-  roomLimit = msg.roomLimit ?? null;
+  const res = onInitImpl(msg, {
+    markJoinFunnelInit,
+    rejoinPending,
+    rejoinFinish,
+    addToast,
+    t,
+    applyMatchPhase,
+    updateRoomInfo,
+    resetClientForNewMatch,
+    hideMatchOverlay,
+    showMatchOverlay,
+    renderMatchResults,
+    updateMatchCountdown,
+    setRoomsCreateOpen,
+    updateRoomsCreateUi,
+    hideMenuOverlay,
+    hideOverlays,
+    syncMenuOnboardingUi,
+    obResetMatch,
+    obAnnounceShop,
+    colors,
+    ownerFillStyleCache,
+    minimapOwnerRgbCache,
+    nameById,
+    nameEnById,
+    cosTerrByPlayer,
+    cosDeathByPlayer,
+    cosTitleByPlayer,
+    botArchByPlayer,
+    captureAnchorByOwner,
+    coolDeadlineByOwner,
+    minimap,
+    mmCtx,
+    storedName,
+    wsSend,
+    onCosmetics,
+    renderTopHud,
+    PHASE_FINAL,
+    W,
+    H,
+    N,
+    tickMs,
+    lastEventsTick,
+    lastEventsAt,
+    you,
+    mapCells,
+    roomId,
+    roomLimit,
+    rejoinRoomId,
+    userLeftRoom,
+    matchSeq,
+    matchEndTick,
+    matchEnded,
+    matchResetAt,
+    matchPhaseBannerSeq,
+    matchContinuePending,
+    matchContinueTimeout,
+    createRoomPending,
+    selectedRoomId,
+    started,
+    gridOwner,
+    trailOwner,
+    minimapGridOwner,
+    botIds,
+    lastRoi,
+    gridFillAt,
+    coolSeenAt,
+    minimapImage,
+    youKills,
+    youStreak,
+    lastMatchResults
+  });
+  W = res.W;
+  H = res.H;
+  N = res.N;
+  tickMs = res.tickMs;
+  lastEventsTick = res.lastEventsTick;
+  lastEventsAt = res.lastEventsAt;
+  you = res.you;
+  mapCells = res.mapCells;
+  roomId = res.roomId;
+  roomLimit = res.roomLimit;
+  rejoinRoomId = res.rejoinRoomId;
+  userLeftRoom = res.userLeftRoom;
+  matchSeq = res.matchSeq;
+  matchEndTick = res.matchEndTick;
+  matchEnded = res.matchEnded;
+  matchResetAt = res.matchResetAt;
+  matchPhaseBannerSeq = res.matchPhaseBannerSeq;
+  matchContinuePending = res.matchContinuePending;
+  matchContinueTimeout = res.matchContinueTimeout;
+  createRoomPending = res.createRoomPending;
+  selectedRoomId = res.selectedRoomId;
+  started = res.started;
+  gridOwner = res.gridOwner;
+  trailOwner = res.trailOwner;
+  minimapGridOwner = res.minimapGridOwner;
+  botIds = res.botIds;
+  lastRoi = res.lastRoi;
+  gridFillAt = res.gridFillAt;
+  coolSeenAt = res.coolSeenAt;
+  minimapImage = res.minimapImage;
+  youKills = res.youKills;
+  youStreak = res.youStreak;
+  lastMatchResults = res.lastMatchResults;
 
-  // K7: вход в комнату состоялся — реконнект-цель обновлена, флаг «ушёл сам» снят.
-  rejoinRoomId = roomId;
-  userLeftRoom = false;
-  const wasRejoin = rejoinPending;
-  if (rejoinPending) {
-    rejoinFinish();
-    addToast('✅', t('net.rejoined'), null, null, { key: 'net_reconnect' });
-  }
-
-  matchSeq = Number(msg?.matchSeq) || 0;
-  matchEndTick = Number(msg?.matchEnd) || 0;
-  matchEnded = !!msg?.matchEnded;
-  matchResetAt = Number(msg?.matchReset) || 0;
-  // C2: фаза приходит прямо в init — при входе посреди матча баннер не нужен.
-  matchPhaseBannerSeq = Number(msg?.phase) === PHASE_FINAL ? matchSeq : -1;
-  applyMatchPhase(msg?.phase, msg?.phaseUntil, false, matchSeq);
+  // Строку «Комната: N / M» перерисовываем ЗДЕСЬ, а не внутри обработчика.
+  // handleInit ведёт свои копии roomId/roomLimit и возвращает их наружу, а
+  // updateRoomInfo() читает переменные этого модуля через getRoomId() —
+  // вызванная до присваиваний выше, она видела прежний roomId (null) и писала
+  // в HUD «Комната: … / 16» на весь матч.
   updateRoomInfo();
-
-  matchContinuePending = false;
-  if (matchContinueTimeout) {
-    clearTimeout(matchContinueTimeout);
-    matchContinueTimeout = 0;
-  }
-  if (matchEnded) {
-    if (msg?.matchResults) {
-      lastMatchResults = msg.matchResults;
-      renderMatchResults(lastMatchResults);
-    }
-    updateMatchCountdown();
-    showMatchOverlay();
-  } else {
-    resetClientForNewMatch();
-    hideMatchOverlay();
-  }
-
-  createRoomPending = false;
-  setRoomsCreateOpen(false);
-  updateRoomsCreateUi();
-  selectedRoomId = null;
-
-  hideMenuOverlay();
-  hideOverlays();
-
-  started = true;
-  // F13: раньше подсказка гасилась прямо здесь, ещё до того как игрок её прочитал.
-  // Теперь её снимает первое реальное действие (см. setDir).
-  syncMenuOnboardingUi();
-  // C9: реконнект не считается новым входом в матч.
-  obResetMatch(!wasRejoin);
-  obAnnounceShop();
-  try {
-    document.body.classList.add('inGame');
-  } catch {}
-
-  gridOwner = new Uint16Array(N);
-  trailOwner = new Uint16Array(N);
-
-  minimapGridOwner = new Uint16Array(N);
-
-  // K2: вход в комнату — новый набор номеров игроков. Всё, что кэшируется по
-  // номеру, обязано умереть здесь, иначе чужие цвета и «ботовость» приезжают
-  // из прошлой комнаты.
-  colors.clear();
-  ownerFillStyleCache.clear();
-  minimapOwnerRgbCache.clear();
-  botIds = new Set();
-  lastRoi = null;
-  // C7: то же самое при входе в комнату — см. комментарий в onMatchStart.
-  nameById.clear();
-  nameEnById.clear();
-  cosTerrByPlayer.clear();
-  cosDeathByPlayer.clear();
-  cosTitleByPlayer.clear();
-  botArchByPlayer.clear();
-
-  gridFillAt = new Float32Array(N);
-  coolSeenAt = new Float32Array(N);
-  captureAnchorByOwner.clear();
-  coolDeadlineByOwner.clear();
-
-  minimap.width = W;
-  minimap.height = H;
-  minimapImage = mmCtx.createImageData(W, H);
-  // minimap is updated by server-sent chunk updates
-
-  mmCtx.imageSmoothingEnabled = true;
-  mmCtx.imageSmoothingQuality = 'high';
-
-  if (storedName) {
-    wsSend('setName', { name: storedName });
-  }
-
-  // Spawn in the current room (no rejoin). Without this the player stays dead and cannot move.
-  wsSend('respawn', {});
-
-  youKills = 0;
-  youStreak = 0;
-
-  if (msg?.cosmetics) {
-    onCosmetics(msg.cosmetics);
-  }
-  renderTopHud();
 }
 
 function onCosmetics(msg) {
-  // C4: remember the previous inventory so we can detect what was just bought.
-  const prevInv = {
-    capturefx: Number(youCos.inv.capturefx) || 0,
-    head: Number(youCos.inv.head) || 0,
-    seg: Number(youCos.inv.seg) || 0,
-    nameplate: Number(youCos.inv.nameplate) || 0,
-    frame: Number(youCos.inv.frame) || 0,
-    terr: Number(youCos.inv.terr) || 0,
-    death: Number(youCos.inv.death) || 0
-  };
-  const hadServerState = cosmeticsSource === 'server';
-
-  const st = Number(msg?.style);
-  if (Number.isFinite(st)) youStyle = Math.max(0, st);
-
-  cosmeticsLoaded = true;
-  cosmeticsSource = 'server';
-
-  // Полный снимок: категории, которых в сообщении нет, обнуляются.
-  applyCosPayload(youCos, msg, 'replace');
-
-
-  // Новые категории и титулы: сервер может их ещё не присылать. В этом случае
-  // поля undefined -> нули, магазин показывает только базовый вариант, а
-  // «Титулы» честно сообщают, что список пока недоступен.
-  // Частичное сообщение: трогаем только присланное.
-  applyCosPayload(youCos, msg, 'patch');
-  if (msg?.titleMask !== undefined) youTitleMask = Number(msg.titleMask) || 0;
-  if (msg?.titleId !== undefined) youTitleId = Math.max(0, Math.min(COS_TITLE_MAX, Number(msg.titleId) || 0));
-  /* C3: прогресс по незакрытым ачивкам. Массив содержит ТОЛЬКО закрытые ещё
-     ачивки — открытые сервер опускает, они и так видны по titleMask. Поле
-     может отсутствовать (старый сервер) — тогда карту не трогаем вовсе,
-     чтобы не стереть уже показанный прогресс. */
-  if (Array.isArray(msg?.achvProgress)) {
-    achvProgressById.clear();
-    for (const it of msg.achvProgress) {
-      const id = Number(it?.id);
-      const cur = Number(it?.cur);
-      const max = Number(it?.max);
-      if (!Number.isFinite(id) || id < 0) continue;
-      if (!Number.isFinite(max) || max <= 0) continue;
-      achvProgressById.set(id, {
-        cur: Math.max(0, Math.min(max, Number.isFinite(cur) ? cur : 0)),
-        max,
-      });
-    }
-  }
-  // Базовый вариант всегда доступен — иначе магазин выглядит полностью пустым.
-  youCos.inv.terr |= 1;
-  youCos.inv.death |= 1;
-
-  cosmeticsCacheSave();
-
-  // C4: report the purchase that just landed.
-  const pending = pendingCosmeticsOp;
-  cosmeticsOpClear();
-
-  if (hadServerState) {
-    const nextInv = {
-      capturefx: Number(youCos.inv.capturefx) || 0,
-      head: Number(youCos.inv.head) || 0,
-      seg: Number(youCos.inv.seg) || 0,
-      nameplate: Number(youCos.inv.nameplate) || 0,
-      frame: Number(youCos.inv.frame) || 0,
-      terr: Number(youCos.inv.terr) || 0,
-      death: Number(youCos.inv.death) || 0
-    };
-    let boughtCat = '';
-    let boughtId = -1;
-    for (const cat of Object.keys(nextInv)) {
-      const added = nextInv[cat] & ~prevInv[cat];
-      if (!added) continue;
-      for (let id = 0; id <= COSMETICS_MAX_ID; id++) {
-        if (added & (1 << id)) {
-          boughtCat = cat;
-          boughtId = id;
-          break;
-        }
-      }
-      if (boughtCat) break;
-    }
-    if (!boughtCat && pending) {
-      // Server confirmed but nothing new appeared (already owned).
-      boughtCat = '';
-    }
-    if (boughtCat) {
-      const bc = boughtCat;
-      const bi = boughtId;
-      const boughtText = () => `${t('cosmetics.bought_prefix')}: ${cosmeticsLabel(bc)} — ${cosmeticsVariantName(bc, bi)}`;
-      setCosmeticsStatus(boughtText, 'success');
-      addToast('✨', boughtText(), null);
-      playBeep(880, 150, 0.9);
-    } else if (pending) {
-      setCosmeticsStatus('', '');
-    }
-  } else if (cosmeticsOpen) {
-    // Магазин был открыт ещё без серверного подтверждения (см. showCosmeticsOverlay)
-    // и статус-строка застыла на «не подтверждено» — теперь оно пришло, гасим подсказку.
-    setCosmeticsStatus('', '');
-  }
-
-  cosmeticsApplyDesiredServer();
-
-  syncCosmeticsUi();
-
-  renderMetaHud();
-  // C3: инвентарь/экипировка обновились — перерисовываем «Ваш облик».
-  try {
-    renderMenuSkinPreview();
-  } catch {}
+  const res = handleCosmeticsMessage(msg, {
+    youStyle,
+    cosmeticsLoaded,
+    cosmeticsSource,
+    youTitleMask,
+    youTitleId,
+    youCos,
+    achvProgressById,
+    applyCosPayload,
+    COS_TITLE_MAX,
+    cosmeticsCacheSave,
+    pendingCosmeticsOp,
+    cosmeticsOpClear,
+    COSMETICS_MAX_ID,
+    t,
+    cosmeticsLabel,
+    cosmeticsVariantName,
+    setCosmeticsStatus,
+    addToast,
+    playBeep,
+    cosmeticsOpen,
+    cosmeticsApplyDesiredServer,
+    syncCosmeticsUi,
+    renderMetaHud,
+    renderMenuSkinPreview
+  });
+  youStyle = res.youStyle;
+  cosmeticsLoaded = res.cosmeticsLoaded;
+  cosmeticsSource = res.cosmeticsSource;
+  youTitleMask = res.youTitleMask;
+  youTitleId = res.youTitleId;
 }
 
 /* Модель «желаемой» экипировки — в client_cos_desired.js вместе с тестами.
@@ -5200,193 +4950,32 @@ function cosmeticsVariantName(cat, id) {
 
 /* --- Титулы в магазине -----------------------------------------------------
    Отдельная вкладка: покупать нечего, поэтому вместо цены — условие открытия,
-   а вместо «Купить» — «Надеть». Отправка идёт сообщением `titleEquip`. */
+   а вместо «Купить» — «Надеть». Отправка идёт сообщением `titleEquip`.
+   DOM-обвязка (renderCosmeticsTitles и связанные хелперы) — в
+   client_shop_ui.js, здесь только тонкие обёртки с deps. */
 
 function cosTitleUnlocked(id) {
-  const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
-  if (i === 0) return true;
-  return (Number(youTitleMask) & (1 << i)) !== 0;
+  return cosTitleUnlockedImpl(id, shopUiDeps());
 }
 
-/* C3: прогресс к титулу. Возвращает {frac, cur, max} либо null, если данных
-   нет. Открытый титул — {frac:1}, без счётчика: сервер не присылает прогресс
-   по уже закрытым ачивкам, и придумывать «10/10» было бы враньём. */
 function cosTitleProgress(id) {
-  const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
-  if (i === 0) return null;
-  if (cosTitleUnlocked(i)) return { frac: 1, cur: 0, max: 0 };
-  const achv = cosTitleAchvById.get(i);
-  if (achv == null) return null;
-  const p = achvProgressById.get(achv);
-  if (!p || !(p.max > 0)) return null;
-  return { frac: Math.max(0, Math.min(1, p.cur / p.max)), cur: p.cur, max: p.max };
+  return cosTitleProgressImpl(id, shopUiDeps());
 }
 
-/* C3: «37/100», «0/100 000» — разряды через УЗКИЙ НЕРАЗРЫВНЫЙ пробел (U+202F).
-   Сама группировка и константа разделителя — в client_format.js. */
 function cosFormatCount(n) {
-  return formatGroupedCount(n);
+  return cosFormatCountImpl(n, shopUiDeps());
 }
 
 function cosTitlesUnlockedCount() {
-  let n = 0;
-  for (let i = 1; i <= COS_TITLE_MAX; i++) {
-    if (cosTitleUnlocked(i)) n++;
-  }
-  return n;
+  return cosTitlesUnlockedCountImpl(shopUiDeps());
 }
 
 function cosTitleEquip(id) {
-  const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
-  if (!cosTitleUnlocked(i)) return;
-  youTitleId = i;
-  if (you) {
-    if (i) cosTitleByPlayer.set(you, i);
-    else cosTitleByPlayer.delete(you);
-  }
-  cosmeticsCacheSave();
-  if (!wsSend('titleEquip', { id: i })) {
-    setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'info');
-  }
-  syncCosmeticsUi();
+  cosTitleEquipImpl(id, shopUiDeps());
 }
 
 function renderCosmeticsTitles() {
-  if (!cosmeticsItemsEl) return;
-  const items = [];
-
-  const hint = document.createElement('div');
-  hint.className = `cosmeticsTierSep ${tierClass()}`;
-  hint.textContent = t('cosmetics.title_free_hint');
-  items.push(hint);
-
-  if (!youTitleMask && cosmeticsSource !== 'server') {
-    const note = document.createElement('div');
-    note.className = 'cosmeticsItemWhere';
-    note.textContent = t('cosmetics.titles_unavailable');
-    items.push(note);
-  }
-
-  for (let id = 0; id <= COS_TITLE_MAX; id++) {
-    const unlocked = cosTitleUnlocked(id);
-    const worn = Number(youTitleId) === id;
-    if (cosmeticsFilter === 'owned' && !unlocked) continue;
-    if (cosmeticsFilter === 'available' && unlocked) continue;
-
-    // Разметка карточки титула согласована с вёрсткой (.titleItem): медаль
-    // вместо превью-канваса, условие получения вместо цены, никакой валюты.
-    const card = document.createElement('div');
-    card.className = 'titleItem' + (cosmeticsSelId === id ? ' isSelected' : '');
-    // K7: тот же приём, что и для карточек предметов — выбор не пересобирает
-    // список и не роняет фокус.
-    card.dataset.cosid = String(id);
-    card.classList.toggle('isUnlocked', unlocked);
-    card.classList.toggle('isEquipped', worn);
-    card.classList.toggle('isLocked', !unlocked);
-    card.tabIndex = 0;
-    card.setAttribute('role', 'button');
-    card.addEventListener('click', () => {
-      cosmeticsSelectItem(id);
-    });
-    // Фокус с клавиатуры равен выбору: Tab по списку сразу меняет превью.
-    card.addEventListener('focus', () => cosmeticsSelectItem(id));
-
-    const medal = document.createElement('span');
-    medal.className = 'titleMedal';
-    medal.setAttribute('aria-hidden', 'true');
-    medal.textContent = id === 0 ? '—' : '🏅';
-
-    const left = document.createElement('div');
-    left.className = 'titleItemLeft';
-
-    const nameEl = document.createElement('div');
-    nameEl.className = 'titleName';
-    nameEl.textContent = id === 0 ? t('cosmetics.title_none') : `«${cosTitleName(id)}»`;
-    left.appendChild(nameEl);
-
-    if (unlocked) {
-      const desc = document.createElement('div');
-      desc.className = 'titleDesc';
-      desc.textContent =
-        id === 0 ? t('cosmetics.title_none_desc') : `${t('cosmetics.title_earned_for')}: ${cosTitleReq(id)}`;
-      left.appendChild(desc);
-    } else {
-      const req = document.createElement('div');
-      req.className = 'titleReq';
-      req.textContent = cosTitleReq(id) || t('cosmetics.title_locked');
-      left.appendChild(req);
-    }
-
-    /* C3: реальный прогресс к ачивке. Сервер присылает накопленные счётчики
-       в `cosmetics.achvProgress` (только по НЕ открытым ачивкам). У открытого
-       титула счётчика нет — там полная полоса без подписи. Если сервер старый
-       или связка «титул → ачивка» не пришла, cosTitleProgress() вернёт null и
-       блок просто не рисуется, как и раньше. */
-    const prog = cosTitleProgress(id);
-    if (prog != null) {
-      const row = document.createElement('div');
-      row.className = 'cosmeticsProgressRow';
-      const bar = document.createElement('div');
-      bar.className = 'cosmeticsItemProgress';
-      const fill = document.createElement('span');
-      fill.style.width = `${Math.round(Math.max(0, Math.min(1, prog.frac)) * 100)}%`;
-      bar.appendChild(fill);
-      row.appendChild(bar);
-      if (prog.max > 0) {
-        const lab = document.createElement('span');
-        lab.className = 'cosmeticsItemProgressLabel';
-        lab.textContent = tfmt('cosmetics.progress_of', {
-          cur: cosFormatCount(prog.cur),
-          max: cosFormatCount(prog.max),
-        });
-        row.appendChild(lab);
-      }
-      left.appendChild(row);
-    }
-
-    const right = document.createElement('div');
-    right.className = 'titleItemRight';
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'btnSecondary';
-    if (!unlocked) {
-      btn.disabled = true;
-      btn.textContent = t('cosmetics.locked');
-    } else if (worn) {
-      btn.disabled = true;
-      btn.textContent = t('cosmetics.title_equipped');
-    } else {
-      btn.textContent = t('cosmetics.wear');
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        cosTitleEquip(id);
-      });
-    }
-    right.appendChild(btn);
-
-    card.appendChild(medal);
-    card.appendChild(left);
-    card.appendChild(right);
-    items.push(card);
-  }
-
-  // Контейнер несёт --title-accent для вкладки титулов (см. .cosmeticsItems.isTitles).
-  cosmeticsItemsEl.classList.add('isTitles');
-
-  if (items.length <= 1) {
-    setSafeHtml(
-      cosmeticsItemsEl,
-      `
-      <div class="roomsEmpty">
-        <div class="roomsEmptyTitle">${escapeHtml(t('cosmetics.empty_title'))}</div>
-        <div class="roomsEmptyDesc">${escapeHtml(t('cosmetics.empty_desc'))}</div>
-      </div>
-      `
-    );
-    return;
-  }
-  cosmeticsItemsEl.replaceChildren(...items);
+  renderCosmeticsTitlesImpl(shopUiDeps());
 }
 
 function cosmeticsSetFilter(next) {
@@ -5832,8 +5421,15 @@ function shopUiDeps() {
     setCosmeticsPreviewLastAt: (v) => { cosmeticsPreviewLastAt = v; },
     getYouStyle: () => youStyle,
     getYouTitleId: () => youTitleId,
+    setYouTitleId: (v) => { youTitleId = v; },
+    getYouTitleMask: () => youTitleMask,
+    getYou: () => you,
     getPendingCosmeticsOp: () => pendingCosmeticsOp,
     youCos,
+    cosTitleByPlayer,
+    cosTitleAchvById,
+    achvProgressById,
+    formatGroupedCount,
     // Функции/таблицы, общие с остальным client.js
     t,
     tfmt,
@@ -5841,6 +5437,9 @@ function shopUiDeps() {
     escapeHtml,
     setSafeHtml,
     cosTitlePrefix,
+    cosTitleName,
+    cosTitleReq,
+    cosmeticsCacheSave,
     cosmeticsEnsureLocalReady,
     cosmeticsServerReady,
     cosmeticsBuyLocal,
@@ -6370,124 +5969,58 @@ function applyPackedDeltaGridWithAnim(buf, now) {
 }
 
 function onState(s) {
-  clientState.lastState = s;
-
-  // K1: прямоугольник ROI приходил и молча выбрасывался. Он — единственный
-  // источник правды о том, какая часть сетки вообще свежая.
-  const r = s?.roi;
-  if (r && Number(r.rw) > 0 && Number(r.rh) > 0) {
-    lastRoi = {
-      rx: Math.max(0, Number(r.rx) || 0),
-      ry: Math.max(0, Number(r.ry) || 0),
-      rw: Number(r.rw) || 0,
-      rh: Number(r.rh) || 0
-    };
-  } else if (s?.full) {
-    // Полный снапшот освежает всю карту — тумана в этом кадре нет.
-    lastRoi = null;
-  }
-
-  const now = performance.now();
-
-  // J15: якоря должны быть готовы до применения дельты сетки — именно в этом
-  // снапшоте голова стоит там, где петля замкнулась.
-  refreshCaptureAnchors(s.players);
-
-  if (s.full) {
-    const prev = gridOwner;
-    gridOwner = new Uint16Array(s.grid);
-    trailOwner = new Uint16Array(s.trail);
-    if (!gridFillAt || gridFillAt.length !== gridOwner.length) gridFillAt = new Float32Array(gridOwner.length);
-    if (!coolSeenAt || coolSeenAt.length !== gridOwner.length) coolSeenAt = new Float32Array(gridOwner.length);
-    if (prev && prev.length === gridOwner.length) {
-      for (let i = 0; i < gridOwner.length; i++) {
-        const n = gridOwner[i];
-        if (prev[i] !== n) markCoolSeen(i, n, now);
-        if (n !== 0 && !gridCellIsCooling(n) && prev[i] !== n) {
-          gridFillAt[i] = now + fillDelayFor(i, n);
-        }
-      }
-    } else {
-      for (let i = 0; i < gridOwner.length; i++) markCoolSeen(i, gridOwner[i], now);
-    }
-  } else {
-    applyPackedDeltaGridWithAnim(s.dg, now);
-    applyPackedDelta(trailOwner, s.dt);
-  }
-
-  // minimap is updated by server-sent chunk updates
-
-  const tmpPlayers = prevPlayers;
-  prevPlayers = currPlayers;
-  currPlayers = tmpPlayers;
-  currPlayers.clear();
-  let nameChanged = false;
-  for (const p of s.players) {
-    currPlayers.set(p.n, p);
-    // K2: номера игроков переиспользуются (аллокатор отдаёт первый свободный,
-    // боты пересоздаются при каждом входе/выходе человека). Кэш «номер → цвет»
-    // раньше писался один раз и никогда не обновлялся: номер 7 оставался
-    // красным даже после того, как его получил новый синий бот. Сравниваем
-    // цвет каждый кадр и сбрасываем зависимые кэши при расхождении.
-    if (colors.get(p.n) !== p.c) {
-      colors.set(p.n, p.c);
-      ownerFillStyleCache.delete(p.n);
-      minimapOwnerRgbCache.delete(p.n);
-      minimapDirty = true;
-    }
-    if (p.nm && nameById.get(p.n) !== p.nm) {
-      nameById.set(p.n, p.nm);
-      nameChanged = true;
-    }
-  }
-
-  if (nameChanged && clientState.chatMessages.length) renderChat();
-
-  headIndexByOwner.clear();
-  for (const p of s.players) {
-    headIndexByOwner.set(p.n, p.y * W + p.x);
-  }
-
-  lastPacketAt = performance.now();
-
-  if (clientState.lastStateAt != null) {
-    const dt = lastPacketAt - clientState.lastStateAt;
-    if (dt > 0) tickrate = lerp(tickrate || 0, 1000 / dt, 0.15);
-  }
-  clientState.lastStateAt = lastPacketAt;
-
-  try {
-    refreshOwnGeometry(false);
-  } catch {}
-
-  const me = s.players?.find((p) => p.n === you);
-  if (me) {
-    const alive = !!me.a;
-    if (alive) {
-      const ordered = computeTopSorted(s.players);
-      const idx = ordered.findIndex((p) => p.n === you);
-      const cells = Number(me?.s) || 0;
-      const pct = mapCells ? (cells / mapCells) * 100 : 0;
-      const points = Number(me?.p) || 0;
-      const place = idx >= 0 ? `${idx + 1}/${ordered.length}` : '—';
-      lastYouStats = { cells, pct, points, place };
-    }
-    if (alive && !youAlive) {
-      youAlive = true;
-      lastDirSent = null;
-      hideOverlays();
-    } else if (!alive && youAlive) {
-      youAlive = false;
-      lastDirSent = null;
-      youStreak = 0;
-      // Драматический наезд камеры на голову в точке гибели — до того, как
-      // сервер уберёт игрока из состояния и координаты станут недоступны.
-      beginDeathZoom((Number(me.x) || 0) + 0.5, (Number(me.y) || 0) + 0.5);
-      // Момент смерти стоит увидеть: модалка мгновенно накрывала кадр, в
-      // котором игрока убили. Держим паузу, пока идёт hitstop + вспышка.
-      beginDeathSlowMo();
-    }
-  }
+  const res = onStateImpl(s, {
+    clientState,
+    W,
+    mapCells,
+    you,
+    colors,
+    nameById,
+    ownerFillStyleCache,
+    minimapOwnerRgbCache,
+    headIndexByOwner,
+    refreshCaptureAnchors,
+    markCoolSeen,
+    gridCellIsCooling,
+    fillDelayFor,
+    applyPackedDeltaGridWithAnim,
+    applyPackedDelta,
+    renderChat,
+    refreshOwnGeometry,
+    computeTopSorted,
+    hideOverlays,
+    beginDeathZoom,
+    beginDeathSlowMo,
+    lerp,
+    lastRoi,
+    gridOwner,
+    trailOwner,
+    gridFillAt,
+    coolSeenAt,
+    prevPlayers,
+    currPlayers,
+    minimapDirty,
+    lastPacketAt,
+    tickrate,
+    lastYouStats,
+    youAlive,
+    lastDirSent,
+    youStreak
+  });
+  lastRoi = res.lastRoi;
+  gridOwner = res.gridOwner;
+  trailOwner = res.trailOwner;
+  gridFillAt = res.gridFillAt;
+  coolSeenAt = res.coolSeenAt;
+  prevPlayers = res.prevPlayers;
+  currPlayers = res.currPlayers;
+  minimapDirty = res.minimapDirty;
+  lastPacketAt = res.lastPacketAt;
+  tickrate = res.tickrate;
+  lastYouStats = res.lastYouStats;
+  youAlive = res.youAlive;
+  lastDirSent = res.lastDirSent;
+  youStreak = res.youStreak;
 }
 
 setInterval(() => {

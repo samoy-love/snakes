@@ -1,39 +1,39 @@
 /* Игровой экран, часть 3/6: лента событий (#killfeed, #eventToasts).
    См. 03-game-fx.css — общее примечание про разрез бывшего 03-game.css. */
 
- /* I12: позиционирование отсюда удалено — killfeed живёт в #rightSidebar,
-    и правило `#rightSidebar #killfeed { position: relative }` его полностью
-    перекрывало. Осталась только раскладка содержимого. */
- #killfeed {
-   display: grid;
-   gap: 6px;
-   pointer-events: none;
- }
+/* I12: позиционирование отсюда удалено — killfeed живёт в #rightSidebar,
+   и правило `#rightSidebar #killfeed { position: relative }` его полностью
+   перекрывало. Осталась только раскладка содержимого. */
+#killfeed {
+  display: grid;
+  gap: 6px;
+  pointer-events: none;
+}
 
- .killLine {
-   padding: 7px 9px;
-   border-radius: var(--r-md);
-   border: 1px solid var(--border2);
-   border-left: 3px solid transparent;
-   background: color-mix(in srgb, var(--panel) 85%, rgba(0,0,0,0.15));
-   backdrop-filter: blur(10px);
-   font-size: var(--fs-meta);
-   line-height: 1.35;
- }
+.killLine {
+  padding: 7px 9px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border2);
+  border-left: 3px solid transparent;
+  background: color-mix(in srgb, var(--panel) 85%, rgba(0,0,0,0.15));
+  backdrop-filter: blur(10px);
+  font-size: var(--fs-meta);
+  line-height: 1.35;
+}
 
- /* УХ31: отличаем свои события от чужих в ленте EVENTS — левая полоса и лёгкий
-    оттенок фона по цвету игрока (--brand) против нейтрального для чужих
-    (--brand2), чтобы не выдумывать новую пару цветов. */
- .killLine.killLineMine {
+/* УХ31: отличаем свои события от чужих в ленте EVENTS — левая полоса и лёгкий
+   оттенок фона по цвету игрока (--brand) против нейтрального для чужих
+   (--brand2), чтобы не выдумывать новую пару цветов. */
+.killLine.killLineMine {
   border-left-color: var(--brand);
   background: color-mix(in srgb, var(--brand) 14%, color-mix(in srgb, var(--panel) 85%, rgba(0,0,0,0.15)));
- }
+}
 
- .killLine.killLineOther {
+.killLine.killLineOther {
   border-left-color: var(--brand2);
- }
+}
 
- #eventToasts {
+#eventToasts {
   position: fixed;
   left: calc(12px + var(--sa-left));
   bottom: calc(12px + var(--sa-bottom));
@@ -43,54 +43,54 @@
   display: grid;
   gap: 8px;
   pointer-events: none;
- }
+}
 
- /* I8: на мобильном камера центрирует игрока, поэтому верхние по центру тосты
-    висели прямо над головой змейки. Уводим их вниз, над чатом, и оставляем два. */
- @media (max-width: 720px) {
+/* I8: на мобильном камера центрирует игрока, поэтому верхние по центру тосты
+   висели прямо над головой змейки. Уводим их вниз, над чатом, и оставляем два. */
+@media (max-width: 720px) {
   #eventToasts {
-   left: calc(8px + var(--sa-left));
-   right: calc(8px + var(--sa-right));
-   top: auto;
-   bottom: calc(8px + var(--sa-bottom) + 52px);
-   transform: none;
-   width: auto;
-   gap: 6px;
-   justify-items: stretch;
+    left: calc(8px + var(--sa-left));
+    right: calc(8px + var(--sa-right));
+    top: auto;
+    bottom: calc(8px + var(--sa-bottom) + 52px);
+    transform: none;
+    width: auto;
+    gap: 6px;
+    justify-items: stretch;
   }
 
   /* тосты добавляются через prepend — свежие идут первыми */
   #eventToasts > .eventToast:nth-child(n + 3) {
-   display: none;
+    display: none;
   }
 
   .eventToast {
-   padding: var(--pad-sm) var(--pad-md);
-   gap: 8px;
-   border-radius: var(--r-md);
+    padding: var(--pad-sm) var(--pad-md);
+    gap: 8px;
+    border-radius: var(--r-md);
   }
 
   .eventToastIcon {
-   width: 26px;
-   height: 26px;
-   font-size: var(--fs-body);
-   flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    font-size: var(--fs-body);
+    flex: 0 0 auto;
   }
 
   .eventToastText {
-   font-size: var(--fs-12);
+    font-size: var(--fs-12);
   }
 
   .eventToastSub {
-   font-size: var(--fs-11);
+    font-size: var(--fs-11);
   }
 
   /* Боевой чип — в тот же нижний стек, тосты идут над ним */
   #hudCombo {
-   left: calc(8px + var(--sa-left));
-   bottom: calc(8px + var(--sa-bottom));
-   padding: 4px 10px;
-   font-size: var(--fs-12);
+    left: calc(8px + var(--sa-left));
+    bottom: calc(8px + var(--sa-bottom));
+    padding: 4px 10px;
+    font-size: var(--fs-12);
   }
 
   /* Стек тостов поднимается ровно на высоту развёрнутого чата. Значение
@@ -98,17 +98,17 @@
      снижения потолка чата тосты уезжали в центр экрана, прямо на голову
      змейки (камера центрирует игрока на 50% высоты). */
   body:has(#chat:not(.collapsed)) #eventToasts {
-   bottom: calc(8px + var(--sa-bottom) + var(--chat-max-mobile) + 8px);
+    bottom: calc(8px + var(--sa-bottom) + var(--chat-max-mobile) + 8px);
   }
 
   /* Развёрнутый чат + два тоста = стек доезжает до головы змейки. Пока чат
      открыт, игрок печатает, а не рулит: оставляем один, самый свежий. */
   body:has(#chat:not(.collapsed)) #eventToasts > .eventToast:nth-child(n + 2) {
-   display: none;
+    display: none;
   }
- }
+}
 
- .eventToast {
+.eventToast {
   display: flex;
   gap: 10px;
   padding: var(--pad-md);
@@ -120,37 +120,37 @@
   pointer-events: auto;
   max-width: 100%;
   word-break: break-word;
- }
+}
 
- .eventToastAction {
-   cursor: pointer;
- }
+.eventToastAction {
+  cursor: pointer;
+}
 
- .eventToastAction:focus-visible {
-   outline: 2px solid var(--focus);
-   outline-offset: 2px;
- }
+.eventToastAction:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
 
- .eventToastIcon {
-   width: 34px;
-   height: 34px;
-   border-radius: var(--r-tab);
-   border: 1px solid rgba(255, 255, 255, 0.10);
-   background: rgba(0, 0, 0, 0.22);
-   display: inline-flex;
-   align-items: center;
-   justify-content: center;
-   font-size: var(--fs-title);
- }
+.eventToastIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-tab);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(0, 0, 0, 0.22);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-title);
+}
 
- .eventToastText {
-   font-size: var(--fs-meta);
-   font-weight: 800;
-   color: var(--text);
- }
+.eventToastText {
+  font-size: var(--fs-meta);
+  font-weight: 800;
+  color: var(--text);
+}
 
- .eventToastSub {
-   font-size: var(--fs-meta);
-   font-weight: 700;
-   color: var(--muted);
- }
+.eventToastSub {
+  font-size: var(--fs-meta);
+  font-weight: 700;
+  color: var(--muted);
+}

@@ -2,7 +2,15 @@
    глобалов (roomsListEl, selectedRoomId, t, attemptJoinRoom...) напрямую.
    Здесь то же поведение, но всё внешнее приходит аргументами: контейнер,
    массив комнат и объект колбэков/хелперов. Сортировка и фильтрация — в
-   client_rooms.js, сюда не дублируются. */
+   client_rooms.js, сюда не дублируются.
+
+   Ниже — orchestration-логика панели «Комнаты» (тоже переехала из client.js):
+   updateRoomsUiImpl и всё, что она вызывает по цепочке. Изменяемое
+   состояние client.js (lastRooms, selectedRoomId, roomsCreateOpen...)
+   приходит через геттеры/сеттеры в deps — модули не могут делить `let`
+   напрямую. */
+
+import { filterAndSortRooms } from './client_rooms.js';
 
 /** Список комнат. container — узел, куда рисуем; rooms — уже отфильтрованный
     и отсортированный массив (см. client_rooms.js). deps:
@@ -246,4 +254,147 @@ export function updateRoomsStats(rawRooms, els, deps) {
   if (!statsEl) return;
   const status = loading ? ` • ${t('rooms.loading')}` : error ? ` • ${error}` : '';
   statsEl.textContent = `${t('rooms.stats_prefix')}: ${formatNumber(rooms.length)} • ${t('rooms.stats_online')}: ${formatNumber(totalHumans)}${wsStatusSuffix()}${status}`;
+}
+
+/** Прячет/показывает крестик очистки поиска по наличию текста в поле.
+    deps: { roomsSearchClearBtn, roomsSearchInput } */
+export function syncRoomsSearchClearUiImpl(deps) {
+  const { roomsSearchClearBtn, roomsSearchInput } = deps;
+  if (!roomsSearchClearBtn) return;
+  const q = String(roomsSearchInput?.value || '').trim();
+  roomsSearchClearBtn.classList.toggle('hidden', !q);
+}
+
+/** Очищает поле поиска комнат и перерисовывает список.
+    deps: { roomsSearchInput, syncRoomsSearchClearUi, updateRoomsUi } */
+export function clearRoomsSearchImpl(deps) {
+  const { roomsSearchInput, syncRoomsSearchClearUi, updateRoomsUi } = deps;
+  if (!roomsSearchInput) return;
+  roomsSearchInput.value = '';
+  syncRoomsSearchClearUi();
+  updateRoomsUi();
+  try {
+    roomsSearchInput.focus();
+  } catch {}
+}
+
+/** Явный запрос входа в комнату (кнопка/dblclick/Enter в строке списка).
+    deps: { menuNameInput, submitNameFromInput, updateMenuNameUi, trackEvent, wsSend } */
+export function attemptJoinRoomImpl(rid, deps) {
+  const { menuNameInput, submitNameFromInput, updateMenuNameUi, trackEvent, wsSend } = deps;
+  const roomId = rid == null ? null : Number(rid);
+  if (roomId == null) return;
+  const nm = submitNameFromInput(menuNameInput);
+  if (!nm) {
+    updateMenuNameUi();
+    menuNameInput?.focus();
+    return;
+  }
+  trackEvent('join_room');
+  wsSend('join', { roomId, mode: 'id' });
+}
+
+/** Открывает/закрывает панель создания комнаты.
+    deps: { setRoomsCreateOpen, roomsCreateEl, toggleCreateRoomBtn, t,
+            roomsCreateNameInput, updateRoomsCreateUi } */
+export function setRoomsCreateOpenImpl(v, deps) {
+  const { setRoomsCreateOpen, roomsCreateEl, toggleCreateRoomBtn, t, roomsCreateNameInput, updateRoomsCreateUi } = deps;
+  const on = !!v;
+  setRoomsCreateOpen(on);
+  if (roomsCreateEl) roomsCreateEl.classList.toggle('hidden', !on);
+  if (toggleCreateRoomBtn) {
+    toggleCreateRoomBtn.textContent = on ? t('rooms.hide') : t('rooms.create');
+    toggleCreateRoomBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+  }
+  if (on) {
+    try {
+      roomsCreateNameInput?.focus();
+    } catch {}
+  }
+  updateRoomsCreateUi();
+}
+
+/** Валидация формы создания комнаты (кнопка/текст ошибки).
+    deps: { getRoomsCreateOpen, roomsCreateError, createRoomBtn,
+            sanitizeRoomTitleClient, roomsCreateNameInput, t, getCreateRoomPending } */
+export function updateRoomsCreateUiImpl(errMsg, deps) {
+  const { getRoomsCreateOpen, roomsCreateError, createRoomBtn, sanitizeRoomTitleClient, roomsCreateNameInput, t, getCreateRoomPending } = deps;
+  if (!getRoomsCreateOpen()) {
+    if (roomsCreateError) roomsCreateError.textContent = '';
+    if (createRoomBtn) createRoomBtn.disabled = true;
+    return;
+  }
+
+  const title = sanitizeRoomTitleClient(roomsCreateNameInput?.value);
+  const ok = !!title;
+  const err = String(errMsg || '').trim();
+  if (roomsCreateError) roomsCreateError.textContent = err ? err : ok ? '' : t('rooms.name_placeholder');
+  if (createRoomBtn) createRoomBtn.disabled = !ok || getCreateRoomPending();
+}
+
+/* Порядок и отбор комнат — в client_rooms.js. Здесь только откуда взять
+   режим сортировки и строку поиска.
+   deps: { lastRooms, roomsSearchInput, roomsSortSelect } */
+export function applyRoomsFilterSortImpl(deps) {
+  const { lastRooms, roomsSearchInput, roomsSortSelect } = deps;
+  return filterAndSortRooms(lastRooms, {
+    query: roomsSearchInput?.value,
+    sort: roomsSortSelect?.value
+  });
+}
+
+/** Главная orchestration-функция панели «Комнаты»: сверяет выбранную
+    комнату со списком, обновляет статистику и кнопку входа, решает какое
+    из состояний списка показать (loading/error/empty/noMatch/список).
+    deps: { syncRoomsSearchClearUi, getLastRooms, getSelectedRoomId,
+            setSelectedRoomId, joinRoomBtn, updateRoomsStatsLocal,
+            applyRoomsFilterSort, getRoomsLoading, getRoomsLoadError,
+            renderRoomsEmptyLocal, renderRoomsListLocal } */
+export function updateRoomsUiImpl(deps) {
+  const { syncRoomsSearchClearUi, getLastRooms, getSelectedRoomId, setSelectedRoomId, joinRoomBtn, updateRoomsStatsLocal, applyRoomsFilterSort, getRoomsLoading, getRoomsLoadError, renderRoomsEmptyLocal, renderRoomsListLocal } = deps;
+
+  syncRoomsSearchClearUi();
+  const rawAll = Array.isArray(getLastRooms()) ? getLastRooms() : [];
+  if (getSelectedRoomId() != null) {
+    const exists = rawAll.some((r) => Number(r?.id) === Number(getSelectedRoomId()));
+    if (!exists) setSelectedRoomId(null);
+  }
+
+  if (joinRoomBtn) {
+    joinRoomBtn.disabled = getSelectedRoomId() == null;
+  }
+  updateRoomsStatsLocal(getLastRooms());
+  const raw = Array.isArray(getLastRooms()) ? getLastRooms() : [];
+  const filtered = applyRoomsFilterSort();
+
+  if (getRoomsLoading() && raw.length === 0) {
+    renderRoomsEmptyLocal('loading');
+    return;
+  }
+  if (getRoomsLoadError() && raw.length === 0) {
+    renderRoomsEmptyLocal('error', getRoomsLoadError());
+    return;
+  }
+  if (raw.length === 0) {
+    renderRoomsEmptyLocal('empty');
+    return;
+  }
+  if (filtered.length === 0) {
+    renderRoomsEmptyLocal('noMatch');
+    return;
+  }
+  renderRoomsListLocal(filtered);
+}
+
+/** Строка «Комната: N / M» в HUD и заголовок чата.
+    deps: { roomInfoEl, getRoomId, getRoomLimit, t, wsStatusSuffix, updateChatHeaderStatus } */
+export function updateRoomInfoImpl(deps) {
+  const { roomInfoEl, getRoomId, getRoomLimit, t, wsStatusSuffix, updateChatHeaderStatus } = deps;
+  if (!roomInfoEl) return;
+  const rid = getRoomId() == null ? '…' : String(getRoomId());
+  const lim = getRoomLimit() == null ? '' : ` / ${getRoomLimit()}`;
+  roomInfoEl.textContent = `${t('perf.room')}: ${rid}${lim}${wsStatusSuffix()}`;
+  try {
+    updateChatHeaderStatus();
+  } catch {}
 }

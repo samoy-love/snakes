@@ -2,6 +2,15 @@
    (#rightSidebar, #emojiPanel). См. 03-game-fx.css — общее примечание про
    разрез бывшего 03-game.css. */
 
+/* Правая колонка. Раскладка задаётся здесь ОДИН раз; ниже её меняют только
+   медиазапросы. Раньше она собиралась из семи объявлений в трёх файлах:
+   display переключался grid -> flex, max-height переписывался трижды, и
+   какое значение победило, можно было узнать только в devtools.
+
+   Флекс-колонка, а не сетка: при display:grid строки с auto-размером
+   ужимались под высоту контейнера, поэтому панели обрезались по контенту и
+   прокрутка не появлялась вовсе (scrollHeight === clientHeight).
+   Высоту ограничивает --right-bottom-reserve — место, занятое чатом. */
 #rightSidebar {
   position: fixed;
   right: calc(12px + var(--sa-right));
@@ -14,19 +23,19 @@
   min-height: 0;
   pointer-events: auto;
   max-height: calc(100dvh - var(--right-top) - 12px - var(--sa-bottom) - var(--right-bottom-reserve));
- }
+}
 
- @media (min-width: 1800px) {
+@media (min-width: 1800px) {
   #rightSidebar {
-   width: clamp(240px, 16vw, 300px);
+    width: clamp(240px, 16vw, 300px);
   }
- }
+}
 
- /* #rightInfo не скроллится целиком: «Матч» и «Команда» ужимаются и
-    прокручиваются ВНУТРИ себя, а блок событий закреплён последним и не
-    отдаёт высоту — иначе килфид уезжал за нижнюю границу и его видимая
-    высота была нулевой на всех разрешениях. */
- #rightInfo {
+/* #rightInfo не скроллится целиком: «Матч» и «Команда» ужимаются и
+   прокручиваются ВНУТРИ себя, а блок событий закреплён последним и не
+   отдаёт высоту — иначе килфид уезжал за нижнюю границу и его видимая
+   высота была нулевой на всех разрешениях. */
+#rightInfo {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -37,9 +46,9 @@
   overscroll-behavior-y: contain;
   padding-bottom: 0;
   -webkit-overflow-scrolling: touch;
- }
+}
 
- #rightInfo .rightDetails {
+#rightInfo .rightDetails {
   border-radius: var(--r-tab);
   border: 1px solid var(--border2);
   background: color-mix(in srgb, var(--panel) calc(var(--hud-panel-alpha) * 100%), transparent);
@@ -47,9 +56,9 @@
   backdrop-filter: blur(10px);
   overflow: hidden;
   filter: var(--hud-filter);
- }
+}
 
- #rightInfo .rightDetailsSummary {
+#rightInfo .rightDetailsSummary {
   list-style: none;
   cursor: pointer;
   user-select: none;
@@ -60,38 +69,38 @@
   font-weight: 800;
   letter-spacing: 0.3px;
   text-transform: uppercase;
- }
+}
 
- #rightInfo .rightDetailsSummary::-webkit-details-marker {
+#rightInfo .rightDetailsSummary::-webkit-details-marker {
   display: none;
- }
+}
 
- #rightInfo .rightDetails[open] > .rightDetailsSummary {
+#rightInfo .rightDetails[open] > .rightDetailsSummary {
   background: rgba(0, 0, 0, 0.10);
- }
+}
 
- #rightInfo .rightDetails > #metaHud,
- #rightInfo .rightDetails > #teamHud {
+#rightInfo .rightDetails > #metaHud,
+#rightInfo .rightDetails > #teamHud {
   border: none;
   background: transparent;
   box-shadow: none;
   backdrop-filter: none;
   padding: 8px 10px 10px;
- }
+}
 
- #rightInfo > #teamHud:empty,
- #rightInfo > #metaHud:empty,
- #rightInfo > #perf:empty,
- #rightInfo > #killfeed:empty {
+#rightInfo > #teamHud:empty,
+#rightInfo > #metaHud:empty,
+#rightInfo > #perf:empty,
+#rightInfo > #killfeed:empty {
   display: none;
- }
+}
 
- #rightInfo.rightInfoPulse #metaHud {
+#rightInfo.rightInfoPulse #metaHud {
   border-color: color-mix(in srgb, var(--focus) 42%, var(--border2));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent), var(--shadow-float);
- }
+}
 
- #rightSidebar #teamHud {
+#rightSidebar #teamHud {
   padding: var(--pad-sm) var(--pad-md);
   border-radius: var(--r-tab);
   border: 1px solid var(--border2);
@@ -101,179 +110,179 @@
   font-size: var(--fs-meta);
   line-height: 1.35;
   color: var(--muted);
- }
+}
 
- #rightSidebar #minimap,
- #rightSidebar #metaHud,
- #rightSidebar #teamHud,
- #rightSidebar #perf,
- #rightSidebar #killfeed {
+#rightSidebar #minimap,
+#rightSidebar #metaHud,
+#rightSidebar #teamHud,
+#rightSidebar #perf,
+#rightSidebar #killfeed {
   position: relative;
   right: auto;
   top: auto;
   left: auto;
   transform: none;
   width: 100%;
- }
+}
 
- #rightSidebar #metaHud,
- #rightSidebar #teamHud,
- #rightSidebar #perf,
- #rightSidebar #killfeed {
+#rightSidebar #metaHud,
+#rightSidebar #teamHud,
+#rightSidebar #perf,
+#rightSidebar #killfeed {
   padding: var(--pad-sm) var(--pad-md);
- }
+}
 
- #rightSidebar #minimap,
- #rightSidebar #metaHud,
- #rightSidebar #teamHud,
- #rightSidebar #perf,
- #rightSidebar #killfeed {
+#rightSidebar #minimap,
+#rightSidebar #metaHud,
+#rightSidebar #teamHud,
+#rightSidebar #perf,
+#rightSidebar #killfeed {
   border-radius: var(--r-tab);
   border: 1px solid var(--border2);
   background: color-mix(in srgb, var(--panel) calc(var(--hud-panel-alpha) * 100%), transparent);
   box-shadow: var(--shadow-float);
   backdrop-filter: blur(10px);
   filter: var(--hud-filter);
- }
+}
 
- #rightSidebar #minimap {
+#rightSidebar #minimap {
   width: auto;
   max-width: 100%;
   margin: 0 auto;
- }
+}
 
- #rightSidebar #metaHud {
-   min-width: 0;
- }
+#rightSidebar #metaHud {
+  min-width: 0;
+}
 
- #perf {
-   position: fixed;
-   right: calc(12px + var(--sa-right));
-   top: calc(174px + var(--sa-top));
-   z-index: var(--z-hud);
-   padding: var(--pad-sm) var(--pad-md);
-   border: 1px solid var(--border2);
-   border-radius: var(--r-md);
-   background: color-mix(in srgb, var(--panel) calc(var(--hud-panel-alpha) * 100%), transparent);
-   backdrop-filter: blur(10px);
-   box-shadow: var(--shadow-float);
-   font-size: var(--fs-meta);
-   line-height: 1.35;
-   white-space: normal;
-   min-width: 160px;
-   opacity: 0.82;
-   filter: var(--hud-filter);
- }
+#perf {
+  position: fixed;
+  right: calc(12px + var(--sa-right));
+  top: calc(174px + var(--sa-top));
+  z-index: var(--z-hud);
+  padding: var(--pad-sm) var(--pad-md);
+  border: 1px solid var(--border2);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--panel) calc(var(--hud-panel-alpha) * 100%), transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-float);
+  font-size: var(--fs-meta);
+  line-height: 1.35;
+  white-space: normal;
+  min-width: 160px;
+  opacity: 0.82;
+  filter: var(--hud-filter);
+}
 
- #perf .perfRow {
+#perf .perfRow {
   margin-top: 2px;
- }
+}
 
- #perf .perfRow:first-child {
+#perf .perfRow:first-child {
   margin-top: 0;
- }
+}
 
- #perf.perfCompact {
+#perf.perfCompact {
   min-width: 132px;
   font-size: var(--fs-meta);
   opacity: 0.76;
- }
+}
 
- #rightSidebar #perf {
-   min-width: 0;
- }
+#rightSidebar #perf {
+  min-width: 0;
+}
 
 #emojiPanel.open {
   display: block;
 }
 
- #emojiPanelTop {
-   position: absolute;
-   top: 8px;
-   right: 8px;
-   left: auto;
-   width: 34px;
-   height: 34px;
-   display: block;
-   padding: 0;
-   pointer-events: none;
- }
+#emojiPanelTop {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  left: auto;
+  width: 34px;
+  height: 34px;
+  display: block;
+  padding: 0;
+  pointer-events: none;
+}
 
- #emojiCloseBtn {
-   margin-left: 0;
-   width: var(--control-h);
-   height: var(--control-h);
-   border-radius: var(--r-sm);
-   border: 1px solid var(--border);
-   background: var(--btn);
-   color: var(--text);
-   cursor: pointer;
-   transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
-   pointer-events: auto;
- }
+#emojiCloseBtn {
+  margin-left: 0;
+  width: var(--control-h);
+  height: var(--control-h);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--btn);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+  pointer-events: auto;
+}
 
- #emojiCloseBtn:hover {
-   background: var(--btn2);
- }
+#emojiCloseBtn:hover {
+  background: var(--btn2);
+}
 
- #emojiCloseBtn:active {
-   transform: translateY(1px);
- }
+#emojiCloseBtn:active {
+  transform: translateY(1px);
+}
 
- #emojiCloseBtn:focus-visible {
-   outline: none;
-   border-color: var(--focus);
-   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
- }
+#emojiCloseBtn:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
+}
 
- .emojiRow {
-   display: grid;
-   grid-template-columns: repeat(auto-fill, var(--control-h));
-   gap: 6px;
-   padding: 0 42px 8px 2px;
- }
+.emojiRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--control-h));
+  gap: 6px;
+  padding: 0 42px 8px 2px;
+}
 
- #emojiRecent button {
-   width: var(--control-h);
-   height: var(--control-h);
- }
+#emojiRecent button {
+  width: var(--control-h);
+  height: var(--control-h);
+}
 
- #emojiGrid {
-   display: grid;
-   grid-template-columns: repeat(8, minmax(0, 1fr));
-   gap: 6px;
-   padding: 0 42px 2px 2px;
- }
+#emojiGrid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0 42px 2px 2px;
+}
 
- #emojiGrid button,
- #emojiRecent button {
-   width: 100%;
-   aspect-ratio: 1;
-   border-radius: var(--r-sm);
-   border: 1px solid var(--border2);
-   background: color-mix(in srgb, var(--btn) 70%, transparent);
-   color: var(--text);
-   cursor: pointer;
-   font-size: var(--fs-title);
-   transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
- }
+#emojiGrid button,
+#emojiRecent button {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border2);
+  background: color-mix(in srgb, var(--btn) 70%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--fs-title);
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
 
- #emojiGrid button:hover,
- #emojiRecent button:hover {
-   background: color-mix(in srgb, var(--btn2) 80%, transparent);
- }
+#emojiGrid button:hover,
+#emojiRecent button:hover {
+  background: color-mix(in srgb, var(--btn2) 80%, transparent);
+}
 
- #emojiGrid button:active,
- #emojiRecent button:active {
-   transform: translateY(1px);
- }
+#emojiGrid button:active,
+#emojiRecent button:active {
+  transform: translateY(1px);
+}
 
- #emojiGrid button:focus-visible,
- #emojiRecent button:focus-visible {
-   outline: none;
-   border-color: var(--focus);
-   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
- }
+#emojiGrid button:focus-visible,
+#emojiRecent button:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
+}
 
 img.emoji {
   width: 1em;
@@ -292,341 +301,341 @@ img.emoji {
   height: 20px;
 }
 
- /* ==========================================================================
-    I1. Мобильная раскладка HUD.
-    Было: #hud (min-width 180) слева и центрированный #topHud (359px на 375px)
-    физически накладывались, #topHud с z-index 13 накрывал выход и настройки,
-    правая панель 200px съедала 53% ширины. Стало — три непересекающиеся зоны:
-      строка 1 слева  — ряд иконок #hud,
-      строка 1 справа — только миникарта (до 520px её нет вовсе),
-      строка 2        — однострочный #topHud во всю оставшуюся ширину,
-      низ             — тосты и свёрнутый в кнопку чат.
-    ========================================================================== */
- @media (max-width: 720px) {
-   /* --- строка 1, слева: только иконки --- */
-   #hud {
-     left: calc(8px + var(--sa-left));
-     top: calc(8px + var(--sa-top));
-     min-width: 0;
-     width: auto;
-     padding: 4px;
-     max-width: calc(100vw - 16px - var(--sa-left) - var(--sa-right));
-     max-height: none;
-     overflow: visible;
-   }
+/* ==========================================================================
+   I1. Мобильная раскладка HUD.
+   Было: #hud (min-width 180) слева и центрированный #topHud (359px на 375px)
+   физически накладывались, #topHud с z-index 13 накрывал выход и настройки,
+   правая панель 200px съедала 53% ширины. Стало — три непересекающиеся зоны:
+     строка 1 слева  — ряд иконок #hud,
+     строка 1 справа — только миникарта (до 520px её нет вовсе),
+     строка 2        — однострочный #topHud во всю оставшуюся ширину,
+     низ             — тосты и свёрнутый в кнопку чат.
+   ========================================================================== */
+@media (max-width: 720px) {
+  /* --- строка 1, слева: только иконки --- */
+  #hud {
+    left: calc(8px + var(--sa-left));
+    top: calc(8px + var(--sa-top));
+    min-width: 0;
+    width: auto;
+    padding: 4px;
+    max-width: calc(100vw - 16px - var(--sa-left) - var(--sa-right));
+    max-height: none;
+    overflow: visible;
+  }
 
-   body.inGame #hud:not(.lbPinned) {
-     padding: 4px;
-     border-color: transparent;
-     background: transparent;
-     backdrop-filter: none;
-     box-shadow: none;
-     /* на тач-устройстве нет hover — держим читаемыми, но ненавязчивыми */
-     opacity: 0.86;
-   }
+  body.inGame #hud:not(.lbPinned) {
+    padding: 4px;
+    border-color: transparent;
+    background: transparent;
+    backdrop-filter: none;
+    box-shadow: none;
+    /* на тач-устройстве нет hover — держим читаемыми, но ненавязчивыми */
+    opacity: 0.86;
+  }
 
-   body.inGame #hud:not(.lbPinned) .hudBrand {
-     display: none;
-   }
+  body.inGame #hud:not(.lbPinned) .hudBrand {
+    display: none;
+  }
 
-   .hudActions {
-     flex-wrap: nowrap;
-     gap: 6px;
-   }
+  .hudActions {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
 
-   /* единая высота 44px: #leaveBtn ниже уже поднят до 44, остальные держим в ряд */
-   .hudActions .iconBtn {
-     width: 44px;
-     height: 44px;
-     min-width: 44px;
-     min-height: 44px;
-     background: color-mix(in srgb, var(--panel) 88%, transparent);
-     backdrop-filter: blur(10px);
-     box-shadow: var(--shadow-float);
-   }
+  /* единая высота 44px: #leaveBtn ниже уже поднят до 44, остальные держим в ряд */
+  .hudActions .iconBtn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    background: color-mix(in srgb, var(--panel) 88%, transparent);
+    backdrop-filter: blur(10px);
+    box-shadow: var(--shadow-float);
+  }
 
-   /* --- строка 2: #topHud прижат влево и однострочный.
-      Смещение = 8 (отступ) + 54 (высота ряда иконок) + 6 (зазор). --- */
-   #topHud {
-     left: calc(8px + var(--sa-left));
-     right: auto;
-     top: calc(8px + var(--sa-top) + 60px);
-     transform: none;
-     width: auto;
-     max-width: calc(100vw - 16px - var(--sa-left) - var(--sa-right) - 158px);
-     padding: 6px 10px;
-   }
+  /* --- строка 2: #topHud прижат влево и однострочный.
+     Смещение = 8 (отступ) + 54 (высота ряда иконок) + 6 (зазор). --- */
+  #topHud {
+    left: calc(8px + var(--sa-left));
+    right: auto;
+    top: calc(8px + var(--sa-top) + 60px);
+    transform: none;
+    width: auto;
+    max-width: calc(100vw - 16px - var(--sa-left) - var(--sa-right) - 158px);
+    padding: 6px 10px;
+  }
 
-   .topHudRow {
-     align-items: center;
-     column-gap: 10px;
-     row-gap: 0;
-   }
+  .topHudRow {
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 0;
+  }
 
-   .topHudRight {
-     grid-template-columns: auto auto;
-     align-items: center;
-     gap: 0 8px;
-   }
+  /* grid-template-columns отсюда убран: строка выложена flex-ом
+     (04-game-hud.css), сетка на ней не действует. Остальное — уплотнение
+     под узкий экран, которое до переноса базы в 04 не работало вовсе. */
+  .topHudRight {
+    align-items: center;
+    gap: 0 8px;
+  }
 
-   .topHudTime {
-     grid-column: auto;
-     font-size: var(--fs-12);
-   }
+  .topHudTime {
+    font-size: var(--fs-12);
+  }
 
-   /* длинный текст контракта в одну строку не помещается — он есть в правой панели */
-   .topHudContract {
-     display: none;
-   }
+  /* длинный текст контракта в одну строку не помещается — он есть в правой панели */
+  .topHudContract {
+    display: none;
+  }
 
-   .topHudBar {
-     margin-top: 5px;
-     height: 4px;
-   }
+  .topHudBar {
+    margin-top: 5px;
+    height: 4px;
+  }
 
-   #metaHud {
-     display: none;
-   }
+  #metaHud {
+    display: none;
+  }
 
-   #hud:not(.lbPinned) #stats,
-   #hud:not(.lbPinned) #help {
-     display: none;
-   }
+  /* Правило `#hud:not(.lbPinned) #stats, … #help { display: none }` удалено:
+     #stats и так безусловно скрыт в 10-ux-waves.css (U5), а #help лежит вне
+     #hud (index.html) — вторая половина селектора не совпадала ни с чем. */
 
-   #title {
-     margin-bottom: 4px;
-   }
+  #title {
+    margin-bottom: 4px;
+  }
 
-   #roomInfo {
-     margin-bottom: 6px;
-   }
+  #roomInfo {
+    margin-bottom: 6px;
+  }
 
-   /* --- низ: чат сворачивается в компактную кнопку --- */
-   #chat.collapsed {
-     left: auto;
-     right: calc(8px + var(--sa-right));
-     width: auto;
-     max-width: 60vw;
-     border-radius: 999px;
-   }
+  /* --- низ: чат сворачивается в компактную кнопку --- */
+  #chat.collapsed {
+    left: auto;
+    right: calc(8px + var(--sa-right));
+    width: auto;
+    max-width: 60vw;
+    border-radius: 999px;
+  }
 
-   #chat.collapsed #chatHeader {
-     border-bottom: none;
-     padding: 0 14px;
-     gap: 8px;
-   }
+  #chat.collapsed #chatHeader {
+    border-bottom: none;
+    padding: 0 14px;
+    gap: 8px;
+  }
 
-   /* в свёрнутой «кнопке» остаются только заголовок и счётчик непрочитанных */
-   #chat.collapsed .chatHeaderStatus {
-     display: none;
-   }
+  /* в свёрнутой «кнопке» остаются только заголовок и счётчик непрочитанных */
+  #chat.collapsed .chatHeaderStatus {
+    display: none;
+  }
 
-   #chat {
-     left: calc(8px + var(--sa-left));
-     right: calc(8px + var(--sa-right));
-     bottom: calc(8px + var(--sa-bottom));
-     width: auto;
-     max-height: 40dvh;
-     display: flex;
-     flex-direction: column;
-   }
+  #chat {
+    left: calc(8px + var(--sa-left));
+    right: calc(8px + var(--sa-right));
+    bottom: calc(8px + var(--sa-bottom));
+    width: auto;
+    max-height: 40dvh;
+    display: flex;
+    flex-direction: column;
+  }
 
-   #chatHeader {
-     min-height: 44px;
-     padding: 12px;
-   }
+  #chatHeader {
+    min-height: 44px;
+    padding: 12px;
+  }
 
-   #chatHeaderHint {
-     display: none;
-   }
+  #chatHeaderHint {
+    display: none;
+  }
 
-   #chatLog {
-     height: auto;
-     flex: 1;
-     min-height: 120px;
-   }
+  #chatLog {
+    height: auto;
+    flex: 1;
+    min-height: 120px;
+  }
 
-   #emojiPanel {
-     max-height: 170px;
-   }
+  #emojiPanel {
+    max-height: 170px;
+  }
 
-   #chatInput,
-   #emojiCloseBtn {
-     font-size: 16px;
-   }
+  #chatInput,
+  #emojiCloseBtn {
+    font-size: 16px;
+  }
 
-   #chatBtn,
-   #emojiBtn,
-   #leaveBtn {
-     min-height: 44px;
-   }
+  #chatBtn,
+  #emojiBtn,
+  #leaveBtn {
+    min-height: 44px;
+  }
 
-   #chatBtn {
-     width: 44px;
-     padding: 0;
-     font-size: 0;
-     display: inline-flex;
-     align-items: center;
-     justify-content: center;
-   }
+  #chatBtn {
+    width: 44px;
+    padding: 0;
+    font-size: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
 
-   #chatBtn::before {
-     content: '➤';
-     font-size: var(--fs-title);
-     line-height: 1;
-     color: var(--text);
-   }
+  #chatBtn::before {
+    content: '➤';
+    font-size: var(--fs-title);
+    line-height: 1;
+    color: var(--text);
+  }
 
-   /* --- строка 1, справа: от правой панели остаётся только миникарта --- */
-   #rightSidebar {
-     right: calc(8px + var(--sa-right));
-     top: calc(8px + var(--sa-top));
-     width: 150px;
-     gap: 8px;
-   }
+  /* --- строка 1, справа: от правой панели остаётся только миникарта --- */
+  #rightSidebar {
+    right: calc(8px + var(--sa-right));
+    top: calc(8px + var(--sa-top));
+    width: 150px;
+    gap: 8px;
+  }
 
-   #rightInfo {
-     display: none;
-   }
+  #rightInfo {
+    display: none;
+  }
 
-   #perf {
-     display: none;
-   }
+  #perf {
+    display: none;
+  }
 
-   #killfeed {
-     display: none;
-   }
+  #killfeed {
+    display: none;
+  }
 
-   #minimap {
-     width: auto;
-     max-width: 100%;
-     height: 96px;
-     margin: 0 auto;
-   }
+  #minimap {
+    width: auto;
+    max-width: 100%;
+    height: 96px;
+    margin: 0 auto;
+  }
 
-   .minimapLegend {
-     display: none;
-   }
+  .minimapLegend {
+    display: none;
+  }
 
-   .endOverlay {
-     padding: calc(12px + var(--sa-top)) calc(12px + var(--sa-right)) calc(12px + var(--sa-bottom)) calc(12px + var(--sa-left));
-   }
+  .endOverlay {
+    padding: calc(12px + var(--sa-top)) calc(12px + var(--sa-right)) calc(12px + var(--sa-bottom)) calc(12px + var(--sa-left));
+  }
 
-   .deathOverlay.matchCard {
-     width: min(560px, 100%);
-   }
- }
+  .deathOverlay.matchCard {
+    width: min(560px, 100%);
+  }
+}
 
- @media (max-width: 520px) {
-   #minimap {
-     display: none;
-   }
+@media (max-width: 520px) {
+  #minimap {
+    display: none;
+  }
 
-   #topHud {
-     max-width: calc(100vw - 16px - var(--sa-left) - var(--sa-right));
-   }
+  #topHud {
+    max-width: calc(100vw - 16px - var(--sa-left) - var(--sa-right));
+  }
 
-   /* --- C10. Карточка товара на 375px -------------------------------------
-      flex без wrap + grid без min-width разъезжались: 44px превью, заголовок,
-      цена и кнопка не помещались в ~270px. */
-   .cosmeticsItem {
-     flex-wrap: wrap;
-     row-gap: 8px;
-   }
+  /* --- C10. Карточка товара на 375px -------------------------------------
+     flex без wrap + grid без min-width разъезжались: 44px превью, заголовок,
+     цена и кнопка не помещались в ~270px. */
+  .cosmeticsItem {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
 
-   /* flex-basis: 0 — иначе длинный заголовок задаёт базу шире доступной
-      ширины и левая часть срывается под превью, теряя строку по высоте */
-   .cosmeticsItemLeft {
-     min-width: 0;
-     flex: 1 1 0;
-   }
+  /* flex-basis: 0 — иначе длинный заголовок задаёт базу шире доступной
+     ширины и левая часть срывается под превью, теряя строку по высоте */
+  .cosmeticsItemLeft {
+    min-width: 0;
+    flex: 1 1 0;
+  }
 
-   .cosmeticsItemTitle,
-   .cosmeticsItemSub {
-     min-width: 0;
-     overflow: hidden;
-     text-overflow: ellipsis;
-     white-space: nowrap;
-   }
+  .cosmeticsItemTitle,
+  .cosmeticsItemSub {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-   .cosmeticsItemRight {
-     flex: 1 0 100%;
-     justify-content: space-between;
-     gap: 10px;
-   }
+  .cosmeticsItemRight {
+    flex: 1 0 100%;
+    justify-content: space-between;
+    gap: 10px;
+  }
 
-   .cosmeticsItemRight > button {
-     flex: 1;
-     min-height: 48px;
-   }
+  .cosmeticsItemRight > button {
+    flex: 1;
+    min-height: 48px;
+  }
 
-   .cosmeticsPrice {
-     flex: 0 0 auto;
-     white-space: nowrap;
-   }
+  .cosmeticsPrice {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 
-   .menuHowToStep {
-     font-size: var(--fs-12);
-   }
- }
+  .menuHowToStep {
+    font-size: var(--fs-12);
+  }
+}
 
- @media (max-height: 520px) {
-   #minimap,
-   #perf {
-     display: none;
-   }
- }
+@media (max-height: 520px) {
+  #minimap,
+  #perf {
+    display: none;
+  }
+}
 
- @media (pointer: coarse) {
-   /* --- C16. Тач-цели в меню и магазине ------------------------------------
-      Раньше блок покрывал только экран смерти: на планшете (>720px, но тач)
-      фильтры магазина оставались 36px, вкладки — 34px. */
-   .cosmeticsFilters {
-     --filter-btn-h: 44px;
-   }
+@media (pointer: coarse) {
+  /* --- C16. Тач-цели в меню и магазине ------------------------------------
+     Раньше блок покрывал только экран смерти: на планшете (>720px, но тач)
+     фильтры магазина оставались 36px, вкладки — 34px. */
+  .cosmeticsFilters {
+    --filter-btn-h: 44px;
+  }
 
-   .overlay button,
-   .overlay summary,
-   .overlay select,
-   .overlay input:not([type='checkbox']):not([type='range']),
-   .overlay .btnPrimary,
-   .overlay .btnSecondary,
-   .overlay .btnGhost,
-   .overlay .cosmeticsTabBtn,
-   .overlay .roomRow,
-   .overlay .roomRowJoin {
-     min-height: 44px;
-   }
+  .overlay button,
+  .overlay summary,
+  .overlay select,
+  .overlay input:not([type='checkbox']):not([type='range']),
+  .overlay .btnPrimary,
+  .overlay .btnSecondary,
+  .overlay .btnGhost,
+  .overlay .cosmeticsTabBtn,
+  .overlay .roomRow,
+  .overlay .roomRowJoin {
+    min-height: 44px;
+  }
 
-   .overlay .iconBtn {
-     width: 44px;
-     height: 44px;
-     min-width: 44px;
-     min-height: 44px;
-   }
+  .overlay .iconBtn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
 
-   /* кнопка очистки поиска абсолютна внутри инпута — освобождаем ей место */
-   .overlay .roomsSearchWrap input {
-     padding-right: 52px;
-   }
+  /* кнопка очистки поиска абсолютна внутри инпута — освобождаем ей место */
+  .overlay .roomsSearchWrap input {
+    padding-right: 52px;
+  }
 
-   .endOverlay {
-     padding: calc(var(--pad-lg) + var(--sa-top)) calc(var(--pad-lg) + var(--sa-right)) calc(var(--pad-lg) + var(--sa-bottom)) calc(var(--pad-lg) + var(--sa-left));
-   }
+  .endOverlay {
+    padding: calc(var(--pad-lg) + var(--sa-top)) calc(var(--pad-lg) + var(--sa-right)) calc(var(--pad-lg) + var(--sa-bottom)) calc(var(--pad-lg) + var(--sa-left));
+  }
 
-   .deathOverlay.matchCard {
-     width: min(520px, 100%);
-   }
+  .deathOverlay.matchCard {
+    width: min(520px, 100%);
+  }
 
-   .deathOverlay .matchActions {
-     flex-direction: column;
-     align-items: stretch;
-   }
+  .deathOverlay .matchActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
 
-   .deathOverlay button {
-     width: 100%;
-     min-height: 44px;
-     font-size: 16px;
-   }
- }
+  .deathOverlay button {
+    width: 100%;
+    min-height: 44px;
+    font-size: 16px;
+  }
+}
 

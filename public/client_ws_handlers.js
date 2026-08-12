@@ -873,3 +873,467 @@ export function handleEventsMessage(dv, offset, ctx) {
   renderTopHud();
   return { offset: o, lastEventsTick, lastEventsAt, mutatorType, mutatorUntil, bountyTarget, bountyUntil, powerUps, youKills, youStreak, youShield, youSpeedUntilTick, youSpeedType, matchStyleEarned, styleToastAcc, styleToastReason, styleToastCount, styleToastTimer, youContractType, youContractGoal, youContractProgress, youContractUntil, killfeedDirty, lastDeathInfo };
 }
+
+// JSON-сообщение type === 'cosmetics': применение серверного снимка косметики
+// игрока (инвентарь, титулы, прогресс ачивок, стиль). Перенесена ЦЕЛИКОМ как
+// есть из onCosmetics() в client.js, порядок вызовов и побочные эффекты не
+// менялись.
+//
+// Как и handleEventsMessage(), эта функция и читает, и переприсваивает
+// module-level let-переменные client.js (youStyle, cosmeticsLoaded,
+// cosmeticsSource, youTitleMask, youTitleId) — их читают другие части
+// client.js (рендер HUD, магазин). Присваивание внутри функции меняет только
+// ЛОКАЛЬНУЮ копию, поэтому контракт тот же: ctx передаёт НАЧАЛЬНЫЕ значения,
+// функция возвращает объект с итоговыми значениями — вызывающий код в
+// client.js обязан переприсвоить свои module-level let из этого объекта.
+//
+// ctx — явные зависимости из client.js:
+//   значения для обратной записи: youStyle, cosmeticsLoaded, cosmeticsSource, youTitleMask, youTitleId
+//   объекты, мутируемые на месте (ссылка не переприсваивается): youCos, achvProgressById
+//   функции/константы только на чтение:
+//     applyCosPayload, COS_TITLE_MAX, cosmeticsCacheSave, pendingCosmeticsOp,
+//     cosmeticsOpClear, COSMETICS_MAX_ID, t, cosmeticsLabel, cosmeticsVariantName,
+//     setCosmeticsStatus, addToast, playBeep, cosmeticsOpen,
+//     cosmeticsApplyDesiredServer, syncCosmeticsUi, renderMetaHud, renderMenuSkinPreview
+export function handleCosmeticsMessage(msg, ctx) {
+  const { youCos, achvProgressById, applyCosPayload, COS_TITLE_MAX, cosmeticsCacheSave, pendingCosmeticsOp, cosmeticsOpClear, COSMETICS_MAX_ID, t, cosmeticsLabel, cosmeticsVariantName, setCosmeticsStatus, addToast, playBeep, cosmeticsOpen, cosmeticsApplyDesiredServer, syncCosmeticsUi, renderMetaHud, renderMenuSkinPreview } = ctx;
+  let youStyle = ctx.youStyle;
+  let cosmeticsLoaded = ctx.cosmeticsLoaded;
+  let cosmeticsSource = ctx.cosmeticsSource;
+  let youTitleMask = ctx.youTitleMask;
+  let youTitleId = ctx.youTitleId;
+
+  // C4: remember the previous inventory so we can detect what was just bought.
+  const prevInv = {
+    capturefx: Number(youCos.inv.capturefx) || 0,
+    head: Number(youCos.inv.head) || 0,
+    seg: Number(youCos.inv.seg) || 0,
+    nameplate: Number(youCos.inv.nameplate) || 0,
+    frame: Number(youCos.inv.frame) || 0,
+    terr: Number(youCos.inv.terr) || 0,
+    death: Number(youCos.inv.death) || 0
+  };
+  const hadServerState = cosmeticsSource === 'server';
+
+  const st = Number(msg?.style);
+  if (Number.isFinite(st)) youStyle = Math.max(0, st);
+
+  cosmeticsLoaded = true;
+  cosmeticsSource = 'server';
+
+  // Полный снимок: категории, которых в сообщении нет, обнуляются.
+  applyCosPayload(youCos, msg, 'replace');
+
+
+  // Новые категории и титулы: сервер может их ещё не присылать. В этом случае
+  // поля undefined -> нули, магазин показывает только базовый вариант, а
+  // «Титулы» честно сообщают, что список пока недоступен.
+  // Частичное сообщение: трогаем только присланное.
+  applyCosPayload(youCos, msg, 'patch');
+  if (msg?.titleMask !== undefined) youTitleMask = Number(msg.titleMask) || 0;
+  if (msg?.titleId !== undefined) youTitleId = Math.max(0, Math.min(COS_TITLE_MAX, Number(msg.titleId) || 0));
+  /* C3: прогресс по незакрытым ачивкам. Массив содержит ТОЛЬКО закрытые ещё
+     ачивки — открытые сервер опускает, они и так видны по titleMask. Поле
+     может отсутствовать (старый сервер) — тогда карту не трогаем вовсе,
+     чтобы не стереть уже показанный прогресс. */
+  if (Array.isArray(msg?.achvProgress)) {
+    achvProgressById.clear();
+    for (const it of msg.achvProgress) {
+      const id = Number(it?.id);
+      const cur = Number(it?.cur);
+      const max = Number(it?.max);
+      if (!Number.isFinite(id) || id < 0) continue;
+      if (!Number.isFinite(max) || max <= 0) continue;
+      achvProgressById.set(id, {
+        cur: Math.max(0, Math.min(max, Number.isFinite(cur) ? cur : 0)),
+        max,
+      });
+    }
+  }
+  // Базовый вариант всегда доступен — иначе магазин выглядит полностью пустым.
+  youCos.inv.terr |= 1;
+  youCos.inv.death |= 1;
+
+  cosmeticsCacheSave();
+
+  // C4: report the purchase that just landed.
+  const pending = pendingCosmeticsOp;
+  cosmeticsOpClear();
+
+  if (hadServerState) {
+    const nextInv = {
+      capturefx: Number(youCos.inv.capturefx) || 0,
+      head: Number(youCos.inv.head) || 0,
+      seg: Number(youCos.inv.seg) || 0,
+      nameplate: Number(youCos.inv.nameplate) || 0,
+      frame: Number(youCos.inv.frame) || 0,
+      terr: Number(youCos.inv.terr) || 0,
+      death: Number(youCos.inv.death) || 0
+    };
+    let boughtCat = '';
+    let boughtId = -1;
+    for (const cat of Object.keys(nextInv)) {
+      const added = nextInv[cat] & ~prevInv[cat];
+      if (!added) continue;
+      for (let id = 0; id <= COSMETICS_MAX_ID; id++) {
+        if (added & (1 << id)) {
+          boughtCat = cat;
+          boughtId = id;
+          break;
+        }
+      }
+      if (boughtCat) break;
+    }
+    if (!boughtCat && pending) {
+      // Server confirmed but nothing new appeared (already owned).
+      boughtCat = '';
+    }
+    if (boughtCat) {
+      const bc = boughtCat;
+      const bi = boughtId;
+      const boughtText = () => `${t('cosmetics.bought_prefix')}: ${cosmeticsLabel(bc)} — ${cosmeticsVariantName(bc, bi)}`;
+      setCosmeticsStatus(boughtText, 'success');
+      addToast('✨', boughtText(), null);
+      playBeep(880, 150, 0.9);
+    } else if (pending) {
+      setCosmeticsStatus('', '');
+    }
+  } else if (cosmeticsOpen) {
+    // Магазин был открыт ещё без серверного подтверждения (см. showCosmeticsOverlay)
+    // и статус-строка застыла на «не подтверждено» — теперь оно пришло, гасим подсказку.
+    setCosmeticsStatus('', '');
+  }
+
+  cosmeticsApplyDesiredServer();
+
+  syncCosmeticsUi();
+
+  renderMetaHud();
+  // C3: инвентарь/экипировка обновились — перерисовываем «Ваш облик».
+  try {
+    renderMenuSkinPreview();
+  } catch {}
+
+  return { youStyle, cosmeticsLoaded, cosmeticsSource, youTitleMask, youTitleId };
+}
+
+// JSON WS сообщение type === 'error'. ctx — явные зависимости, которые тело
+// читало через замыкание client.js. createRoomPending — единственное
+// мутируемое значение, возвращается вместе с остальными полями.
+export function onError(d, ctx) {
+  const { setRoomsCreateOpen, updateRoomsCreateUi, t, roomsCreateNameInput, rejoinPending, rejoinGiveUp, cosmeticsOpClear, cosmeticsOpen, setCosmeticsStatus, syncCosmeticsUi, addToast } = ctx;
+  const code = String(d?.message || '').trim();
+  const createRoomPending = false;
+  updateRoomsCreateUi();
+
+  if (code === 'room_title_invalid') {
+    setRoomsCreateOpen(true);
+    updateRoomsCreateUi(t('rooms.invalid_title'));
+    try {
+      roomsCreateNameInput?.focus();
+    } catch {}
+    return { createRoomPending };
+  }
+
+  const msgFor = () =>
+    code === 'room_full'
+      ? t('rooms.full')
+      : code === 'room_not_found'
+        ? t('rooms.not_found')
+        : code === 'cosmetics_invalid_id'
+          ? t('cosmetics.err_invalid_id')
+          : code === 'cosmetics_invalid_cat'
+            ? t('cosmetics.err_invalid_cat')
+            : code === 'cosmetics_not_owned'
+              ? t('cosmetics.err_not_owned')
+              : code === 'cosmetics_not_enough_style'
+                ? t('cosmetics.err_not_enough_style')
+                : code === 'cosmetics_unavailable'
+                  ? t('cosmetics.err_unavailable')
+        : t('common.error');
+  const msg = msgFor();
+
+  // K7: если не удалось вернуться в свою комнату после обрыва — комнаты уже
+  // нет или она заполнилась. Тогда честно отправляем в меню.
+  // C9: любая ошибка во время ожидания возврата — повод честно уйти в меню,
+  // а не только room_not_found / room_full.
+  if (rejoinPending) {
+    rejoinGiveUp(msg);
+    return { createRoomPending };
+  }
+
+  // C1/C4: shop errors must land inside the overlay — toasts are hidden while it is open.
+  if (code.startsWith('cosmetics_')) {
+    cosmeticsOpClear();
+    if (cosmeticsOpen) {
+      setCosmeticsStatus(msgFor, 'error');
+      syncCosmeticsUi();
+      return { createRoomPending };
+    }
+  }
+
+  addToast('⚠', msg, null);
+  return { createRoomPending };
+}
+
+// JSON WS сообщение type === 'state' — обёртка над состоянием матча.
+// НЕ путать с бинарным handleStateBinary() (msgType-диспетчер). ctx — явные
+// зависимости, которые тело читало через замыкание client.js. Все поля,
+// которые тело переприсваивает (не мутирует на месте), возвращаются вместе.
+export function onState(s, ctx) {
+  const { clientState, W, mapCells, you, colors, nameById, ownerFillStyleCache, minimapOwnerRgbCache, headIndexByOwner, refreshCaptureAnchors, markCoolSeen, gridCellIsCooling, fillDelayFor, applyPackedDeltaGridWithAnim, applyPackedDelta, renderChat, refreshOwnGeometry, computeTopSorted, hideOverlays, beginDeathZoom, beginDeathSlowMo, lerp } = ctx;
+  let { gridOwner, trailOwner, gridFillAt, coolSeenAt, prevPlayers, currPlayers, minimapDirty, lastPacketAt, tickrate, lastYouStats, youAlive, lastDirSent, youStreak } = ctx;
+  let lastRoi = ctx.lastRoi;
+
+  clientState.lastState = s;
+
+  // K1: прямоугольник ROI приходил и молча выбрасывался. Он — единственный
+  // источник правды о том, какая часть сетки вообще свежая.
+  const r = s?.roi;
+  if (r && Number(r.rw) > 0 && Number(r.rh) > 0) {
+    lastRoi = {
+      rx: Math.max(0, Number(r.rx) || 0),
+      ry: Math.max(0, Number(r.ry) || 0),
+      rw: Number(r.rw) || 0,
+      rh: Number(r.rh) || 0
+    };
+  } else if (s?.full) {
+    // Полный снапшот освежает всю карту — тумана в этом кадре нет.
+    lastRoi = null;
+  }
+
+  const now = performance.now();
+
+  // J15: якоря должны быть готовы до применения дельты сетки — именно в этом
+  // снапшоте голова стоит там, где петля замкнулась.
+  refreshCaptureAnchors(s.players);
+
+  if (s.full) {
+    const prev = gridOwner;
+    gridOwner = new Uint16Array(s.grid);
+    trailOwner = new Uint16Array(s.trail);
+    if (!gridFillAt || gridFillAt.length !== gridOwner.length) gridFillAt = new Float32Array(gridOwner.length);
+    if (!coolSeenAt || coolSeenAt.length !== gridOwner.length) coolSeenAt = new Float32Array(gridOwner.length);
+    if (prev && prev.length === gridOwner.length) {
+      for (let i = 0; i < gridOwner.length; i++) {
+        const n = gridOwner[i];
+        if (prev[i] !== n) markCoolSeen(i, n, now);
+        if (n !== 0 && !gridCellIsCooling(n) && prev[i] !== n) {
+          gridFillAt[i] = now + fillDelayFor(i, n);
+        }
+      }
+    } else {
+      for (let i = 0; i < gridOwner.length; i++) markCoolSeen(i, gridOwner[i], now);
+    }
+  } else {
+    applyPackedDeltaGridWithAnim(s.dg, now);
+    applyPackedDelta(trailOwner, s.dt);
+  }
+
+  // minimap is updated by server-sent chunk updates
+
+  const tmpPlayers = prevPlayers;
+  prevPlayers = currPlayers;
+  currPlayers = tmpPlayers;
+  currPlayers.clear();
+  let nameChanged = false;
+  for (const p of s.players) {
+    currPlayers.set(p.n, p);
+    // K2: номера игроков переиспользуются (аллокатор отдаёт первый свободный,
+    // боты пересоздаются при каждом входе/выходе человека). Кэш «номер → цвет»
+    // раньше писался один раз и никогда не обновлялся: номер 7 оставался
+    // красным даже после того, как его получил новый синий бот. Сравниваем
+    // цвет каждый кадр и сбрасываем зависимые кэши при расхождении.
+    if (colors.get(p.n) !== p.c) {
+      colors.set(p.n, p.c);
+      ownerFillStyleCache.delete(p.n);
+      minimapOwnerRgbCache.delete(p.n);
+      minimapDirty = true;
+    }
+    if (p.nm && nameById.get(p.n) !== p.nm) {
+      nameById.set(p.n, p.nm);
+      nameChanged = true;
+    }
+  }
+
+  if (nameChanged && clientState.chatMessages.length) renderChat();
+
+  headIndexByOwner.clear();
+  for (const p of s.players) {
+    headIndexByOwner.set(p.n, p.y * W + p.x);
+  }
+
+  lastPacketAt = performance.now();
+
+  if (clientState.lastStateAt != null) {
+    const dt = lastPacketAt - clientState.lastStateAt;
+    if (dt > 0) tickrate = lerp(tickrate || 0, 1000 / dt, 0.15);
+  }
+  clientState.lastStateAt = lastPacketAt;
+
+  try {
+    refreshOwnGeometry(false);
+  } catch {}
+
+  const me = s.players?.find((p) => p.n === you);
+  if (me) {
+    const alive = !!me.a;
+    if (alive) {
+      const ordered = computeTopSorted(s.players);
+      const idx = ordered.findIndex((p) => p.n === you);
+      const cells = Number(me?.s) || 0;
+      const pct = mapCells ? (cells / mapCells) * 100 : 0;
+      const points = Number(me?.p) || 0;
+      const place = idx >= 0 ? `${idx + 1}/${ordered.length}` : '—';
+      lastYouStats = { cells, pct, points, place };
+    }
+    if (alive && !youAlive) {
+      youAlive = true;
+      lastDirSent = null;
+      hideOverlays();
+    } else if (!alive && youAlive) {
+      youAlive = false;
+      lastDirSent = null;
+      youStreak = 0;
+      // Драматический наезд камеры на голову в точке гибели — до того, как
+      // сервер уберёт игрока из состояния и координаты станут недоступны.
+      beginDeathZoom((Number(me.x) || 0) + 0.5, (Number(me.y) || 0) + 0.5);
+      // Момент смерти стоит увидеть: модалка мгновенно накрывала кадр, в
+      // котором игрока убили. Держим паузу, пока идёт hitstop + вспышка.
+      beginDeathSlowMo();
+    }
+  }
+
+  return { lastRoi, gridOwner, trailOwner, gridFillAt, coolSeenAt, prevPlayers, currPlayers, minimapDirty, lastPacketAt, tickrate, lastYouStats, youAlive, lastDirSent, youStreak };
+}
+
+// Первое сообщение инициализации от сервера (размеры поля, начальная
+// косметика, id игрока и т.п.). ctx — явные зависимости, которые тело читало
+// через замыкание client.js. Поля, которые тело переприсваивает (не мутирует
+// на месте), возвращаются вместе.
+export function onInit(msg, ctx) {
+  const { markJoinFunnelInit, rejoinPending, rejoinFinish, addToast, t, applyMatchPhase, resetClientForNewMatch, hideMatchOverlay, showMatchOverlay, renderMatchResults, updateMatchCountdown, setRoomsCreateOpen, updateRoomsCreateUi, hideMenuOverlay, hideOverlays, syncMenuOnboardingUi, obResetMatch, obAnnounceShop, colors, ownerFillStyleCache, minimapOwnerRgbCache, nameById, nameEnById, cosTerrByPlayer, cosDeathByPlayer, cosTitleByPlayer, botArchByPlayer, captureAnchorByOwner, coolDeadlineByOwner, minimap, mmCtx, storedName, wsSend, onCosmetics, renderTopHud, PHASE_FINAL } = ctx;
+  let { W, H, N, tickMs, lastEventsTick, lastEventsAt, you, mapCells, roomId, roomLimit, rejoinRoomId, userLeftRoom, matchSeq, matchEndTick, matchEnded, matchResetAt, matchPhaseBannerSeq, matchContinuePending, matchContinueTimeout, createRoomPending, selectedRoomId, started, gridOwner, trailOwner, minimapGridOwner, botIds, lastRoi, gridFillAt, coolSeenAt, minimapImage, youKills, youStreak, lastMatchResults } = ctx;
+
+  markJoinFunnelInit();
+  W = msg.w;
+  H = msg.h;
+  N = W * H;
+  tickMs = msg.tickMs;
+  if (typeof msg?.tick === 'number' && Number.isFinite(msg.tick)) {
+    lastEventsTick = msg.tick;
+    lastEventsAt = Date.now();
+  }
+  you = Number(msg.you) || 0;
+  mapCells = msg.mapCells || N;
+  roomId = msg.room ?? null;
+  roomLimit = msg.roomLimit ?? null;
+
+  // K7: вход в комнату состоялся — реконнект-цель обновлена, флаг «ушёл сам» снят.
+  rejoinRoomId = roomId;
+  userLeftRoom = false;
+  const wasRejoin = rejoinPending;
+  if (rejoinPending) {
+    rejoinFinish();
+    addToast('✅', t('net.rejoined'), null, null, { key: 'net_reconnect' });
+  }
+
+  matchSeq = Number(msg?.matchSeq) || 0;
+  matchEndTick = Number(msg?.matchEnd) || 0;
+  matchEnded = !!msg?.matchEnded;
+  matchResetAt = Number(msg?.matchReset) || 0;
+  // C2: фаза приходит прямо в init — при входе посреди матча баннер не нужен.
+  matchPhaseBannerSeq = Number(msg?.phase) === PHASE_FINAL ? matchSeq : -1;
+  applyMatchPhase(msg?.phase, msg?.phaseUntil, false, matchSeq);
+  // updateRoomInfo() отсюда убран: он читает roomId/roomLimit из client.js
+  // через геттеры, а туда значения попадают только после возврата из этого
+  // обработчика — вызов здесь показывал прежнее состояние. Перерисовку
+  // делает сам client.js сразу после присваивания результата.
+
+  matchContinuePending = false;
+  if (matchContinueTimeout) {
+    clearTimeout(matchContinueTimeout);
+    matchContinueTimeout = 0;
+  }
+  if (matchEnded) {
+    if (msg?.matchResults) {
+      lastMatchResults = msg.matchResults;
+      renderMatchResults(lastMatchResults);
+    }
+    updateMatchCountdown();
+    showMatchOverlay();
+  } else {
+    resetClientForNewMatch();
+    hideMatchOverlay();
+  }
+
+  createRoomPending = false;
+  setRoomsCreateOpen(false);
+  updateRoomsCreateUi();
+  selectedRoomId = null;
+
+  hideMenuOverlay();
+  hideOverlays();
+
+  started = true;
+  // F13: раньше подсказка гасилась прямо здесь, ещё до того как игрок её прочитал.
+  // Теперь её снимает первое реальное действие (см. setDir).
+  syncMenuOnboardingUi();
+  // C9: реконнект не считается новым входом в матч.
+  obResetMatch(!wasRejoin);
+  obAnnounceShop();
+  try {
+    document.body.classList.add('inGame');
+  } catch {}
+
+  gridOwner = new Uint16Array(N);
+  trailOwner = new Uint16Array(N);
+
+  minimapGridOwner = new Uint16Array(N);
+
+  // K2: вход в комнату — новый набор номеров игроков. Всё, что кэшируется по
+  // номеру, обязано умереть здесь, иначе чужие цвета и «ботовость» приезжают
+  // из прошлой комнаты.
+  colors.clear();
+  ownerFillStyleCache.clear();
+  minimapOwnerRgbCache.clear();
+  botIds = new Set();
+  lastRoi = null;
+  // C7: то же самое при входе в комнату — см. комментарий в onMatchStart.
+  nameById.clear();
+  nameEnById.clear();
+  cosTerrByPlayer.clear();
+  cosDeathByPlayer.clear();
+  cosTitleByPlayer.clear();
+  botArchByPlayer.clear();
+
+  gridFillAt = new Float32Array(N);
+  coolSeenAt = new Float32Array(N);
+  captureAnchorByOwner.clear();
+  coolDeadlineByOwner.clear();
+
+  minimap.width = W;
+  minimap.height = H;
+  minimapImage = mmCtx.createImageData(W, H);
+  // minimap is updated by server-sent chunk updates
+
+  mmCtx.imageSmoothingEnabled = true;
+  mmCtx.imageSmoothingQuality = 'high';
+
+  if (storedName) {
+    wsSend('setName', { name: storedName });
+  }
+
+  // Spawn in the current room (no rejoin). Without this the player stays dead and cannot move.
+  wsSend('respawn', {});
+
+  youKills = 0;
+  youStreak = 0;
+
+  if (msg?.cosmetics) {
+    onCosmetics(msg.cosmetics);
+  }
+  renderTopHud();
+
+  return { W, H, N, tickMs, lastEventsTick, lastEventsAt, you, mapCells, roomId, roomLimit, rejoinRoomId, userLeftRoom, matchSeq, matchEndTick, matchEnded, matchResetAt, matchPhaseBannerSeq, matchContinuePending, matchContinueTimeout, createRoomPending, selectedRoomId, started, gridOwner, trailOwner, minimapGridOwner, botIds, lastRoi, gridFillAt, coolSeenAt, minimapImage, youKills, youStreak, lastMatchResults };
+}
