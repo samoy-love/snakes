@@ -111,3 +111,13 @@ test('onState() не читает идентификаторы, которых �
 
   assert.deepEqual(unknown, [], `onState() читает необъявленные идентификаторы: ${unknown.join(', ')}`);
 });
+
+test('onInit() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_ws_handlers.js', () => {
+  const masked = maskNonCode(CLIENT_WS_HANDLERS_JS);
+  const body = extractFunctionBody(masked, 'onInit');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(unknown, [], `onInit() читает необъявленные идентификаторы: ${unknown.join(', ')}`);
+});

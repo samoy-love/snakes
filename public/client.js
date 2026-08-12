@@ -32,7 +32,8 @@ import {
   handleEventsMessage,
   handleCosmeticsMessage,
   onError as onErrorImpl,
-  onState as onStateImpl
+  onState as onStateImpl,
+  onInit as onInitImpl
 } from './client_ws_handlers.js';
 import {
   applyMatchPhaseImpl,
@@ -42,6 +43,17 @@ import {
   onMatchStartImpl,
   runMatchResultsCascadeImpl
 } from './client_match.js';
+import {
+  setDirImpl,
+  handleMovementKeydownImpl,
+  getSwipeIndicatorImpl,
+  showSwipeIndicatorImpl,
+  moveSwipeIndicatorImpl,
+  hideSwipeIndicatorImpl,
+  handleSwipePointerDownImpl,
+  handleSwipePointerMoveImpl,
+  endSwipeImpl
+} from './client_input.js';
 import { trailVisualState } from './client_trail_style.js';
 import { DEATH_REASON, deathReasonSuffix } from './client_death.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
@@ -4264,15 +4276,15 @@ resize();
 let lastDirSent = null;
 
 function setDir(dir) {
-  if (!youAlive) return;
-  if (dir === lastDirSent) return;
-  // F13: подсказка про управление гаснет по факту действия, а не по факту входа.
-  if (!getMenuControlsSeen()) {
-    setMenuControlsSeen();
-    syncMenuOnboardingUi();
-  }
-  lastDirSent = dir;
-  wsSend('input', { dir });
+  const res = setDirImpl(dir, {
+    youAlive,
+    lastDirSent,
+    getMenuControlsSeen,
+    setMenuControlsSeen,
+    syncMenuOnboardingUi,
+    wsSend
+  });
+  lastDirSent = res.lastDirSent;
 }
 
 window.addEventListener(
@@ -4379,15 +4391,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
-  // C6: never steer the snake while an overlay is on top of the game.
-  if (overlayManager.getTop()) return;
-
-  const ae = document.activeElement;
-  if (ae && (ae === nameInput || chat.contains(ae))) return;
-  if (e.code === 'ArrowUp' || e.code === 'KeyW') setDir('up');
-  else if (e.code === 'ArrowDown' || e.code === 'KeyS') setDir('down');
-  else if (e.code === 'ArrowLeft' || e.code === 'KeyA') setDir('left');
-  else if (e.code === 'ArrowRight' || e.code === 'KeyD') setDir('right');
+  handleMovementKeydownImpl(e, { overlayManager, nameInput, chat, setDir });
 });
 
 // Mobile / touch: swipe on the canvas to change direction
@@ -4409,60 +4413,35 @@ const SWIPE_PX = 22;
 // граница срабатывания, и терял змейку на "случайных" срабатываниях.
 let swipeIndicatorEl = null;
 function getSwipeIndicator() {
-  if (swipeIndicatorEl) return swipeIndicatorEl;
-  const el = document.createElement('div');
-  el.id = 'swipeIndicator';
-  el.setAttribute('aria-hidden', 'true');
-  const dead = document.createElement('div');
-  dead.className = 'swipeIndicator-deadzone';
-  const dot = document.createElement('div');
-  dot.className = 'swipeIndicator-dot';
-  el.appendChild(dead);
-  el.appendChild(dot);
-  document.body.appendChild(el);
-  swipeIndicatorEl = el;
-  return el;
+  swipeIndicatorEl = getSwipeIndicatorImpl({ swipeIndicatorEl });
+  return swipeIndicatorEl;
 }
 function showSwipeIndicator(x0, y0) {
-  const el = getSwipeIndicator();
-  el.style.left = `${x0}px`;
-  el.style.top = `${y0}px`;
-  el.classList.add('isOn');
+  showSwipeIndicatorImpl(x0, y0, { getSwipeIndicator });
 }
 function moveSwipeIndicator(dx, dy) {
-  if (!swipeIndicatorEl) return;
-  const dot = swipeIndicatorEl.querySelector('.swipeIndicator-dot');
-  if (dot) dot.style.transform = `translate(${dx}px, ${dy}px)`;
+  moveSwipeIndicatorImpl(dx, dy, { swipeIndicatorEl });
 }
 function hideSwipeIndicator() {
-  if (!swipeIndicatorEl) return;
-  swipeIndicatorEl.classList.remove('isOn');
-  const dot = swipeIndicatorEl.querySelector('.swipeIndicator-dot');
-  if (dot) dot.style.transform = 'translate(0, 0)';
-}
-
-function swipeDir(dx, dy) {
-  if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'right' : 'left';
-  return dy > 0 ? 'down' : 'up';
+  hideSwipeIndicatorImpl({ swipeIndicatorEl });
 }
 
 canvas.addEventListener(
   'pointerdown',
   (e) => {
-    if (!youAlive) return;
-    if (e.pointerType !== 'touch') return;
-    swipeActive = true;
-    swipePointerId = e.pointerId;
-    swipeX0 = e.clientX;
-    swipeY0 = e.clientY;
-    showSwipeIndicator(swipeX0, swipeY0);
-    try {
-      canvas.setPointerCapture?.(e.pointerId);
-    } catch {
-      // Захват — оптимизация: свайп работает и без него, а setPointerCapture
-      // кидает NotFoundError, если указатель уже отпущен.
-    }
-    e.preventDefault();
+    const res = handleSwipePointerDownImpl(e, {
+      youAlive,
+      swipeActive,
+      swipeX0,
+      swipeY0,
+      swipePointerId,
+      showSwipeIndicator,
+      canvas
+    });
+    swipeActive = res.swipeActive;
+    swipeX0 = res.swipeX0;
+    swipeY0 = res.swipeY0;
+    swipePointerId = res.swipePointerId;
   },
   { passive: false }
 );
@@ -4470,26 +4449,26 @@ canvas.addEventListener(
 canvas.addEventListener(
   'pointermove',
   (e) => {
-    if (!swipeActive) return;
-    if (swipePointerId != null && e.pointerId !== swipePointerId) return;
-    const dx = e.clientX - swipeX0;
-    const dy = e.clientY - swipeY0;
-    moveSwipeIndicator(dx, dy);
-    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return;
-    setDir(swipeDir(dx, dy));
-    swipeX0 = e.clientX;
-    swipeY0 = e.clientY;
-    showSwipeIndicator(swipeX0, swipeY0);
-    e.preventDefault();
+    const res = handleSwipePointerMoveImpl(e, {
+      swipeActive,
+      swipeX0,
+      swipeY0,
+      swipePointerId,
+      SWIPE_PX,
+      moveSwipeIndicator,
+      showSwipeIndicator,
+      setDir
+    });
+    swipeX0 = res.swipeX0;
+    swipeY0 = res.swipeY0;
   },
   { passive: false }
 );
 
 function endSwipe(e) {
-  if (swipePointerId != null && e.pointerId !== swipePointerId) return;
-  swipeActive = false;
-  swipePointerId = null;
-  hideSwipeIndicator();
+  const res = endSwipeImpl(e, { swipePointerId, hideSwipeIndicator });
+  swipeActive = res.swipeActive;
+  swipePointerId = res.swipePointerId;
 }
 
 canvas.addEventListener('pointerup', endSwipe);
@@ -4585,122 +4564,111 @@ function markJoinFunnelFirstState() {
 }
 
 function onInit(msg) {
-  markJoinFunnelInit();
-  W = msg.w;
-  H = msg.h;
-  N = W * H;
-  tickMs = msg.tickMs;
-  if (typeof msg?.tick === 'number' && Number.isFinite(msg.tick)) {
-    lastEventsTick = msg.tick;
-    lastEventsAt = Date.now();
-  }
-  you = Number(msg.you) || 0;
-  mapCells = msg.mapCells || N;
-  roomId = msg.room ?? null;
-  roomLimit = msg.roomLimit ?? null;
-
-  // K7: вход в комнату состоялся — реконнект-цель обновлена, флаг «ушёл сам» снят.
-  rejoinRoomId = roomId;
-  userLeftRoom = false;
-  const wasRejoin = rejoinPending;
-  if (rejoinPending) {
-    rejoinFinish();
-    addToast('✅', t('net.rejoined'), null, null, { key: 'net_reconnect' });
-  }
-
-  matchSeq = Number(msg?.matchSeq) || 0;
-  matchEndTick = Number(msg?.matchEnd) || 0;
-  matchEnded = !!msg?.matchEnded;
-  matchResetAt = Number(msg?.matchReset) || 0;
-  // C2: фаза приходит прямо в init — при входе посреди матча баннер не нужен.
-  matchPhaseBannerSeq = Number(msg?.phase) === PHASE_FINAL ? matchSeq : -1;
-  applyMatchPhase(msg?.phase, msg?.phaseUntil, false, matchSeq);
-  updateRoomInfo();
-
-  matchContinuePending = false;
-  if (matchContinueTimeout) {
-    clearTimeout(matchContinueTimeout);
-    matchContinueTimeout = 0;
-  }
-  if (matchEnded) {
-    if (msg?.matchResults) {
-      lastMatchResults = msg.matchResults;
-      renderMatchResults(lastMatchResults);
-    }
-    updateMatchCountdown();
-    showMatchOverlay();
-  } else {
-    resetClientForNewMatch();
-    hideMatchOverlay();
-  }
-
-  createRoomPending = false;
-  setRoomsCreateOpen(false);
-  updateRoomsCreateUi();
-  selectedRoomId = null;
-
-  hideMenuOverlay();
-  hideOverlays();
-
-  started = true;
-  // F13: раньше подсказка гасилась прямо здесь, ещё до того как игрок её прочитал.
-  // Теперь её снимает первое реальное действие (см. setDir).
-  syncMenuOnboardingUi();
-  // C9: реконнект не считается новым входом в матч.
-  obResetMatch(!wasRejoin);
-  obAnnounceShop();
-  try {
-    document.body.classList.add('inGame');
-  } catch {}
-
-  gridOwner = new Uint16Array(N);
-  trailOwner = new Uint16Array(N);
-
-  minimapGridOwner = new Uint16Array(N);
-
-  // K2: вход в комнату — новый набор номеров игроков. Всё, что кэшируется по
-  // номеру, обязано умереть здесь, иначе чужие цвета и «ботовость» приезжают
-  // из прошлой комнаты.
-  colors.clear();
-  ownerFillStyleCache.clear();
-  minimapOwnerRgbCache.clear();
-  botIds = new Set();
-  lastRoi = null;
-  // C7: то же самое при входе в комнату — см. комментарий в onMatchStart.
-  nameById.clear();
-  nameEnById.clear();
-  cosTerrByPlayer.clear();
-  cosDeathByPlayer.clear();
-  cosTitleByPlayer.clear();
-  botArchByPlayer.clear();
-
-  gridFillAt = new Float32Array(N);
-  coolSeenAt = new Float32Array(N);
-  captureAnchorByOwner.clear();
-  coolDeadlineByOwner.clear();
-
-  minimap.width = W;
-  minimap.height = H;
-  minimapImage = mmCtx.createImageData(W, H);
-  // minimap is updated by server-sent chunk updates
-
-  mmCtx.imageSmoothingEnabled = true;
-  mmCtx.imageSmoothingQuality = 'high';
-
-  if (storedName) {
-    wsSend('setName', { name: storedName });
-  }
-
-  // Spawn in the current room (no rejoin). Without this the player stays dead and cannot move.
-  wsSend('respawn', {});
-
-  youKills = 0;
-  youStreak = 0;
-
-  if (msg?.cosmetics) {
-    onCosmetics(msg.cosmetics);
-  }
-  renderTopHud();
+  const res = onInitImpl(msg, {
+    markJoinFunnelInit,
+    rejoinPending,
+    rejoinFinish,
+    addToast,
+    t,
+    applyMatchPhase,
+    updateRoomInfo,
+    resetClientForNewMatch,
+    hideMatchOverlay,
+    showMatchOverlay,
+    renderMatchResults,
+    updateMatchCountdown,
+    setRoomsCreateOpen,
+    updateRoomsCreateUi,
+    hideMenuOverlay,
+    hideOverlays,
+    syncMenuOnboardingUi,
+    obResetMatch,
+    obAnnounceShop,
+    colors,
+    ownerFillStyleCache,
+    minimapOwnerRgbCache,
+    nameById,
+    nameEnById,
+    cosTerrByPlayer,
+    cosDeathByPlayer,
+    cosTitleByPlayer,
+    botArchByPlayer,
+    captureAnchorByOwner,
+    coolDeadlineByOwner,
+    minimap,
+    mmCtx,
+    storedName,
+    wsSend,
+    onCosmetics,
+    renderTopHud,
+    PHASE_FINAL,
+    W,
+    H,
+    N,
+    tickMs,
+    lastEventsTick,
+    lastEventsAt,
+    you,
+    mapCells,
+    roomId,
+    roomLimit,
+    rejoinRoomId,
+    userLeftRoom,
+    matchSeq,
+    matchEndTick,
+    matchEnded,
+    matchResetAt,
+    matchPhaseBannerSeq,
+    matchContinuePending,
+    matchContinueTimeout,
+    createRoomPending,
+    selectedRoomId,
+    started,
+    gridOwner,
+    trailOwner,
+    minimapGridOwner,
+    botIds,
+    lastRoi,
+    gridFillAt,
+    coolSeenAt,
+    minimapImage,
+    youKills,
+    youStreak,
+    lastMatchResults
+  });
+  W = res.W;
+  H = res.H;
+  N = res.N;
+  tickMs = res.tickMs;
+  lastEventsTick = res.lastEventsTick;
+  lastEventsAt = res.lastEventsAt;
+  you = res.you;
+  mapCells = res.mapCells;
+  roomId = res.roomId;
+  roomLimit = res.roomLimit;
+  rejoinRoomId = res.rejoinRoomId;
+  userLeftRoom = res.userLeftRoom;
+  matchSeq = res.matchSeq;
+  matchEndTick = res.matchEndTick;
+  matchEnded = res.matchEnded;
+  matchResetAt = res.matchResetAt;
+  matchPhaseBannerSeq = res.matchPhaseBannerSeq;
+  matchContinuePending = res.matchContinuePending;
+  matchContinueTimeout = res.matchContinueTimeout;
+  createRoomPending = res.createRoomPending;
+  selectedRoomId = res.selectedRoomId;
+  started = res.started;
+  gridOwner = res.gridOwner;
+  trailOwner = res.trailOwner;
+  minimapGridOwner = res.minimapGridOwner;
+  botIds = res.botIds;
+  lastRoi = res.lastRoi;
+  gridFillAt = res.gridFillAt;
+  coolSeenAt = res.coolSeenAt;
+  minimapImage = res.minimapImage;
+  youKills = res.youKills;
+  youStreak = res.youStreak;
+  lastMatchResults = res.lastMatchResults;
 }
 
 function onCosmetics(msg) {

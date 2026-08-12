@@ -1206,3 +1206,131 @@ export function onState(s, ctx) {
 
   return { lastRoi, gridOwner, trailOwner, gridFillAt, coolSeenAt, prevPlayers, currPlayers, minimapDirty, lastPacketAt, tickrate, lastYouStats, youAlive, lastDirSent, youStreak };
 }
+
+// Первое сообщение инициализации от сервера (размеры поля, начальная
+// косметика, id игрока и т.п.). ctx — явные зависимости, которые тело читало
+// через замыкание client.js. Поля, которые тело переприсваивает (не мутирует
+// на месте), возвращаются вместе.
+export function onInit(msg, ctx) {
+  const { markJoinFunnelInit, rejoinPending, rejoinFinish, addToast, t, applyMatchPhase, updateRoomInfo, resetClientForNewMatch, hideMatchOverlay, showMatchOverlay, renderMatchResults, updateMatchCountdown, setRoomsCreateOpen, updateRoomsCreateUi, hideMenuOverlay, hideOverlays, syncMenuOnboardingUi, obResetMatch, obAnnounceShop, colors, ownerFillStyleCache, minimapOwnerRgbCache, nameById, nameEnById, cosTerrByPlayer, cosDeathByPlayer, cosTitleByPlayer, botArchByPlayer, captureAnchorByOwner, coolDeadlineByOwner, minimap, mmCtx, storedName, wsSend, onCosmetics, renderTopHud, PHASE_FINAL } = ctx;
+  let { W, H, N, tickMs, lastEventsTick, lastEventsAt, you, mapCells, roomId, roomLimit, rejoinRoomId, userLeftRoom, matchSeq, matchEndTick, matchEnded, matchResetAt, matchPhaseBannerSeq, matchContinuePending, matchContinueTimeout, createRoomPending, selectedRoomId, started, gridOwner, trailOwner, minimapGridOwner, botIds, lastRoi, gridFillAt, coolSeenAt, minimapImage, youKills, youStreak, lastMatchResults } = ctx;
+
+  markJoinFunnelInit();
+  W = msg.w;
+  H = msg.h;
+  N = W * H;
+  tickMs = msg.tickMs;
+  if (typeof msg?.tick === 'number' && Number.isFinite(msg.tick)) {
+    lastEventsTick = msg.tick;
+    lastEventsAt = Date.now();
+  }
+  you = Number(msg.you) || 0;
+  mapCells = msg.mapCells || N;
+  roomId = msg.room ?? null;
+  roomLimit = msg.roomLimit ?? null;
+
+  // K7: вход в комнату состоялся — реконнект-цель обновлена, флаг «ушёл сам» снят.
+  rejoinRoomId = roomId;
+  userLeftRoom = false;
+  const wasRejoin = rejoinPending;
+  if (rejoinPending) {
+    rejoinFinish();
+    addToast('✅', t('net.rejoined'), null, null, { key: 'net_reconnect' });
+  }
+
+  matchSeq = Number(msg?.matchSeq) || 0;
+  matchEndTick = Number(msg?.matchEnd) || 0;
+  matchEnded = !!msg?.matchEnded;
+  matchResetAt = Number(msg?.matchReset) || 0;
+  // C2: фаза приходит прямо в init — при входе посреди матча баннер не нужен.
+  matchPhaseBannerSeq = Number(msg?.phase) === PHASE_FINAL ? matchSeq : -1;
+  applyMatchPhase(msg?.phase, msg?.phaseUntil, false, matchSeq);
+  updateRoomInfo();
+
+  matchContinuePending = false;
+  if (matchContinueTimeout) {
+    clearTimeout(matchContinueTimeout);
+    matchContinueTimeout = 0;
+  }
+  if (matchEnded) {
+    if (msg?.matchResults) {
+      lastMatchResults = msg.matchResults;
+      renderMatchResults(lastMatchResults);
+    }
+    updateMatchCountdown();
+    showMatchOverlay();
+  } else {
+    resetClientForNewMatch();
+    hideMatchOverlay();
+  }
+
+  createRoomPending = false;
+  setRoomsCreateOpen(false);
+  updateRoomsCreateUi();
+  selectedRoomId = null;
+
+  hideMenuOverlay();
+  hideOverlays();
+
+  started = true;
+  // F13: раньше подсказка гасилась прямо здесь, ещё до того как игрок её прочитал.
+  // Теперь её снимает первое реальное действие (см. setDir).
+  syncMenuOnboardingUi();
+  // C9: реконнект не считается новым входом в матч.
+  obResetMatch(!wasRejoin);
+  obAnnounceShop();
+  try {
+    document.body.classList.add('inGame');
+  } catch {}
+
+  gridOwner = new Uint16Array(N);
+  trailOwner = new Uint16Array(N);
+
+  minimapGridOwner = new Uint16Array(N);
+
+  // K2: вход в комнату — новый набор номеров игроков. Всё, что кэшируется по
+  // номеру, обязано умереть здесь, иначе чужие цвета и «ботовость» приезжают
+  // из прошлой комнаты.
+  colors.clear();
+  ownerFillStyleCache.clear();
+  minimapOwnerRgbCache.clear();
+  botIds = new Set();
+  lastRoi = null;
+  // C7: то же самое при входе в комнату — см. комментарий в onMatchStart.
+  nameById.clear();
+  nameEnById.clear();
+  cosTerrByPlayer.clear();
+  cosDeathByPlayer.clear();
+  cosTitleByPlayer.clear();
+  botArchByPlayer.clear();
+
+  gridFillAt = new Float32Array(N);
+  coolSeenAt = new Float32Array(N);
+  captureAnchorByOwner.clear();
+  coolDeadlineByOwner.clear();
+
+  minimap.width = W;
+  minimap.height = H;
+  minimapImage = mmCtx.createImageData(W, H);
+  // minimap is updated by server-sent chunk updates
+
+  mmCtx.imageSmoothingEnabled = true;
+  mmCtx.imageSmoothingQuality = 'high';
+
+  if (storedName) {
+    wsSend('setName', { name: storedName });
+  }
+
+  // Spawn in the current room (no rejoin). Without this the player stays dead and cannot move.
+  wsSend('respawn', {});
+
+  youKills = 0;
+  youStreak = 0;
+
+  if (msg?.cosmetics) {
+    onCosmetics(msg.cosmetics);
+  }
+  renderTopHud();
+
+  return { W, H, N, tickMs, lastEventsTick, lastEventsAt, you, mapCells, roomId, roomLimit, rejoinRoomId, userLeftRoom, matchSeq, matchEndTick, matchEnded, matchResetAt, matchPhaseBannerSeq, matchContinuePending, matchContinueTimeout, createRoomPending, selectedRoomId, started, gridOwner, trailOwner, minimapGridOwner, botIds, lastRoi, gridFillAt, coolSeenAt, minimapImage, youKills, youStreak, lastMatchResults };
+}
