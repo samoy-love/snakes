@@ -18,7 +18,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CLIENT_JS = readFileSync(join(HERE, '../public/client.js'), 'utf8');
+// handleStateBinary() переехала из client.js в client_net_bind.js вместе со
+// всей работой с сокетом — сторож едет за ней.
+const CLIENT_JS = readFileSync(join(HERE, '../public/client_net_bind.js'), 'utf8');
 // Фаза 3: сама pushEventFeed() переехала в client_fx_ui.js (как
 // pushEventFeedImpl) — killfeedDirty теперь выставляется через колбэк
 // setKillfeedDirty(true), но источник флага остаётся тем же самым, ровно

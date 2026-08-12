@@ -1,15 +1,32 @@
-// Обработчики бинарных WS-сообщений, вынесенные из handleStateBinary()
-// в client.js. Каждая функция разбирает ровно один msgType и возвращает
-// новый offset (курсор буфера) после разбора — диспетчер (switch/if по
-// msgType) остаётся в client.js.
+/* Разбор входящих сообщений сервера: бинарные пакеты кадра и JSON-сообщения
+   состояния комнаты, косметики и ошибок.
+
+   Отдельный модуль, потому что это самая длинная и самая «сырая» часть
+   клиента: побайтовый разбор буфера рядом с отрисовкой и HUD читался как
+   каша, а любая правка формата задевала половину файла. Здесь только разбор
+   и запись в общий стор — кто и когда зовёт эти функции, решает диспетчер
+   в client_net_bind.js.
+
+   Бинарные обработчики разбирают ровно один msgType и возвращают новый
+   offset (курсор буфера): по ссылке примитив не передать, поэтому диспетчер
+   переприсваивает свой курсор из результата. Ничего другого наружу они не
+   возвращают — состояние правится прямо в client_store.js. */
+
+import { dom } from './client_dom.js';
+import { clientState } from './client_state.js';
+import { PHASE_FINAL, cos, match, me, rooms, session, styleToast, ui, world } from './client_store.js';
+import { gridCellIsCooling, gridCellOwner } from './client_grid.js';
+import { minimapOwnerRgbCache } from './client_minimap_ui.js';
+import { sortPlayersByScore } from './client_stats.js';
+import { lerp } from './client_util.js';
 
 // msgType === 2: ROI-обновление (players, rx/ry/rw/rh, dg, dt).
-// ctx — явные зависимости, которые тело читало через замыкание client.js:
+// ctx — вызовы наружу и справочники, которые нельзя импортировать без кольца:
 //   PLAYER_RECORD_SIZES, pickPlayerRecordSize — client_protocol.js
 //   hueToHsl                                  — client_color.js
-//   botIds                                    — module-level Set в client.js
-//   DIR_NAMES                                 — module-level массив в client.js
-//   displayNameOf, botDisplayName, t          — функции client.js/i18n
+//   botIds                                    — множество id ботов
+//   DIR_NAMES                                 — названия направлений
+//   displayNameOf, botDisplayName, t          — имена игроков и перевод
 //   onState                                   — обработчик готового кадра состояния
 export function handlePlayersMessage(dv, offset, ctx) {
   const { PLAYER_RECORD_SIZES, pickPlayerRecordSize, hueToHsl, botIds, DIR_NAMES, displayNameOf, botDisplayName, t, onState } = ctx;
@@ -116,17 +133,11 @@ export function handlePlayersMessage(dv, offset, ctx) {
   return o;
 }
 
-// msgType === 4: minimap chunks (tick, cw, ch, count, flags, chunks...).
-// ctx — явные зависимости, которые тело читало через замыкание client.js:
-//   W, N                                       — размеры минимапы
-//   minimapGridOwner                           — Uint16Array владельцев клеток
-//   minimapImage, you, colors, minimapOwnerRgbCache,
-//   gridCellOwner, gridCellIsCooling           — данные для setMinimapPixel
-//   setMinimapPixel                            — client_minimap.js
-// Возвращает null, если буфера не хватило (диспетчер должен прервать разбор
-// без побочных эффектов), иначе { offset, hadChunkUpdate: true }.
+/* msgType === 4: куски миникарты (tick, cw, ch, count, flags, chunks...).
+   Возвращает null, если буфера не хватило — диспетчер обязан прервать разбор;
+   иначе { offset } с курсором после разобранного. */
 export function handleMinimapMessage(dv, offset, ctx) {
-  const { W, N, minimapGridOwner, minimapImage, you, colors, minimapOwnerRgbCache, gridCellOwner, gridCellIsCooling, setMinimapPixel } = ctx;
+  const { setMinimapPixel } = ctx;
   const bl = dv.byteLength;
   let o = offset;
 
@@ -157,8 +168,8 @@ export function handleMinimapMessage(dv, offset, ctx) {
       o += 2;
       const xx = n % cw;
       const yy = (n / cw) | 0;
-      const i = (y0 + yy) * W + (x0 + xx);
-      if (i >= 0 && i < N && minimapGridOwner) minimapGridOwner[i] = v;
+      const i = (y0 + yy) * session.W + (x0 + xx);
+      if (i >= 0 && i < session.N && world.minimapGridOwner) world.minimapGridOwner[i] = v;
     }
     if (hasTrail) {
       for (let n = 0; n < chunkCells; n++) {
@@ -168,81 +179,83 @@ export function handleMinimapMessage(dv, offset, ctx) {
 
     // update pixels for this chunk only
     for (let yy = 0; yy < ch; yy++) {
-      const row = (y0 + yy) * W + x0;
+      const row = (y0 + yy) * session.W + x0;
       for (let xx = 0; xx < cw; xx++) {
         const i = row + xx;
-        if (i >= 0 && i < N) {
-          setMinimapPixel(i, { minimapImage, minimapGridOwner, you, colors, minimapOwnerRgbCache, gridCellOwner, gridCellIsCooling });
+        if (i >= 0 && i < session.N) {
+          setMinimapPixel(i, {
+            minimapImage: world.minimapImage,
+            minimapGridOwner: world.minimapGridOwner,
+            you: session.you,
+            colors: world.colors,
+            minimapOwnerRgbCache,
+            gridCellOwner,
+            gridCellIsCooling
+          });
         }
       }
     }
   }
-  return { offset: o, hadChunkUpdate: true };
+  // Пришедшие куски — повод перерисовать карту в ближайшем кадре.
+  world.minimapHadChunkUpdate = true;
+  return { offset: o };
 }
 
-// msgType === 5: пакет событий матча (тик, мутатор, баунти, powerUps,
-// список событий). Самая насыщенная побочными эффектами ветка бинарного
-// протокола — перенесена ЦЕЛИКОМ как есть из handleStateBinary(), порядок
-// вызовов внутри каждого kind не менялся.
-//
-// В отличие от handlePlayersMessage()/handleMinimapMessage() эта ветка не
-// только читает состояние client.js, но и переприсваивает module-level
-// let-переменные (bountyTarget, mutatorType, youKills, youContractProgress,
-// killfeedDirty и т.д. — их читают renderTopHud()/renderMetaHud() и другие
-// части client.js). Присваивание внутри функции меняет только ЛОКАЛЬНУЮ
-// копию (JS передаёт примитивы по значению), поэтому такие имена не могут
-// быть просто полями ctx, которые функция читает и всё — она должна отдать
-// их обновлённые значения обратно. Контракт: ctx передаёт НАЧАЛЬНЫЕ значения
-// этих полей, а при успешном разборе (offset !== null) функция возвращает
-// объект с offset и итоговыми значениями ВСЕХ из них — вызывающий код в
-// client.js обязан переприсвоить свои module-level let из этого объекта.
-// При нехватке байт функция возвращает null, ничего не отдавая — как и
-// другие handle*Message(), это означает «прервать разбор без побочных
-// эффектов после этой точки» (эффекты ДО прерывания, например изменение o
-// или пуш в киллфид, уже могли начаться — это то же поведение, что было в
-// исходном коде: `return;` внутри if (msgType === 5) обрывал разбор ровно
-// в этом месте).
-//
-// ctx — явные зависимости из client.js:
-//   значения для обратной записи (см. выше): lastEventsTick, lastEventsAt, mutatorType, mutatorUntil, bountyTarget, bountyUntil, powerUps, youKills, youStreak, youShield, youSpeedUntilTick, youSpeedType, matchStyleEarned, styleToastAcc, styleToastReason, styleToastCount, styleToastTimer, youContractType, youContractGoal, youContractProgress, youContractUntil, killfeedDirty, lastDeathInfo
-//   функции/константы только на чтение:
-//     displayNameOf, deathReasonLabel, addFxBurst, cosClampId,
-//     cosDeathByPlayer, COS_DEATH_MS, pushEventFeed, t (i18n), addShakeClass,
-//     shakeDirFrom, sfx, fxFlashScreen, comboBump, vibrate, obFireEvent,
-//     FEED_FOREIGN_CAPTURE_MIN, addScorePopup, CAPTURE_JACKPOT_CELLS,
-//     triggerHitstop, bumpMatchTabBadge, showBigBanner, addToast, fmtInt,
-//     celebrateFirstCapture, cosCaptureFxByPlayer, coolDeadlineByOwner (Map,
-//     мутируется через .set/.delete — сама ссылка не переприсваивается),
-//     approxNowTick, tickMs, RECLAIM_WINDOW_MS, dailySetAssign, infoPack,
-//     dailyLabel, dailySetProgress, youDailies (Map), achvLabel, infoDesc,
-//     contractLabel, styleLabel, setYouStyle, flushStyleToast, comboBreak,
-//     mutatorLabel, unknownEventKindSeen (Set), powerupLabel, you (id игрока),
-//     renderKillfeed, renderMetaHud, renderTopHud
+/* Пакет игровых событий за тик: убийства, захваты, бонусы, контракты,
+   ежедневки, ачивки, начисления Стиля, модификаторы раунда.
+
+   Раньше функция принимала 22 значения изменяемого состояния и возвращала их
+   обратно вместе с новым смещением буфера — список приходилось держать
+   синхронным в трёх местах (ctx, прологовые `let`, return). Теперь она пишет
+   в общий стор, и наружу отдаётся только курсор буфера.
+
+   В ctx остались вызовы наружу: перевод, эффекты, звук и перерисовка. */
 export function handleEventsMessage(dv, offset, ctx) {
-  const { displayNameOf, deathReasonLabel, addFxBurst, cosClampId, cosDeathByPlayer, COS_DEATH_MS, pushEventFeed, t, addShakeClass, shakeDirFrom, sfx, fxFlashScreen, comboBump, vibrate, obFireEvent, FEED_FOREIGN_CAPTURE_MIN, addScorePopup, CAPTURE_JACKPOT_CELLS, triggerHitstop, bumpMatchTabBadge, showBigBanner, addToast, fmtInt, celebrateFirstCapture, cosCaptureFxByPlayer, coolDeadlineByOwner, approxNowTick, tickMs, RECLAIM_WINDOW_MS, dailySetAssign, infoPack, dailyLabel, dailySetProgress, youDailies, achvLabel, infoDesc, contractLabel, styleLabel, setYouStyle, flushStyleToast, comboBreak, mutatorLabel, unknownEventKindSeen, powerupLabel, you, renderKillfeed, renderMetaHud, renderTopHud } = ctx;
-  let lastEventsTick = ctx.lastEventsTick;
-  let lastEventsAt = ctx.lastEventsAt;
-  let mutatorType = ctx.mutatorType;
-  let mutatorUntil = ctx.mutatorUntil;
-  let bountyTarget = ctx.bountyTarget;
-  let bountyUntil = ctx.bountyUntil;
-  let powerUps = ctx.powerUps;
-  let youKills = ctx.youKills;
-  let youStreak = ctx.youStreak;
-  let youShield = ctx.youShield;
-  let youSpeedUntilTick = ctx.youSpeedUntilTick;
-  let youSpeedType = ctx.youSpeedType;
-  let matchStyleEarned = ctx.matchStyleEarned;
-  let styleToastAcc = ctx.styleToastAcc;
-  let styleToastReason = ctx.styleToastReason;
-  let styleToastCount = ctx.styleToastCount;
-  let styleToastTimer = ctx.styleToastTimer;
-  let youContractType = ctx.youContractType;
-  let youContractGoal = ctx.youContractGoal;
-  let youContractProgress = ctx.youContractProgress;
-  let youContractUntil = ctx.youContractUntil;
-  let killfeedDirty = ctx.killfeedDirty;
-  let lastDeathInfo = ctx.lastDeathInfo;
+  const {
+    CAPTURE_JACKPOT_CELLS,
+    COS_DEATH_MS,
+    FEED_FOREIGN_CAPTURE_MIN,
+    RECLAIM_WINDOW_MS,
+    achvLabel,
+    addFxBurst,
+    addScorePopup,
+    addShakeClass,
+    addToast,
+    approxNowTick,
+    bumpMatchTabBadge,
+    celebrateFirstCapture,
+    comboBreak,
+    comboBump,
+    contractLabel,
+    cosCaptureFxByPlayer,
+    cosClampId,
+    dailyLabel,
+    dailySetAssign,
+    dailySetProgress,
+    deathReasonLabel,
+    displayNameOf,
+    flushStyleToast,
+    fmtInt,
+    fxFlashScreen,
+    infoDesc,
+    infoPack,
+    mutatorLabel,
+    obFireEvent,
+    powerupLabel,
+    pushEventFeed,
+    renderKillfeed,
+    renderMetaHud,
+    renderTopHud,
+    setYouStyle,
+    sfx,
+    shakeDirFrom,
+    showBigBanner,
+    styleLabel,
+    t,
+    triggerHitstop,
+    unknownEventKindSeen,
+    vibrate
+  } = ctx;
   const bl = dv.byteLength;
   let o = offset;
 
@@ -251,17 +264,17 @@ export function handleEventsMessage(dv, offset, ctx) {
   const tick = dv.getUint32(o, true);
   o += 4;
 
-  lastEventsTick = tick;
-  lastEventsAt = Date.now();
+  match.lastEventsTick = tick;
+  match.lastEventsAt = Date.now();
 
-  mutatorType = dv.getUint8(o);
+  match.mutatorType = dv.getUint8(o);
   o += 1;
-  mutatorUntil = dv.getUint32(o, true);
+  match.mutatorUntil = dv.getUint32(o, true);
   o += 4;
 
-  bountyTarget = dv.getUint16(o, true);
+  match.bountyTarget = dv.getUint16(o, true);
   o += 2;
-  bountyUntil = dv.getUint32(o, true);
+  match.bountyUntil = dv.getUint32(o, true);
   o += 4;
 
   const puCount = dv.getUint8(o);
@@ -281,7 +294,7 @@ export function handleEventsMessage(dv, offset, ctx) {
     o += 4;
     nextPU.set(id, { id, type, x, y, expires });
   }
-  powerUps = nextPU;
+  match.powerUps = nextPU;
 
   const evCount = dv.getUint16(o, true);
   o += 2;
@@ -305,14 +318,14 @@ export function handleEventsMessage(dv, offset, ctx) {
       const vn = displayNameOf(victim);
       const kn = killer ? displayNameOf(killer) : '';
 
-      if (victim === you) {
-        lastDeathInfo = { killer, killerName: kn, reason };
+      if (victim === session.you) {
+        me.lastDeathInfo = { killer, killerName: kn, reason };
       }
 
       const rs = deathReasonLabel(reason);
       // Эффект гибели жертвы — его видят все, а не только убийца.
       // Стиль берём из cosExtra; без сообщения это базовая вспышка (0).
-      addFxBurst(ex, ey, `die${cosClampId(cosDeathByPlayer.get(victim) || 0)}`, {
+      addFxBurst(ex, ey, `die${cosClampId(cos.deathByPlayer.get(victim) || 0)}`, {
         pid: victim,
         life: COS_DEATH_MS
       });
@@ -320,8 +333,8 @@ export function handleEventsMessage(dv, offset, ctx) {
       if (killer) pushEventFeed(`${kn} -> ${vn}${rs ? ` (${rs})` : ''}`, 'Kill', killer);
       else pushEventFeed(`${vn} ${t('feed.died')}${rs ? ` (${rs})` : ''}`, 'Death', victim);
 
-      if (killer && killer === you) {
-        youKills++;
+      if (killer && killer === session.you) {
+        me.kills++;
         addFxBurst(ex, ey, 'kill');
         addShakeClass('medium', ...shakeDirFrom(ex, ey));
         sfx.kill();
@@ -331,7 +344,7 @@ export function handleEventsMessage(dv, offset, ctx) {
         // K5: первое убийство — открываем контракты.
         obFireEvent('kill');
       }
-      if (victim === you) {
+      if (victim === session.you) {
         // J2: отклик на собственную смерть — не на чужую.
         addShakeClass('large', ...shakeDirFrom(ex, ey));
         fxFlashScreen([255, 80, 80], 1);
@@ -361,7 +374,7 @@ export function handleEventsMessage(dv, offset, ctx) {
          чужой — только если он крупный: порог примерно равен половине
          типового домашнего квадрата, ниже него событие не несёт
          информации о раскладе на карте. */
-      if (pid === you || delta >= FEED_FOREIGN_CAPTURE_MIN) {
+      if (pid === session.you || delta >= FEED_FOREIGN_CAPTURE_MIN) {
         pushEventFeed(
           `${pn} ${t('feed.captured')} +${delta} ${t('feed.zone')}`,
           'Capture',
@@ -369,7 +382,7 @@ export function handleEventsMessage(dv, offset, ctx) {
         );
       }
       addFxBurst(ex, ey, `cap${cosClampId(fxId)}`, { pid });
-      if (pid === you) {
+      if (pid === session.you) {
         // J5: самое частое приятное действие теперь показывает число.
         addScorePopup(ex, ey, delta);
         comboBump();
@@ -419,11 +432,11 @@ export function handleEventsMessage(dv, offset, ctx) {
       const pn = displayNameOf(pid);
       // C6: тот же порог, что и у захвата — чужой возврат мелочи в ленте
       // такой же шум, как и чужой мелкий захват. Свой — всегда.
-      if (pid === you || cells >= FEED_FOREIGN_CAPTURE_MIN) {
+      if (pid === session.you || cells >= FEED_FOREIGN_CAPTURE_MIN) {
         pushEventFeed(`${pn} ${t('feed.reclaimed')} +${cells}`, 'Reclaim', pid);
       }
       addFxBurst(ex, ey, `cap${cosClampId(cosCaptureFxByPlayer(pid))}`, { pid });
-      if (pid === you && cells > 0) {
+      if (pid === session.you && cells > 0) {
         addScorePopup(ex, ey, cells);
         // F5: возврат своей земли должен читаться иначе, чем обычный захват —
         // это отыгранная назад потеря, а не прирост.
@@ -437,7 +450,7 @@ export function handleEventsMessage(dv, offset, ctx) {
         });
         if (cells >= 120) triggerHitstop(110);
       }
-      coolDeadlineByOwner.delete(pid);
+      world.coolDeadlineByOwner.delete(pid);
       continue;
     }
 
@@ -454,8 +467,8 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 4;
       if (cells > 0) {
         const nt = approxNowTick();
-        const remMs = nt != null && tickMs ? Math.max(0, (untilTick - nt) * tickMs) : RECLAIM_WINDOW_MS;
-        coolDeadlineByOwner.set(pid, performance.now() + Math.min(RECLAIM_WINDOW_MS * 1.5, remMs));
+        const remMs = nt != null && session.tickMs ? Math.max(0, (untilTick - nt) * session.tickMs) : RECLAIM_WINDOW_MS;
+        world.coolDeadlineByOwner.set(pid, performance.now() + Math.min(RECLAIM_WINDOW_MS * 1.5, remMs));
       }
       continue;
     }
@@ -474,7 +487,7 @@ export function handleEventsMessage(dv, offset, ctx) {
       // на весь блок. Переименовано в `type`.
       const type = (packed >>> 16) & 0xffff;
       const prog = packed & 0xffff;
-      if (pid === you) {
+      if (pid === session.you) {
         dailySetAssign(slot, type, goal, prog);
         bumpMatchTabBadge();
         // J16: назначение ежедневки было беззвучным.
@@ -494,7 +507,7 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 1;
       const prog = dv.getUint16(o, true);
       o += 2;
-      if (pid === you) {
+      if (pid === session.you) {
         dailySetProgress(slot, prog);
       }
       continue;
@@ -506,10 +519,10 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 2;
       const slot = dv.getUint8(o);
       o += 1;
-      if (pid === you) {
+      if (pid === session.you) {
         bumpMatchTabBadge();
         // C7: тост называет конкретное задание и различает слоты.
-        const doneIt = youDailies.get(Number(slot) || 0);
+        const doneIt = me.dailies.get(Number(slot) || 0);
         if (doneIt) doneIt.prog = doneIt.goal || doneIt.prog;
         const doneName = doneIt?.type ? dailyLabel(doneIt.type) : '';
         addToast('🏁', infoPack().labels.dailyComplete, 'big', doneName, { tab: 'match', key: `daily_complete_${slot}`, prio: 'important' });
@@ -527,7 +540,7 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 1;
       const pn = displayNameOf(pid);
       pushEventFeed(`${pn} — ${infoPack().labels.achievement}: ${achvLabel(achv)}`, 'Achv', pid);
-      if (pid === you) {
+      if (pid === session.you) {
         bumpMatchTabBadge();
         sfx.achievement();
         fxFlashScreen([255, 225, 150], 0.8);
@@ -552,11 +565,11 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 4;
       const pn = displayNameOf(pid);
       pushEventFeed(`${pn} — ${infoPack().labels.contract}: ${contractLabel(type) || type} ${goal}`, 'Contract', pid);
-      if (pid === you) {
-        youContractType = type;
-        youContractGoal = goal;
-        youContractProgress = 0;
-        youContractUntil = until;
+      if (pid === session.you) {
+        me.contractType = type;
+        me.contractGoal = goal;
+        me.contractProgress = 0;
+        me.contractUntil = until;
         bumpMatchTabBadge();
         // J16: назначение контракта было беззвучным.
         sfx.contractAssigned();
@@ -573,9 +586,9 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 1;
       const prog = dv.getUint16(o, true);
       o += 2;
-      if (pid === you) {
-        youContractType = type;
-        youContractProgress = prog;
+      if (pid === session.you) {
+        me.contractType = type;
+        me.contractProgress = prog;
       }
       continue;
     }
@@ -588,8 +601,8 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 1;
       const pn = displayNameOf(pid);
       pushEventFeed(`${pn} — ${infoPack().labels.contractComplete}: ${contractLabel(type) || type}`, 'Contract', pid);
-      if (pid === you) {
-        youContractProgress = youContractGoal;
+      if (pid === session.you) {
+        me.contractProgress = me.contractGoal;
         bumpMatchTabBadge();
         addToast('✅', `${infoPack().labels.contractComplete}: ${contractLabel(type) || type}`, 'big', infoDesc(infoPack().contracts, type, ''), { tab: 'match', key: `contract_complete_${type}`, prio: 'important' });
         sfx.contractDone();
@@ -611,31 +624,31 @@ export function handleEventsMessage(dv, offset, ctx) {
       /* C8: начисления Стиля чужих игроков давали вторую строку на каждый
          захват бота — при одном человеке в комнате это ~16 строк/с про чужую
          валюту, ценности для игрока ноль. В ленту идёт только свой Стиль. */
-      if (pid === you) {
+      if (pid === session.you) {
         pushEventFeed(`+${delta} ${t('cosmetics.style_points')} (${styleLabel(reason)})`, 'Style');
-        if (delta > 0) matchStyleEarned += delta;
+        if (delta > 0) match.styleEarned += delta;
         setYouStyle(total);
         bumpMatchTabBadge();
         if (delta >= 20) {
-          if (styleToastTimer) {
+          if (styleToast.timer) {
             try {
-              clearTimeout(styleToastTimer);
+              clearTimeout(styleToast.timer);
             } catch {}
-            styleToastTimer = 0;
-            styleToastAcc = 0;
-            styleToastReason = 0;
-            styleToastCount = 0;
+            styleToast.timer = 0;
+            styleToast.acc = 0;
+            styleToast.reason = 0;
+            styleToast.count = 0;
           }
           addToast('✨', `+${delta} ${t('cosmetics.style_points')}`, 'big', styleLabel(reason), { tab: 'match', key: `style_${reason}_${delta}` });
         } else if (delta > 0) {
-          if (styleToastAcc && styleToastReason && styleToastReason !== reason) {
+          if (styleToast.acc && styleToast.reason && styleToast.reason !== reason) {
             flushStyleToast();
           }
-          styleToastAcc += delta;
-          styleToastReason = reason;
-          styleToastCount++;
-          if (!styleToastTimer) {
-            styleToastTimer = setTimeout(flushStyleToast, 650);
+          styleToast.acc += delta;
+          styleToast.reason = reason;
+          styleToast.count++;
+          if (!styleToast.timer) {
+            styleToast.timer = setTimeout(flushStyleToast, 650);
           }
         }
       }
@@ -651,7 +664,7 @@ export function handleEventsMessage(dv, offset, ctx) {
       const kn = displayNameOf(killer);
       const vn = displayNameOf(victim);
       pushEventFeed(`${t('feed.revenge')}: ${kn} -> ${vn}`, 'Revenge', killer);
-      if (killer === you) {
+      if (killer === session.you) {
         bumpMatchTabBadge();
         sfx.revenge();
         fxFlashScreen([255, 110, 110], 0.85);
@@ -670,8 +683,8 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 1;
       const pn = displayNameOf(pid);
       pushEventFeed(`${pn} — ${t('event.streak')} x${streak}`, 'Streak', pid);
-      if (pid === you) {
-        youStreak = streak;
+      if (pid === session.you) {
+        me.streak = streak;
         // J3: раньше бип стоял вне этой проверки — в комнате с 14 ботами
         // получался метроном.
         sfx.streak(Math.max(0, streak - 2));
@@ -696,17 +709,17 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 2;
       const until = dv.getUint32(o, true);
       o += 4;
-      bountyTarget = target;
-      bountyUntil = until;
+      match.bountyTarget = target;
+      match.bountyUntil = until;
       const tn = displayNameOf(target);
       pushEventFeed(`${t('event.bounty')}: ${tn}`, 'Bounty');
 
       bumpMatchTabBadge();
-      addToast('🎯', `${infoPack().labels.bounty}: ${tn}`, 'big', t('toast.bounty_desc'), { tab: 'match', key: `bounty_${target}`, prio: target === you ? 'jackpot' : 'important' });
+      addToast('🎯', `${infoPack().labels.bounty}: ${tn}`, 'big', t('toast.bounty_desc'), { tab: 'match', key: `bounty_${target}`, prio: target === session.you ? 'jackpot' : 'important' });
       // J2/J3: назначение баунти — глобальное событие. Полная громкость только
       // если цель — ты, иначе 40%.
-      sfx.bountyAssigned(target === you ? 1 : 0.4);
-      if (target === you) fxFlashScreen([255, 140, 90], 0.7);
+      sfx.bountyAssigned(target === session.you ? 1 : 0.4);
+      if (target === session.you) fxFlashScreen([255, 140, 90], 0.7);
       continue;
     }
 
@@ -721,7 +734,7 @@ export function handleEventsMessage(dv, offset, ctx) {
       pushEventFeed(`${t('event.bounty_claimed')}: ${kn} -> ${vn}`, 'Bounty', killer);
 
       bumpMatchTabBadge();
-      const mineClaim = killer === you;
+      const mineClaim = killer === session.you;
       addToast('🏆', t('toast.bounty_claim_title'), 'big', t('toast.bounty_claim_desc'), { tab: 'match', key: 'bounty_claim', prio: mineClaim ? 'jackpot' : 'minor' });
       // J2: тряска и полная громкость только тому, кто забрал награду.
       if (mineClaim) {
@@ -747,7 +760,7 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 2;
       const expires = dv.getUint32(o, true);
       o += 4;
-      powerUps.set(id, { id, type, x, y, expires });
+      match.powerUps.set(id, { id, type, x, y, expires });
       continue;
     }
 
@@ -763,19 +776,19 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 2;
       const ey = dv.getUint16(o, true);
       o += 2;
-      powerUps.delete(id);
+      match.powerUps.delete(id);
       const pn = displayNameOf(pid);
       pushEventFeed(`${pn} ${t('event.picked')}: ${powerupLabel(type)}`, 'Pickup', pid);
 
-      if (pid === you) {
-        if (type === 1) youShield = true;
+      if (pid === session.you) {
+        if (type === 1) me.shield = true;
         if (type === 2) {
-          youSpeedUntilTick = lastEventsTick + 45;
-          youSpeedType = 2;
+          me.speedUntilTick = match.lastEventsTick + 45;
+          me.speedType = 2;
         }
         if (type === 4) {
-          youSpeedUntilTick = lastEventsTick + 95;
-          youSpeedType = 4;
+          me.speedUntilTick = match.lastEventsTick + 95;
+          me.speedType = 4;
         }
         addFxBurst(ex, ey, type === 2 ? 'pickup2' : type === 4 ? 'pickup4' : 'pickup');
         if (type === 2 || type === 4) sfx.speedOn();
@@ -799,8 +812,8 @@ export function handleEventsMessage(dv, offset, ctx) {
       const pn = displayNameOf(pid);
       pushEventFeed(`${pn} ${t('event.used')}: ${powerupLabel(type)}`, 'Use', pid);
 
-      if (pid === you) {
-        if (type === 1) youShield = false;
+      if (pid === session.you) {
+        if (type === 1) me.shield = false;
         addFxBurst(ex, ey, 'use');
         addToast(type === 3 ? '💥' : '🛡', `${t('toast.powerup_used')}: ${powerupLabel(type)}`, null, infoDesc(infoPack().powerups, type, ''));
         if (type === 3) {
@@ -820,8 +833,8 @@ export function handleEventsMessage(dv, offset, ctx) {
       o += 1;
       const until = dv.getUint32(o, true);
       o += 4;
-      mutatorType = type;
-      mutatorUntil = until;
+      match.mutatorType = type;
+      match.mutatorUntil = until;
       const mn = mutatorLabel(type);
       if (mn) pushEventFeed(`${t('event.round')}: ${mn}`, 'Round');
 
@@ -835,9 +848,9 @@ export function handleEventsMessage(dv, offset, ctx) {
       if (!need(1)) return null;
       const type = dv.getUint8(o);
       o += 1;
-      if (mutatorType === type) {
-        mutatorType = 0;
-        mutatorUntil = 0;
+      if (match.mutatorType === type) {
+        match.mutatorType = 0;
+        match.mutatorUntil = 0;
       }
 
       addToast('✓', infoPack().labels.roundEnded, 'big');
@@ -865,43 +878,45 @@ export function handleEventsMessage(dv, offset, ctx) {
 
   // K7: renderKillfeed() звался 13 раз внутри цикла разбора событий (замер:
   // 784 мутации DOM за 115 с). Один пакет — одна перерисовка в конце.
-  if (killfeedDirty) {
-    killfeedDirty = false;
+  if (ui.killfeedDirty) {
+    ui.killfeedDirty = false;
     renderKillfeed();
   }
   renderMetaHud();
   renderTopHud();
-  return { offset: o, lastEventsTick, lastEventsAt, mutatorType, mutatorUntil, bountyTarget, bountyUntil, powerUps, youKills, youStreak, youShield, youSpeedUntilTick, youSpeedType, matchStyleEarned, styleToastAcc, styleToastReason, styleToastCount, styleToastTimer, youContractType, youContractGoal, youContractProgress, youContractUntil, killfeedDirty, lastDeathInfo };
+  return { offset: o };
 }
 
-// JSON-сообщение type === 'cosmetics': применение серверного снимка косметики
-// игрока (инвентарь, титулы, прогресс ачивок, стиль). Перенесена ЦЕЛИКОМ как
-// есть из onCosmetics() в client.js, порядок вызовов и побочные эффекты не
-// менялись.
-//
-// Как и handleEventsMessage(), эта функция и читает, и переприсваивает
-// module-level let-переменные client.js (youStyle, cosmeticsLoaded,
-// cosmeticsSource, youTitleMask, youTitleId) — их читают другие части
-// client.js (рендер HUD, магазин). Присваивание внутри функции меняет только
-// ЛОКАЛЬНУЮ копию, поэтому контракт тот же: ctx передаёт НАЧАЛЬНЫЕ значения,
-// функция возвращает объект с итоговыми значениями — вызывающий код в
-// client.js обязан переприсвоить свои module-level let из этого объекта.
-//
-// ctx — явные зависимости из client.js:
-//   значения для обратной записи: youStyle, cosmeticsLoaded, cosmeticsSource, youTitleMask, youTitleId
-//   объекты, мутируемые на месте (ссылка не переприсваивается): youCos, achvProgressById
-//   функции/константы только на чтение:
-//     applyCosPayload, COS_TITLE_MAX, cosmeticsCacheSave, pendingCosmeticsOp,
-//     cosmeticsOpClear, COSMETICS_MAX_ID, t, cosmeticsLabel, cosmeticsVariantName,
-//     setCosmeticsStatus, addToast, playBeep, cosmeticsOpen,
-//     cosmeticsApplyDesiredServer, syncCosmeticsUi, renderMetaHud, renderMenuSkinPreview
+/* JSON-сообщение type === 'cosmetics': кошелёк, инвентарь, титулы, прогресс
+   ачивок и надетый стиль. Порядок вызовов и побочные эффекты те же, что были
+   у onCosmetics() до выноса.
+
+   Раньше функция возвращала пять полей (баланс, признак загрузки, источник,
+   маску и надетый титул), которые вызывающий раскладывал обратно по плоским
+   let: присваивание внутри меняло только ЛОКАЛЬНУЮ копию. Теперь она пишет
+   прямо в cos — ни списка значений на вход, ни возврата.
+
+   В ctx остались только вызовы наружу и объект youCos, который мутируется
+   на месте (ссылка не переприсваивается). */
 export function handleCosmeticsMessage(msg, ctx) {
-  const { youCos, achvProgressById, applyCosPayload, COS_TITLE_MAX, cosmeticsCacheSave, pendingCosmeticsOp, cosmeticsOpClear, COSMETICS_MAX_ID, t, cosmeticsLabel, cosmeticsVariantName, setCosmeticsStatus, addToast, playBeep, cosmeticsOpen, cosmeticsApplyDesiredServer, syncCosmeticsUi, renderMetaHud, renderMenuSkinPreview } = ctx;
-  let youStyle = ctx.youStyle;
-  let cosmeticsLoaded = ctx.cosmeticsLoaded;
-  let cosmeticsSource = ctx.cosmeticsSource;
-  let youTitleMask = ctx.youTitleMask;
-  let youTitleId = ctx.youTitleId;
+  const {
+    COSMETICS_MAX_ID,
+    COS_TITLE_MAX,
+    addToast,
+    applyCosPayload,
+    cosmeticsApplyDesiredServer,
+    cosmeticsCacheSave,
+    cosmeticsLabel,
+    cosmeticsOpClear,
+    cosmeticsVariantName,
+    playBeep,
+    renderMenuSkinPreview,
+    renderMetaHud,
+    setCosmeticsStatus,
+    syncCosmeticsUi,
+    t,
+    youCos
+  } = ctx;
 
   // C4: remember the previous inventory so we can detect what was just bought.
   const prevInv = {
@@ -913,13 +928,13 @@ export function handleCosmeticsMessage(msg, ctx) {
     terr: Number(youCos.inv.terr) || 0,
     death: Number(youCos.inv.death) || 0
   };
-  const hadServerState = cosmeticsSource === 'server';
+  const hadServerState = cos.source === 'server';
 
   const st = Number(msg?.style);
-  if (Number.isFinite(st)) youStyle = Math.max(0, st);
+  if (Number.isFinite(st)) cos.style = Math.max(0, st);
 
-  cosmeticsLoaded = true;
-  cosmeticsSource = 'server';
+  cos.loaded = true;
+  cos.source = 'server';
 
   // Полный снимок: категории, которых в сообщении нет, обнуляются.
   applyCosPayload(youCos, msg, 'replace');
@@ -930,21 +945,21 @@ export function handleCosmeticsMessage(msg, ctx) {
   // «Титулы» честно сообщают, что список пока недоступен.
   // Частичное сообщение: трогаем только присланное.
   applyCosPayload(youCos, msg, 'patch');
-  if (msg?.titleMask !== undefined) youTitleMask = Number(msg.titleMask) || 0;
-  if (msg?.titleId !== undefined) youTitleId = Math.max(0, Math.min(COS_TITLE_MAX, Number(msg.titleId) || 0));
+  if (msg?.titleMask !== undefined) cos.titleMask = Number(msg.titleMask) || 0;
+  if (msg?.titleId !== undefined) cos.titleId = Math.max(0, Math.min(COS_TITLE_MAX, Number(msg.titleId) || 0));
   /* C3: прогресс по незакрытым ачивкам. Массив содержит ТОЛЬКО закрытые ещё
      ачивки — открытые сервер опускает, они и так видны по titleMask. Поле
      может отсутствовать (старый сервер) — тогда карту не трогаем вовсе,
      чтобы не стереть уже показанный прогресс. */
   if (Array.isArray(msg?.achvProgress)) {
-    achvProgressById.clear();
+    cos.achvProgressById.clear();
     for (const it of msg.achvProgress) {
       const id = Number(it?.id);
       const cur = Number(it?.cur);
       const max = Number(it?.max);
       if (!Number.isFinite(id) || id < 0) continue;
       if (!Number.isFinite(max) || max <= 0) continue;
-      achvProgressById.set(id, {
+      cos.achvProgressById.set(id, {
         cur: Math.max(0, Math.min(max, Number.isFinite(cur) ? cur : 0)),
         max,
       });
@@ -957,7 +972,7 @@ export function handleCosmeticsMessage(msg, ctx) {
   cosmeticsCacheSave();
 
   // C4: report the purchase that just landed.
-  const pending = pendingCosmeticsOp;
+  const pending = cos.pendingOp;
   cosmeticsOpClear();
 
   if (hadServerState) {
@@ -998,7 +1013,7 @@ export function handleCosmeticsMessage(msg, ctx) {
     } else if (pending) {
       setCosmeticsStatus('', '');
     }
-  } else if (cosmeticsOpen) {
+  } else if (cos.open) {
     // Магазин был открыт ещё без серверного подтверждения (см. showCosmeticsOverlay)
     // и статус-строка застыла на «не подтверждено» — теперь оно пришло, гасим подсказку.
     setCosmeticsStatus('', '');
@@ -1013,17 +1028,24 @@ export function handleCosmeticsMessage(msg, ctx) {
   try {
     renderMenuSkinPreview();
   } catch {}
-
-  return { youStyle, cosmeticsLoaded, cosmeticsSource, youTitleMask, youTitleId };
 }
 
-// JSON WS сообщение type === 'error'. ctx — явные зависимости, которые тело
-// читало через замыкание client.js. createRoomPending — единственное
-// мутируемое значение, возвращается вместе с остальными полями.
+/* JSON-сообщение type === 'error'. Гасит форму создания комнаты, показывает
+   игроку понятную причину и разруливает неудавшийся возврат в комнату. */
 export function onError(d, ctx) {
-  const { setRoomsCreateOpen, updateRoomsCreateUi, t, roomsCreateNameInput, rejoinPending, rejoinGiveUp, cosmeticsOpClear, cosmeticsOpen, setCosmeticsStatus, syncCosmeticsUi, addToast } = ctx;
+  const {
+    setRoomsCreateOpen,
+    updateRoomsCreateUi,
+    t,
+    roomsCreateNameInput,
+    rejoinGiveUp,
+    cosmeticsOpClear,
+    setCosmeticsStatus,
+    syncCosmeticsUi,
+    addToast
+  } = ctx;
   const code = String(d?.message || '').trim();
-  const createRoomPending = false;
+  rooms.createPending = false;
   updateRoomsCreateUi();
 
   if (code === 'room_title_invalid') {
@@ -1032,7 +1054,7 @@ export function onError(d, ctx) {
     try {
       roomsCreateNameInput?.focus();
     } catch {}
-    return { createRoomPending };
+    return;
   }
 
   const msgFor = () =>
@@ -1057,33 +1079,49 @@ export function onError(d, ctx) {
   // нет или она заполнилась. Тогда честно отправляем в меню.
   // C9: любая ошибка во время ожидания возврата — повод честно уйти в меню,
   // а не только room_not_found / room_full.
-  if (rejoinPending) {
+  if (session.rejoinPending) {
     rejoinGiveUp(msg);
-    return { createRoomPending };
+    return;
   }
 
   // C1/C4: shop errors must land inside the overlay — toasts are hidden while it is open.
   if (code.startsWith('cosmetics_')) {
     cosmeticsOpClear();
-    if (cosmeticsOpen) {
+    if (cos.open) {
       setCosmeticsStatus(msgFor, 'error');
       syncCosmeticsUi();
-      return { createRoomPending };
+    return;
     }
   }
 
   addToast('⚠', msg, null);
-  return { createRoomPending };
+    return;
 }
 
-// JSON WS сообщение type === 'state' — обёртка над состоянием матча.
-// НЕ путать с бинарным handleStateBinary() (msgType-диспетчер). ctx — явные
-// зависимости, которые тело читало через замыкание client.js. Все поля,
-// которые тело переприсваивает (не мутирует на месте), возвращаются вместе.
+/* JSON-сообщение type === 'state' — снапшот состояния комнаты: сетка, следы,
+   игроки. НЕ путать с бинарным разбором кадра (msgType-диспетчер).
+
+   Раньше функция принимала 13 значений изменяемого состояния и возвращала их
+   обратно объектом, который вызывающий раскладывал по плоским let. Теперь
+   и она, и остальные модули пишут в один и тот же стор, поэтому ни того,
+   ни другого списка больше нет.
+
+   В ctx остались только вызовы наружу — то, что делают другие модули:
+   применение дельт, перерисовка и реакция на смерть. */
 export function onState(s, ctx) {
-  const { clientState, W, mapCells, you, colors, nameById, ownerFillStyleCache, minimapOwnerRgbCache, headIndexByOwner, refreshCaptureAnchors, markCoolSeen, gridCellIsCooling, fillDelayFor, applyPackedDeltaGridWithAnim, applyPackedDelta, renderChat, refreshOwnGeometry, computeTopSorted, hideOverlays, beginDeathZoom, beginDeathSlowMo, lerp } = ctx;
-  let { gridOwner, trailOwner, gridFillAt, coolSeenAt, prevPlayers, currPlayers, minimapDirty, lastPacketAt, tickrate, lastYouStats, youAlive, lastDirSent, youStreak } = ctx;
-  let lastRoi = ctx.lastRoi;
+  const {
+    ownerFillStyleCache,
+    refreshCaptureAnchors,
+    markCoolSeen,
+    fillDelayFor,
+    applyPackedDeltaGridWithAnim,
+    applyPackedDelta,
+    renderChat,
+    refreshOwnGeometry,
+    hideOverlays,
+    beginDeathZoom,
+    beginDeathSlowMo
+  } = ctx;
 
   clientState.lastState = s;
 
@@ -1091,7 +1129,7 @@ export function onState(s, ctx) {
   // источник правды о том, какая часть сетки вообще свежая.
   const r = s?.roi;
   if (r && Number(r.rw) > 0 && Number(r.rh) > 0) {
-    lastRoi = {
+    world.lastRoi = {
       rx: Math.max(0, Number(r.rx) || 0),
       ry: Math.max(0, Number(r.ry) || 0),
       rw: Number(r.rw) || 0,
@@ -1099,7 +1137,7 @@ export function onState(s, ctx) {
     };
   } else if (s?.full) {
     // Полный снапшот освежает всю карту — тумана в этом кадре нет.
-    lastRoi = null;
+    world.lastRoi = null;
   }
 
   const now = performance.now();
@@ -1109,156 +1147,175 @@ export function onState(s, ctx) {
   refreshCaptureAnchors(s.players);
 
   if (s.full) {
-    const prev = gridOwner;
-    gridOwner = new Uint16Array(s.grid);
-    trailOwner = new Uint16Array(s.trail);
-    if (!gridFillAt || gridFillAt.length !== gridOwner.length) gridFillAt = new Float32Array(gridOwner.length);
-    if (!coolSeenAt || coolSeenAt.length !== gridOwner.length) coolSeenAt = new Float32Array(gridOwner.length);
-    if (prev && prev.length === gridOwner.length) {
-      for (let i = 0; i < gridOwner.length; i++) {
-        const n = gridOwner[i];
+    const prev = world.gridOwner;
+    world.gridOwner = new Uint16Array(s.grid);
+    world.trailOwner = new Uint16Array(s.trail);
+    const len = world.gridOwner.length;
+    if (!world.gridFillAt || world.gridFillAt.length !== len) world.gridFillAt = new Float32Array(len);
+    if (!world.coolSeenAt || world.coolSeenAt.length !== len) world.coolSeenAt = new Float32Array(len);
+    if (prev && prev.length === len) {
+      for (let i = 0; i < len; i++) {
+        const n = world.gridOwner[i];
         if (prev[i] !== n) markCoolSeen(i, n, now);
         if (n !== 0 && !gridCellIsCooling(n) && prev[i] !== n) {
-          gridFillAt[i] = now + fillDelayFor(i, n);
+          world.gridFillAt[i] = now + fillDelayFor(i, n);
         }
       }
     } else {
-      for (let i = 0; i < gridOwner.length; i++) markCoolSeen(i, gridOwner[i], now);
+      for (let i = 0; i < len; i++) markCoolSeen(i, world.gridOwner[i], now);
     }
   } else {
     applyPackedDeltaGridWithAnim(s.dg, now);
-    applyPackedDelta(trailOwner, s.dt);
+    applyPackedDelta(world.trailOwner, s.dt);
   }
 
-  // minimap is updated by server-sent chunk updates
+  // Миникарта обновляется отдельными chunk-сообщениями сервера.
 
-  const tmpPlayers = prevPlayers;
-  prevPlayers = currPlayers;
-  currPlayers = tmpPlayers;
-  currPlayers.clear();
+  const tmpPlayers = world.prevPlayers;
+  world.prevPlayers = world.currPlayers;
+  world.currPlayers = tmpPlayers;
+  world.currPlayers.clear();
+
   let nameChanged = false;
   for (const p of s.players) {
-    currPlayers.set(p.n, p);
-    // K2: номера игроков переиспользуются (аллокатор отдаёт первый свободный,
-    // боты пересоздаются при каждом входе/выходе человека). Кэш «номер → цвет»
-    // раньше писался один раз и никогда не обновлялся: номер 7 оставался
-    // красным даже после того, как его получил новый синий бот. Сравниваем
-    // цвет каждый кадр и сбрасываем зависимые кэши при расхождении.
-    if (colors.get(p.n) !== p.c) {
-      colors.set(p.n, p.c);
+    world.currPlayers.set(p.n, p);
+    /* K2: номера игроков переиспользуются (аллокатор отдаёт первый свободный,
+       боты пересоздаются при каждом входе/выходе человека). Кэш «номер →
+       цвет» раньше писался один раз и никогда не обновлялся: номер 7
+       оставался красным даже после того, как его получил новый синий бот.
+       Сравниваем цвет каждый кадр и сбрасываем зависимые кэши при
+       расхождении. */
+    if (world.colors.get(p.n) !== p.c) {
+      world.colors.set(p.n, p.c);
       ownerFillStyleCache.delete(p.n);
       minimapOwnerRgbCache.delete(p.n);
-      minimapDirty = true;
+      world.minimapDirty = true;
     }
-    if (p.nm && nameById.get(p.n) !== p.nm) {
-      nameById.set(p.n, p.nm);
+    if (p.nm && world.nameById.get(p.n) !== p.nm) {
+      world.nameById.set(p.n, p.nm);
       nameChanged = true;
     }
   }
 
   if (nameChanged && clientState.chatMessages.length) renderChat();
 
-  headIndexByOwner.clear();
+  world.headIndexByOwner.clear();
   for (const p of s.players) {
-    headIndexByOwner.set(p.n, p.y * W + p.x);
+    world.headIndexByOwner.set(p.n, p.y * session.W + p.x);
   }
 
-  lastPacketAt = performance.now();
+  world.lastPacketAt = performance.now();
 
   if (clientState.lastStateAt != null) {
-    const dt = lastPacketAt - clientState.lastStateAt;
-    if (dt > 0) tickrate = lerp(tickrate || 0, 1000 / dt, 0.15);
+    const dt = world.lastPacketAt - clientState.lastStateAt;
+    if (dt > 0) world.tickrate = lerp(world.tickrate || 0, 1000 / dt, 0.15);
   }
-  clientState.lastStateAt = lastPacketAt;
+  clientState.lastStateAt = world.lastPacketAt;
 
   try {
     refreshOwnGeometry(false);
   } catch {}
 
-  const me = s.players?.find((p) => p.n === you);
-  if (me) {
-    const alive = !!me.a;
-    if (alive) {
-      const ordered = computeTopSorted(s.players);
-      const idx = ordered.findIndex((p) => p.n === you);
-      const cells = Number(me?.s) || 0;
-      const pct = mapCells ? (cells / mapCells) * 100 : 0;
-      const points = Number(me?.p) || 0;
-      const place = idx >= 0 ? `${idx + 1}/${ordered.length}` : '—';
-      lastYouStats = { cells, pct, points, place };
-    }
-    if (alive && !youAlive) {
-      youAlive = true;
-      lastDirSent = null;
-      hideOverlays();
-    } else if (!alive && youAlive) {
-      youAlive = false;
-      lastDirSent = null;
-      youStreak = 0;
-      // Драматический наезд камеры на голову в точке гибели — до того, как
-      // сервер уберёт игрока из состояния и координаты станут недоступны.
-      beginDeathZoom((Number(me.x) || 0) + 0.5, (Number(me.y) || 0) + 0.5);
-      // Момент смерти стоит увидеть: модалка мгновенно накрывала кадр, в
-      // котором игрока убили. Держим паузу, пока идёт hitstop + вспышка.
-      beginDeathSlowMo();
-    }
+  const mine = s.players?.find((p) => p.n === session.you);
+  if (!mine) return;
+
+  const alive = !!mine.a;
+  if (alive) {
+    const ordered = sortPlayersByScore(s.players);
+    const idx = ordered.findIndex((p) => p.n === session.you);
+    const cells = Number(mine?.s) || 0;
+    const pct = session.mapCells ? (cells / session.mapCells) * 100 : 0;
+    const points = Number(mine?.p) || 0;
+    const place = idx >= 0 ? `${idx + 1}/${ordered.length}` : '—';
+    me.lastStats = { cells, pct, points, place };
   }
 
-  return { lastRoi, gridOwner, trailOwner, gridFillAt, coolSeenAt, prevPlayers, currPlayers, minimapDirty, lastPacketAt, tickrate, lastYouStats, youAlive, lastDirSent, youStreak };
+  if (alive && !session.youAlive) {
+    session.youAlive = true;
+    session.lastDirSent = null;
+    hideOverlays();
+  } else if (!alive && session.youAlive) {
+    session.youAlive = false;
+    session.lastDirSent = null;
+    me.streak = 0;
+    /* Драматический наезд камеры на голову в точке гибели — до того, как
+       сервер уберёт игрока из состояния и координаты станут недоступны. */
+    beginDeathZoom((Number(mine.x) || 0) + 0.5, (Number(mine.y) || 0) + 0.5);
+    /* Момент смерти стоит увидеть: модалка мгновенно накрывала кадр, в
+       котором игрока убили. Держим паузу, пока идёт hitstop + вспышка. */
+    beginDeathSlowMo();
+  }
 }
 
-// Первое сообщение инициализации от сервера (размеры поля, начальная
-// косметика, id игрока и т.п.). ctx — явные зависимости, которые тело читало
-// через замыкание client.js. Поля, которые тело переприсваивает (не мутирует
-// на месте), возвращаются вместе.
+/* Первое сообщение инициализации от сервера (размеры поля, начальная
+   косметика, id игрока и т.п.). Всё, что тело переприсваивает, живёт в
+   client_store.js и правится на месте; в ctx остались только вызовы наружу. */
 export function onInit(msg, ctx) {
-  const { markJoinFunnelInit, rejoinPending, rejoinFinish, addToast, t, applyMatchPhase, resetClientForNewMatch, hideMatchOverlay, showMatchOverlay, renderMatchResults, updateMatchCountdown, setRoomsCreateOpen, updateRoomsCreateUi, hideMenuOverlay, hideOverlays, syncMenuOnboardingUi, obResetMatch, obAnnounceShop, colors, ownerFillStyleCache, minimapOwnerRgbCache, nameById, nameEnById, cosTerrByPlayer, cosDeathByPlayer, cosTitleByPlayer, botArchByPlayer, captureAnchorByOwner, coolDeadlineByOwner, minimap, mmCtx, storedName, wsSend, onCosmetics, renderTopHud, PHASE_FINAL } = ctx;
-  let { W, H, N, tickMs, lastEventsTick, lastEventsAt, you, mapCells, roomId, roomLimit, rejoinRoomId, userLeftRoom, matchSeq, matchEndTick, matchEnded, matchResetAt, matchPhaseBannerSeq, matchContinuePending, matchContinueTimeout, createRoomPending, selectedRoomId, started, gridOwner, trailOwner, minimapGridOwner, botIds, lastRoi, gridFillAt, coolSeenAt, minimapImage, youKills, youStreak, lastMatchResults } = ctx;
+  const {
+    markJoinFunnelInit,
+    rejoinFinish,
+    addToast,
+    t,
+    applyMatchPhase,
+    resetClientForNewMatch,
+    hideMatchOverlay,
+    showMatchOverlay,
+    renderMatchResults,
+    updateMatchCountdown,
+    setRoomsCreateOpen,
+    updateRoomsCreateUi,
+    hideMenuOverlay,
+    hideOverlays,
+    syncMenuOnboardingUi,
+    obResetMatch,
+    obAnnounceShop,
+    ownerFillStyleCache,
+    botArchByPlayer,
+    wsSend,
+    onCosmetics,
+    renderTopHud
+  } = ctx;
 
   markJoinFunnelInit();
-  W = msg.w;
-  H = msg.h;
-  N = W * H;
-  tickMs = msg.tickMs;
+  session.W = msg.w;
+  session.H = msg.h;
+  session.N = session.W * session.H;
+  session.tickMs = msg.tickMs;
   if (typeof msg?.tick === 'number' && Number.isFinite(msg.tick)) {
-    lastEventsTick = msg.tick;
-    lastEventsAt = Date.now();
+    match.lastEventsTick = msg.tick;
+    match.lastEventsAt = Date.now();
   }
-  you = Number(msg.you) || 0;
-  mapCells = msg.mapCells || N;
-  roomId = msg.room ?? null;
-  roomLimit = msg.roomLimit ?? null;
+  session.you = Number(msg.you) || 0;
+  session.mapCells = msg.mapCells || session.N;
+  session.roomId = msg.room ?? null;
+  session.roomLimit = msg.roomLimit ?? null;
 
-  // K7: вход в комнату состоялся — реконнект-цель обновлена, флаг «ушёл сам» снят.
-  rejoinRoomId = roomId;
-  userLeftRoom = false;
-  const wasRejoin = rejoinPending;
-  if (rejoinPending) {
+  // K7: вход в комнату состоялся — цель реконнекта обновлена, флаг «ушёл сам» снят.
+  session.rejoinRoomId = session.roomId;
+  session.userLeftRoom = false;
+  const wasRejoin = session.rejoinPending;
+  if (wasRejoin) {
     rejoinFinish();
     addToast('✅', t('net.rejoined'), null, null, { key: 'net_reconnect' });
   }
 
-  matchSeq = Number(msg?.matchSeq) || 0;
-  matchEndTick = Number(msg?.matchEnd) || 0;
-  matchEnded = !!msg?.matchEnded;
-  matchResetAt = Number(msg?.matchReset) || 0;
+  match.seq = Number(msg?.matchSeq) || 0;
+  match.endTick = Number(msg?.matchEnd) || 0;
+  match.ended = !!msg?.matchEnded;
+  match.resetAt = Number(msg?.matchReset) || 0;
   // C2: фаза приходит прямо в init — при входе посреди матча баннер не нужен.
-  matchPhaseBannerSeq = Number(msg?.phase) === PHASE_FINAL ? matchSeq : -1;
-  applyMatchPhase(msg?.phase, msg?.phaseUntil, false, matchSeq);
-  // updateRoomInfo() отсюда убран: он читает roomId/roomLimit из client.js
-  // через геттеры, а туда значения попадают только после возврата из этого
-  // обработчика — вызов здесь показывал прежнее состояние. Перерисовку
-  // делает сам client.js сразу после присваивания результата.
+  match.phaseBannerSeq = Number(msg?.phase) === PHASE_FINAL ? match.seq : -1;
+  applyMatchPhase(msg?.phase, msg?.phaseUntil, false, match.seq);
 
-  matchContinuePending = false;
-  if (matchContinueTimeout) {
-    clearTimeout(matchContinueTimeout);
-    matchContinueTimeout = 0;
+  match.continuePending = false;
+  if (match.continueTimeout) {
+    clearTimeout(match.continueTimeout);
+    match.continueTimeout = 0;
   }
-  if (matchEnded) {
+  if (match.ended) {
     if (msg?.matchResults) {
-      lastMatchResults = msg.matchResults;
-      renderMatchResults(lastMatchResults);
+      match.lastResults = msg.matchResults;
+      renderMatchResults(match.lastResults);
     }
     updateMatchCountdown();
     showMatchOverlay();
@@ -1267,17 +1324,17 @@ export function onInit(msg, ctx) {
     hideMatchOverlay();
   }
 
-  createRoomPending = false;
+  rooms.createPending = false;
   setRoomsCreateOpen(false);
   updateRoomsCreateUi();
-  selectedRoomId = null;
+  rooms.selectedId = null;
 
   hideMenuOverlay();
   hideOverlays();
 
-  started = true;
-  // F13: раньше подсказка гасилась прямо здесь, ещё до того как игрок её прочитал.
-  // Теперь её снимает первое реальное действие (см. setDir).
+  session.started = true;
+  /* F13: раньше подсказка гасилась прямо здесь, ещё до того как игрок её
+     прочитал. Теперь её снимает первое реальное действие (см. setDir). */
   syncMenuOnboardingUi();
   // C9: реконнект не считается новым входом в матч.
   obResetMatch(!wasRejoin);
@@ -1286,54 +1343,48 @@ export function onInit(msg, ctx) {
     document.body.classList.add('inGame');
   } catch {}
 
-  gridOwner = new Uint16Array(N);
-  trailOwner = new Uint16Array(N);
+  world.gridOwner = new Uint16Array(session.N);
+  world.trailOwner = new Uint16Array(session.N);
+  world.minimapGridOwner = new Uint16Array(session.N);
+  world.gridFillAt = new Float32Array(session.N);
+  world.coolSeenAt = new Float32Array(session.N);
 
-  minimapGridOwner = new Uint16Array(N);
-
-  // K2: вход в комнату — новый набор номеров игроков. Всё, что кэшируется по
-  // номеру, обязано умереть здесь, иначе чужие цвета и «ботовость» приезжают
-  // из прошлой комнаты.
-  colors.clear();
+  /* K2: вход в комнату — новый набор номеров игроков. Всё, что кэшируется по
+     номеру, обязано умереть здесь, иначе чужие цвета и «ботовость» приезжают
+     из прошлой комнаты. C7: имена и косметика чистятся именно тут, а не на
+     границе матча — см. комментарий в resetClientForNewMatch. */
+  world.colors.clear();
+  world.botIds.clear();
+  world.nameById.clear();
+  world.nameEnById.clear();
+  world.captureAnchorByOwner.clear();
+  world.coolDeadlineByOwner.clear();
+  world.lastRoi = null;
   ownerFillStyleCache.clear();
   minimapOwnerRgbCache.clear();
-  botIds = new Set();
-  lastRoi = null;
-  // C7: то же самое при входе в комнату — см. комментарий в onMatchStart.
-  nameById.clear();
-  nameEnById.clear();
-  cosTerrByPlayer.clear();
-  cosDeathByPlayer.clear();
-  cosTitleByPlayer.clear();
+  cos.terrByPlayer.clear();
+  cos.deathByPlayer.clear();
+  cos.titleByPlayer.clear();
   botArchByPlayer.clear();
 
-  gridFillAt = new Float32Array(N);
-  coolSeenAt = new Float32Array(N);
-  captureAnchorByOwner.clear();
-  coolDeadlineByOwner.clear();
-
-  minimap.width = W;
-  minimap.height = H;
-  minimapImage = mmCtx.createImageData(W, H);
-  // minimap is updated by server-sent chunk updates
-
+  const mm = dom.minimap;
+  const mmCtx = mm.getContext('2d');
+  mm.width = session.W;
+  mm.height = session.H;
+  // Саму карту наполняют chunk-сообщения сервера.
+  world.minimapImage = mmCtx.createImageData(session.W, session.H);
   mmCtx.imageSmoothingEnabled = true;
   mmCtx.imageSmoothingQuality = 'high';
 
-  if (storedName) {
-    wsSend('setName', { name: storedName });
-  }
-
-  // Spawn in the current room (no rejoin). Without this the player stays dead and cannot move.
+  if (session.name) wsSend('setName', { name: session.name });
+  /* Спавн в текущей комнате (без rejoin). Без этого игрок остаётся мёртвым и
+     не может двигаться. */
   wsSend('respawn', {});
 
-  youKills = 0;
-  youStreak = 0;
+  me.kills = 0;
+  me.streak = 0;
 
-  if (msg?.cosmetics) {
-    onCosmetics(msg.cosmetics);
-  }
+  if (msg?.cosmetics) onCosmetics(msg.cosmetics);
   renderTopHud();
-
-  return { W, H, N, tickMs, lastEventsTick, lastEventsAt, you, mapCells, roomId, roomLimit, rejoinRoomId, userLeftRoom, matchSeq, matchEndTick, matchEnded, matchResetAt, matchPhaseBannerSeq, matchContinuePending, matchContinueTimeout, createRoomPending, selectedRoomId, started, gridOwner, trailOwner, minimapGridOwner, botIds, lastRoi, gridFillAt, coolSeenAt, minimapImage, youKills, youStreak, lastMatchResults };
 }
+

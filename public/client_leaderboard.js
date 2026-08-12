@@ -94,7 +94,7 @@ function createLeaderboardRow(p) {
 /* То же для DOM-пути таблицы лидеров, которая обновляется каждый кадр:
    пересобираем ячейку только при смене титула или ника.
    deps: { botArchInfo, botArchBadge, cosTitleName, lang } */
-export function setNameCellWithTitle(td, titleId, name, playerNum, deps) {
+function setNameCellWithTitle(td, titleId, name, playerNum, deps) {
   if (!td) return;
   const { botArchInfo, botArchBadge, cosTitleName, lang } = deps;
   const tid = Math.max(0, Number(titleId) || 0);

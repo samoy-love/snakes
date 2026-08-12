@@ -10,6 +10,7 @@
    вызовы уходят в возвращённый объект. */
 
 import { clientState, pushChatMessage, resetChatMessages } from './client_state.js';
+import { KEYS, storageGetJson, storageSetJson } from './client_storage.js';
 
 export function createChatUi(deps) {
   const {
@@ -118,7 +119,6 @@ export function createChatUi(deps) {
 
   // --- Эмодзи-панель ---
 
-  const RECENT_KEY = 'recentEmojis';
   let recentEmojis = [];
 
   function getEmojiCode(e) {
@@ -127,21 +127,13 @@ export function createChatUi(deps) {
   }
 
   function loadRecentEmojis() {
-    try {
-      const v = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
-      if (Array.isArray(v)) return v.filter((x) => typeof x === 'string').slice(0, 24);
-    } catch {
-      // ignore
-    }
+    const v = storageGetJson(KEYS.recentEmojis);
+    if (Array.isArray(v)) return v.filter((x) => typeof x === 'string').slice(0, 24);
     return [];
   }
 
   function saveRecentEmojis() {
-    try {
-      localStorage.setItem(RECENT_KEY, JSON.stringify(recentEmojis.slice(0, 24)));
-    } catch {
-      // ignore
-    }
+    storageSetJson(KEYS.recentEmojis, recentEmojis.slice(0, 24));
   }
 
   function pushRecentEmoji(e) {

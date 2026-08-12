@@ -206,7 +206,21 @@ function declaratorNames(fragment) {
 export function extractDeclared(maskedSource) {
   const declared = new Set();
 
-  const declRe = new RegExp(`\\b(?:const|let|var)\\s+([^;\\n]+)`, 'g');
+  /* Деструктуризация может занимать несколько строк — так её и форматирует
+     prettier, когда имён больше пяти:
+
+       const {
+         addToast,
+         renderChat
+       } = ctx;
+
+     Первый вариант этого выражения обрывался по `\n`, поэтому из такого
+     объявления в набор попадало только первое имя, а остальные считались
+     необъявленными. Проверка при этом падала на совершенно корректном коде и
+     чинилась переносом деструктуризации в одну длинную строку — то есть
+     заставляла подгонять исходник под ограничение теста. Теперь фигурные
+     скобки разбираются целиком. */
+  const declRe = new RegExp(`\\b(?:const|let|var)\\s+(\\{[\\s\\S]*?\\}|\\[[\\s\\S]*?\\]|[^;\\n]+)`, 'g');
   let m;
   while ((m = declRe.exec(maskedSource))) {
     for (const name of declaratorNames(m[1])) declared.add(name);

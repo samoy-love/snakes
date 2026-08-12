@@ -16,9 +16,11 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CLIENT_JS = readFileSync(join(HERE, '../public/client.js'), 'utf8');
+// Разбор пакетов (и вместе с ним вызовы cosClampId) переехал из client.js
+// в client_net_bind.js — сторож едет за кодом, класс регрессии тот же.
+const CLIENT_JS = readFileSync(join(HERE, '../public/client_net_bind.js'), 'utf8');
 
-test('client.js не переписывает формулу cosClampId руками', () => {
+test('client_net_bind.js не переписывает формулу cosClampId руками', () => {
   // Единственное легитимное совпадение — темп спавна частиц по dt (не id
   // косметики), диапазон 0..7 у него общий с cosClampId чисто случайно.
   const manualClamp = /Math\.max\(0,\s*Math\.min\(7,\s*([^)]*)/g;
@@ -33,6 +35,6 @@ test('client.js не переписывает формулу cosClampId рука
   );
 });
 
-test('client.js импортирует cosClampId', () => {
+test('client_net_bind.js импортирует cosClampId', () => {
   assert.match(CLIENT_JS, /\bcosClampId\b[\s\S]*from ['"]\.\/client_cos_draw\.js['"]/);
 });

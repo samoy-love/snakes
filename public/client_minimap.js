@@ -23,23 +23,23 @@ const MINIMAP_TOP1_SWITCH_COOLDOWN_MS = 4500;
 export const MINIMAP_ZONE_ICON_TOP1 = '👑';
 export const MINIMAP_ZONE_ICON_BOUNTY = '🎯';
 
-export function minimapZoneRadiusCells(W, H) {
+function minimapZoneRadiusCells(W, H) {
   const base = Math.round(Math.min(W, H) * 0.085);
   return clampInt(base, 28, 90);
 }
 
-export function rndDisk(r) {
+function rndDisk(r) {
   const a = Math.random() * Math.PI * 2;
   const rr = Math.sqrt(Math.random()) * r;
   return { x: Math.cos(a) * rr, y: Math.sin(a) * rr };
 }
 
-export function scheduleNextZoneUpdate(now) {
+function scheduleNextZoneUpdate(now) {
   const span = MINIMAP_ZONE_REFRESH_MAX_MS - MINIMAP_ZONE_REFRESH_MIN_MS;
   return now + MINIMAP_ZONE_REFRESH_MIN_MS + Math.random() * Math.max(0, span);
 }
 
-export function ensureZoneState(prev, pid, px, py, now, W, H) {
+function ensureZoneState(prev, pid, px, py, now, W, H) {
   const r = minimapZoneRadiusCells(W, H);
 
   let needUpdate = !prev || prev.pid !== pid || prev.r !== r;
@@ -94,7 +94,7 @@ function drawZoneCircle(mmCtx, W, H, cx, cy, r, stroke, fill, icon) {
  * clientState мутируется на месте (как и остальной код клиента, см.
  * client_state.js) — там же живут пины между кадрами.
  */
-export function drawMinimapZones(mmCtx, clientState, bountyTarget, W, H) {
+function drawMinimapZones(mmCtx, clientState, bountyTarget, W, H) {
   if (!clientState.lastState?.players?.length) return;
   const now = performance.now();
 
@@ -216,8 +216,8 @@ export function setMinimapPixel(i, { minimapImage, minimapGridOwner, you, colors
  * рамка текущего обзора, зоны интереса и своя точка поверх всего.
  *
  * Примитивные флаги dirty/hadChunkUpdate передаются значением и возвращаются
- * в результате — client.js обязан переприсвоить их своим module-level let,
- * т.к. по ссылке примитив не мутируется.
+ * в результате — вызывающий (client_minimap_ui.js) обязан переписать ими свои
+ * поля стора, т.к. по ссылке примитив не мутируется.
  */
 export function drawMinimap(mmCtx, deps) {
   const {

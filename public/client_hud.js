@@ -1,29 +1,80 @@
-/* Верхний HUD и правая колонка (мета-панель и таблица команды). Вынесено из
-   client.js — вызовы и порядок выполнения не менялись, только источник
-   импорта. Как и client_shop_ui.js/client_rooms_ui.js, функции принимают
-   deps — геттеры для переменных состояния client.js и ссылки на DOM/хелперы.
-   Это не меняет, КОГДА что вызывается, только ОТКУДА берётся код функции. */
+/* Верхний HUD и правая колонка (мета-панель и таблица команды).
+
+   Раньше все три функции принимали deps — один объект на шестьдесят ключей,
+   который client.js пересобирал перед каждым вызовом, то есть до 180 раз в
+   секунду в кадре отрисовки. Ключи были копиями состояния, и любое
+   переименование поля в client.js молча превращало сокращённую запись
+   `{ youKills }` в `{ kills: me.kills }` — модуль-потребитель продолжал
+   доставать youKills и получал undefined, а кусок интерфейса просто пропадал.
+
+   Теперь модуль импортирует dom и группы стора напрямую и читает те же самые
+   поля, что и все остальные. Передавать нечего, ctx нет.
+
+   Поля-подписи renderTopHudImpl._placeSig и renderMetaHudImpl._sig остаются
+   на самих функциях: их гасит resetClientForNewMatch вместе с очисткой DOM. */
 
 import { cosClampId } from './client_cos_draw.js';
 import { escapeHtml, setSafeHtml } from './client_util.js';
+import { dom } from './client_dom.js';
+import { clientState } from './client_state.js';
+import {
+  PHASE_CONFLICT,
+  PHASE_FINAL,
+  cos,
+  dailySlots,
+  match,
+  me,
+  session,
+  world
+} from './client_store.js';
+import { infoPack, lang, t } from './client_i18n_rt.js';
+import { obSecondMatchPlus, obTickImpl, obUnlocked } from './client_onboarding.js';
+import { addToast } from './client_toasts.js';
+import { animateNumber, renderComboHud } from './client_fx_rt.js';
+import { sortPlayersByScore } from './client_stats.js';
+import { displayNameOf, playerTitleHtml } from './client_identity.js';
+import {
+  contractLabel,
+  dailyLabel,
+  formatTickRemain,
+  infoName,
+  powerupLabel,
+  tickRemainSeconds
+} from './client_labels.js';
+import { syncRightEmptyStates } from './client_hud_panels.js';
 
 // C10: getElementById зваться каждый кадр не должен — держим ссылку.
 let topHudPlaceElCache = null;
 let topHudPhaseElCache = null;
 
+function phaseKey(ph) {
+  return ph === PHASE_FINAL ? 'final' : ph === PHASE_CONFLICT ? 'conflict' : 'expansion';
+}
+
+export function phaseLabel(ph) {
+  return t(`phase.${phaseKey(ph)}`);
+}
+
+export function phaseDesc(ph) {
+  return t(`phase.${phaseKey(ph)}_desc`);
+}
+
+export function phaseIcon(ph) {
+  return ph === PHASE_FINAL ? '🔥' : ph === PHASE_CONFLICT ? '⚔' : '🌱';
+}
+
 // I5: отдельный слот баунти в верхнем HUD. Разметку добавляет вёрсточный агент
 // (#topHudBounty); пока её нет — создаём сами, рядом с киллами.
-function ensureTopHudBountyEl(deps) {
-  const { topHudKillsEl, topHudTimeEl } = deps;
+function ensureTopHudBountyEl() {
   let el = document.getElementById('topHudBounty');
   if (el) return el;
-  const host = topHudKillsEl?.parentElement || topHudTimeEl?.parentElement || null;
+  const host = dom.topHudKills?.parentElement || dom.topHudTime?.parentElement || null;
   if (!host) return null;
   try {
     el = document.createElement('span');
     el.id = 'topHudBounty';
     el.className = 'topHudBounty hidden';
-    host.insertBefore(el, topHudKillsEl || null);
+    host.insertBefore(el, dom.topHudKills || null);
   } catch {
     return null;
   }
@@ -34,12 +85,11 @@ function ensureTopHudBountyEl(deps) {
    ранжирует, и её в HUD не было вовсе (показывалась «Зона %», по которой не
    ранжируют). Слот #topHudPlace ждём от вёрсточного агента; пока его нет —
    создаём сами, слева в правой группе верхнего HUD. */
-function ensureTopHudPlaceEl(deps) {
-  const { topHudTimeEl, topHudKillsEl } = deps;
+function ensureTopHudPlaceEl() {
   if (topHudPlaceElCache && topHudPlaceElCache.isConnected) return topHudPlaceElCache;
   let el = document.getElementById('topHudPlace');
   if (el) return (topHudPlaceElCache = el);
-  const host = topHudTimeEl?.parentElement || topHudKillsEl?.parentElement || null;
+  const host = dom.topHudTime?.parentElement || dom.topHudKills?.parentElement || null;
   if (!host) return null;
   try {
     el = document.createElement('span');
@@ -56,19 +106,18 @@ function ensureTopHudPlaceEl(deps) {
 
 /* C2: индикатор фазы матча — рядом с таймером. Слот #topHudPhase ждём от
    вёрсточного агента; пока его нет — создаём сами и переиспользуем .topHudChip. */
-function ensureTopHudPhaseEl(deps) {
-  const { topHudTimeEl, topHudKillsEl } = deps;
+function ensureTopHudPhaseEl() {
   if (topHudPhaseElCache && topHudPhaseElCache.isConnected) return topHudPhaseElCache;
   let el = document.getElementById('topHudPhase');
   if (el) return (topHudPhaseElCache = el);
-  const host = topHudTimeEl?.parentElement || topHudKillsEl?.parentElement || null;
+  const host = dom.topHudTime?.parentElement || dom.topHudKills?.parentElement || null;
   if (!host) return null;
   try {
     el = document.createElement('span');
     el.id = 'topHudPhase';
     el.className = 'topHudPhase topHudChip';
-    if (topHudTimeEl && topHudTimeEl.parentElement === host) {
-      host.insertBefore(el, topHudTimeEl.nextSibling);
+    if (dom.topHudTime && dom.topHudTime.parentElement === host) {
+      host.insertBefore(el, dom.topHudTime.nextSibling);
     } else {
       host.appendChild(el);
     }
@@ -78,55 +127,10 @@ function ensureTopHudPhaseEl(deps) {
   return (topHudPhaseElCache = el);
 }
 
-export function renderTopHudImpl(deps) {
-  const {
-    topHudEl,
-    started,
-    clientState,
-    you,
-    mapCells,
-    topHudCellsEl,
-    topHudPctEl,
-    topHudKillsEl,
-    topHudTimeEl,
-    topHudContractEl,
-    topHudBarFillEl,
-    cosmeticsBtn,
-    lastPacketAt,
-    lang,
-    matchPhase,
-    matchEnded,
-    matchFinalMult,
-    matchPhaseUntil,
-    matchEndTick,
-    bountyTarget,
-    bountyUntil,
-    youKills,
-    youContractType,
-    youContractGoal,
-    youContractProgress,
-    youContractUntil,
-    PHASE_FINAL,
-    PHASE_CONFLICT,
-    obTick,
-    obUnlocked,
-    obSecondMatchPlus,
-    animateNumber,
-    computeTopSorted,
-    t,
-    phaseIcon,
-    phaseLabel,
-    phaseDesc,
-    tickRemainSeconds,
-    formatTickRemain,
-    renderComboHud,
-    displayNameOf,
-    contractLabel,
-    infoPack
-  } = deps;
-
+export function renderTopHudImpl() {
+  const topHudEl = dom.topHud;
   if (!topHudEl) return;
-  if (!started || !clientState.lastState) {
+  if (!session.started || !clientState.lastState) {
     topHudEl.setAttribute('aria-hidden', 'true');
     return;
   }
@@ -134,47 +138,49 @@ export function renderTopHudImpl(deps) {
   topHudEl.setAttribute('aria-hidden', 'false');
 
   // F17: постепенное раскрытие мета-систем в первом матче.
-  obTick();
+  obTickImpl({ started: session.started, addToast, t });
   const obKills = obUnlocked('bounty');
   const obContract = obUnlocked('contract');
   // Магазин — со второго матча: в первом тратить ещё нечего и незачем.
-  if (cosmeticsBtn) cosmeticsBtn.classList.toggle('hidden', !obSecondMatchPlus());
+  if (dom.cosmeticsBtn) dom.cosmeticsBtn.classList.toggle('hidden', !obSecondMatchPlus());
 
-  const me = clientState.lastState.players?.find((p) => p.n === you);
-  const cells = Number(me?.s) || 0;
+  const you = session.you;
+  const mapCells = session.mapCells;
+  const mine = clientState.lastState.players?.find((p) => p.n === you);
+  const cells = Number(mine?.s) || 0;
   const pct = mapCells ? (cells / mapCells) * 100 : 0;
 
   // J6: счётчик клеток догоняется анимацией, а не прыгает.
-  if (topHudCellsEl) {
-    const prevCells = Number(topHudCellsEl.dataset.value);
+  if (dom.topHudCells) {
+    const prevCells = Number(dom.topHudCells.dataset.value);
     if (!Number.isFinite(prevCells)) {
-      topHudCellsEl.textContent = String(cells);
+      dom.topHudCells.textContent = String(cells);
     } else if (prevCells !== cells) {
-      animateNumber(topHudCellsEl, prevCells, cells, 420);
+      animateNumber(dom.topHudCells, prevCells, cells, 420);
     }
-    topHudCellsEl.dataset.value = String(cells);
+    dom.topHudCells.dataset.value = String(cells);
   }
-  if (topHudPctEl) {
+  if (dom.topHudPct) {
     // C10: запись в DOM только при изменении строки. Сверяемся с самим узлом,
     // а не с внешним кэшем: тот протух бы, если разметку пересоберут.
     const pctTxt = `${pct.toFixed(1)}%`;
-    if (topHudPctEl.textContent !== pctTxt) topHudPctEl.textContent = pctTxt;
+    if (dom.topHudPct.textContent !== pctTxt) dom.topHudPct.textContent = pctTxt;
   }
 
   // K3: место и очки — прямо в верхнем HUD.
   // C10: computeTopSorted() копировала и сортировала массив каждый кадр, а
   // textContent писался безусловно. Пересчёт — только когда меняется вход.
   {
-    const placeEl = ensureTopHudPlaceEl(deps);
+    const placeEl = ensureTopHudPlaceEl();
     if (placeEl) {
       // points в подписи остаётся, хотя в текст больше не попадает: их
       // изменение — признак того, что мог поменяться и порядок в таблице,
       // то есть само место. Это триггер пересчёта, а не выводимое значение.
-      const points = Number(me?.p) || 0;
-      const sig = `${lastPacketAt}|${points}|${lang}`;
+      const points = Number(mine?.p) || 0;
+      const sig = `${world.lastPacketAt}|${points}|${lang()}`;
       if (renderTopHudImpl._placeSig !== sig) {
         renderTopHudImpl._placeSig = sig;
-        const ordered = computeTopSorted(clientState.lastState.players);
+        const ordered = sortPlayersByScore(clientState.lastState.players);
         const idx = ordered.findIndex((p) => p.n === you);
         /* Очки из полосы убраны: место уже ранжирует игрока, а сами очки
            стоят колонкой в правой таблице (и в итогах матча). В полосе
@@ -195,19 +201,19 @@ export function renderTopHudImpl(deps) {
   /* C2: фаза матча рядом с таймером. Раньше игрок не видел арку вовсе —
      включая удвоение очков за захват в последней фазе. */
   {
-    const phaseEl = ensureTopHudPhaseEl(deps);
+    const phaseEl = ensureTopHudPhaseEl();
     if (phaseEl) {
-      const isFinal = matchPhase === PHASE_FINAL;
-      let txt = matchEnded
+      const isFinal = match.phase === PHASE_FINAL;
+      let txt = match.ended
         ? ''
-        : `${phaseIcon(matchPhase)} ${phaseLabel(matchPhase)}${isFinal ? ` ×${matchFinalMult}` : ''}`;
+        : `${phaseIcon(match.phase)} ${phaseLabel(match.phase)}${isFinal ? ` ×${match.finalMult}` : ''}`;
       // Последние 20 секунд перед финалом — обратный отсчёт до ×N, чтобы игрок
       // успел придержать крупный захват.
-      if (txt && !isFinal && matchPhase === PHASE_CONFLICT && matchPhaseUntil) {
+      if (txt && !isFinal && match.phase === PHASE_CONFLICT && match.phaseUntil) {
         // tickRemainSeconds отдаёт дробное число: без округления в чипе
         // висело бы «Final in 12.698999999999979», да ещё и с записью в DOM
         // на каждом кадре.
-        const raw = tickRemainSeconds(matchPhaseUntil);
+        const raw = tickRemainSeconds(match.phaseUntil);
         const sec = raw == null ? null : Math.max(0, Math.ceil(raw));
         if (sec != null && sec <= 20) {
           txt = `🔥 ${t('phase.final_in')} ${sec}`;
@@ -218,50 +224,50 @@ export function renderTopHudImpl(deps) {
         phaseEl.classList.toggle('hidden', !txt);
         phaseEl.classList.toggle('isFinal', isFinal);
         try {
-          phaseEl.title = `${t('phase.label')}: ${phaseDesc(matchPhase)}`;
+          phaseEl.title = `${t('phase.label')}: ${phaseDesc(match.phase)}`;
         } catch {}
       }
     }
   }
 
-  if (topHudKillsEl) {
-    const killsTxt = obKills ? `⚔ ${youKills}` : '';
-    if (topHudKillsEl.textContent !== killsTxt) {
-      topHudKillsEl.textContent = killsTxt;
-      topHudKillsEl.classList.toggle('hidden', !obKills);
+  if (dom.topHudKills) {
+    const killsTxt = obKills ? `⚔ ${me.kills}` : '';
+    if (dom.topHudKills.textContent !== killsTxt) {
+      dom.topHudKills.textContent = killsTxt;
+      dom.topHudKills.classList.toggle('hidden', !obKills);
     }
   }
   if (obKills) renderComboHud();
 
   // I5: таймер матча — отдельный крупный элемент. Только время, без «•»-склейки,
   // иначе самое важное («сколько до конца») обрезается по ellipsis.
-  if (topHudTimeEl) {
-    const rem = matchEndTick ? formatTickRemain(matchEndTick) : '';
-    if (topHudTimeEl.textContent !== rem) {
-      topHudTimeEl.textContent = rem || '';
-      const sec = matchEndTick ? tickRemainSeconds(matchEndTick) : null;
-      topHudTimeEl.classList.toggle('isUrgent', sec != null && sec <= 30);
-      topHudTimeEl.classList.toggle('isCritical', sec != null && sec <= 15);
-      topHudTimeEl.classList.toggle('hidden', !rem);
+  if (dom.topHudTime) {
+    const rem = match.endTick ? formatTickRemain(match.endTick) : '';
+    if (dom.topHudTime.textContent !== rem) {
+      dom.topHudTime.textContent = rem || '';
+      const sec = match.endTick ? tickRemainSeconds(match.endTick) : null;
+      dom.topHudTime.classList.toggle('isUrgent', sec != null && sec <= 30);
+      dom.topHudTime.classList.toggle('isCritical', sec != null && sec <= 15);
+      dom.topHudTime.classList.toggle('hidden', !rem);
       try {
-        topHudTimeEl.title = t('hud.time_left');
+        dom.topHudTime.title = t('hud.time_left');
       } catch {}
     }
   }
 
   // I5: баунти — отдельный элемент, а не часть таймерной строки.
-  const bountyEl = ensureTopHudBountyEl(deps);
+  const bountyEl = ensureTopHudBountyEl();
   if (bountyEl) {
-    if (bountyTarget && obKills) {
-      const bn = displayNameOf(bountyTarget);
-      const rem = formatTickRemain(bountyUntil);
+    if (match.bountyTarget && obKills) {
+      const bn = displayNameOf(match.bountyTarget);
+      const rem = formatTickRemain(match.bountyUntil);
       /* C7: строка писалась в DOM на КАЖДОМ кадре, хотя меняется раз в секунду
          (обратный отсчёт). Пишем только при изменении — так же, как соседние
          элементы верхнего HUD. */
       const bt = rem ? `🎯 ${bn} (${rem})` : `🎯 ${bn}`;
       if (bountyEl.textContent !== bt) bountyEl.textContent = bt;
       bountyEl.classList.remove('hidden');
-      bountyEl.classList.toggle('isMe', bountyTarget === you);
+      bountyEl.classList.toggle('isMe', match.bountyTarget === you);
     } else {
       if (bountyEl.textContent !== '') bountyEl.textContent = '';
       bountyEl.classList.add('hidden');
@@ -274,13 +280,13 @@ export function renderTopHudImpl(deps) {
      играть»), а верхняя полоса оставлена под то, что действительно меняется:
      место, зона, время, фаза, киллы и контракт. */
   const ensureContractParts = () => {
-    if (!topHudContractEl) return { chip: null };
-    let chip = topHudContractEl.querySelector('.topHudChip');
+    if (!dom.topHudContract) return { chip: null };
+    let chip = dom.topHudContract.querySelector('.topHudChip');
     if (!chip) {
-      topHudContractEl.replaceChildren();
+      dom.topHudContract.replaceChildren();
       chip = document.createElement('span');
       chip.className = 'topHudChip hidden';
-      topHudContractEl.appendChild(chip);
+      dom.topHudContract.appendChild(chip);
     }
     return { chip };
   };
@@ -288,11 +294,11 @@ export function renderTopHudImpl(deps) {
   const { chip } = ensureContractParts();
 
   if (chip) {
-    if (youContractType && obContract) {
-      const cn = contractLabel(youContractType) || infoPack().labels.contract;
-      const goal = Number(youContractGoal) || 0;
-      const prog = Number(youContractProgress) || 0;
-      const rem = formatTickRemain(youContractUntil);
+    if (me.contractType && obContract) {
+      const cn = contractLabel(me.contractType) || infoPack().labels.contract;
+      const goal = Number(me.contractGoal) || 0;
+      const prog = Number(me.contractProgress) || 0;
+      const rem = formatTickRemain(me.contractUntil);
       // C7: то же самое — раньше безусловная запись на каждом кадре.
       const chipTxt = `📜 ${cn} ${prog}/${goal}${rem ? ` (${rem})` : ''}`;
       if (chip.textContent !== chipTxt) chip.textContent = chipTxt;
@@ -303,60 +309,22 @@ export function renderTopHudImpl(deps) {
     }
   }
 
-  if (topHudBarFillEl) {
+  if (dom.topHudBarFill) {
     const p = mapCells ? Math.max(0, Math.min(1, cells / mapCells)) : 0;
     // C7: присваивание в style пересчитывает стиль элемента даже когда значение
     // не изменилось, а меняется оно только при смене числа клеток.
     const wTxt = `${(p * 100).toFixed(1)}%`;
-    if (topHudBarFillEl.style.width !== wTxt) topHudBarFillEl.style.width = wTxt;
+    if (dom.topHudBarFill.style.width !== wTxt) dom.topHudBarFill.style.width = wTxt;
   }
 }
 
-export function renderMetaHudImpl(deps) {
-  const {
-    metaHudEl,
-    clientState,
-    you,
-    mapCells,
-    youStreak,
-    youShield,
-    youSpeedUntilTick,
-    lastEventsTick,
-    youSpeedType,
-    youStyle,
-    youDailies,
-    t,
-    obUnlocked,
-    obSecondMatchPlus,
-    infoName,
-    infoPack,
-    powerupLabel,
-    formatTickRemain,
-    dailySlots,
-    dailyLabel,
-    syncRightEmptyStates
-  } = deps;
-
+export function renderMetaHudImpl() {
+  const metaHudEl = dom.metaHud;
   if (!metaHudEl) return;
   const addRow = (rows, label, value, urgent) => {
     const v = String(value ?? '').trim();
     if (!v) return;
     rows.push({ label, value: v, urgent: !!urgent });
-  };
-
-  const addProgressRow = (rows, label, p, leftText, rightText, urgent) => {
-    const pct = Number(p);
-    if (!Number.isFinite(pct)) return;
-    const lt = String(leftText || '').trim();
-    const rt = String(rightText || '').trim();
-    const vv = lt && rt ? `${lt} • ${rt}` : lt || rt;
-    rows.push({
-      label,
-      value: vv,
-      urgent: !!urgent,
-      progress: Math.max(0, Math.min(1, pct / 100)),
-      progressRight: vv,
-    });
   };
 
   const buildSection = (title, rows, titleHint) => {
@@ -387,10 +355,6 @@ export function renderMetaHudImpl(deps) {
     return sec;
   };
 
-  const me = clientState.lastState?.players?.find?.((p) => p.n === you) || null;
-  const cells = Number(me?.s) || 0;
-  const pct = mapCells ? (cells / mapCells) * 100 : 0;
-
   // F17: в первом матче мета-системы открываются по одной (см. OB_STAGES).
   const obBonus = obUnlocked('bonus');
   const obKills = obUnlocked('bounty');
@@ -405,12 +369,12 @@ export function renderMetaHudImpl(deps) {
   const fightRows = [];
   // «Киллы» живут в #topHudKills. Здесь остаётся только серия: её в верхней
   // полосе нет, а она объясняет, откуда взялся множитель очков.
-  if (obKills && youStreak >= 2) addRow(fightRows, t('meta.streak'), `x${youStreak}`);
+  if (obKills && me.streak >= 2) addRow(fightRows, t('meta.streak'), `x${me.streak}`);
   const buffs = [];
-  if (youShield && obBonus) buffs.push(infoName(infoPack().powerups, 1, powerupLabel(1)));
-  if (obBonus && youSpeedUntilTick && lastEventsTick && youSpeedUntilTick > lastEventsTick) {
-    const rem = formatTickRemain(youSpeedUntilTick);
-    const tpe = youSpeedType === 4 ? 4 : 2;
+  if (me.shield && obBonus) buffs.push(infoName(infoPack().powerups, 1, powerupLabel(1)));
+  if (obBonus && me.speedUntilTick && match.lastEventsTick && me.speedUntilTick > match.lastEventsTick) {
+    const rem = formatTickRemain(me.speedUntilTick);
+    const tpe = me.speedType === 4 ? 4 : 2;
     const dash = infoName(infoPack().powerups, tpe, powerupLabel(tpe));
     buffs.push(rem ? `${dash} (${rem})` : dash);
   }
@@ -427,14 +391,14 @@ export function renderMetaHudImpl(deps) {
      для того, что в строку не помещается. */
   const mainRows = [];
   // Стиль как валюта имеет смысл только вместе с контрактом, который его даёт.
-  if (youStyle && obUnlocked('contract')) addRow(mainRows, infoPack().labels.style, String(youStyle));
+  if (cos.style && obUnlocked('contract')) addRow(mainRows, infoPack().labels.style, String(cos.style));
 
   // Ежедневки — со второго матча: в первом они только добавляют шума.
   const dailyRows = [];
   if (obDaily) {
     // C7: все слоты, сколько бы их ни прислал сервер.
     for (const s of dailySlots()) {
-      const it = youDailies.get(s);
+      const it = me.dailies.get(s);
       if (!it || !it.type) continue;
       addRow(dailyRows, dailyLabel(it.type), `${it.prog}/${it.goal}`);
     }
@@ -509,29 +473,19 @@ export function renderMetaHudImpl(deps) {
   } catch {}
 }
 
-export function renderTeamHudImpl(deps) {
-  const {
-    teamHudEl,
-    started,
-    clientState,
-    you,
-    mapCells,
-    t,
-    computeTopSorted,
-    cosTitleByPlayer,
-    playerTitleHtml,
-    syncRightEmptyStates
-  } = deps;
-
+export function renderTeamHudImpl() {
+  const teamHudEl = dom.teamHud;
   if (!teamHudEl) return;
-  if (!started || !clientState.lastState) {
+  if (!session.started || !clientState.lastState) {
     teamHudEl.textContent = '';
     try {
       syncRightEmptyStates();
     } catch {}
     return;
   }
-  const ordered = computeTopSorted(clientState.lastState.players);
+  const you = session.you;
+  const mapCells = session.mapCells;
+  const ordered = sortPlayersByScore(clientState.lastState.players);
   // cells/pct/place отсюда убраны вместе со строками «Место» и «Очки»:
   // ровно эти числа стоят в #topHudPlace, который виден всегда.
   const small = window.innerWidth <= 720;
@@ -540,7 +494,7 @@ export function renderTeamHudImpl(deps) {
 
   const rows = topN
     .map((p, i) => {
-      const pid = String(p.n);
+      const pid = escapeHtml(String(p.n));
       const nm = p.nm || String(p.n);
       const isMe = p.n === you;
       const pp = mapCells ? ((Number(p.s) || 0) / mapCells) * 100 : 0;
@@ -549,7 +503,7 @@ export function renderTeamHudImpl(deps) {
       return `
         <tr class="${isMe ? 'me' : ''} ${frClass}" data-pid="${pid}">
           <td class="num">${i + 1}</td>
-          <td class="name">${playerTitleHtml(cosTitleByPlayer.get(p.n) || 0)}${escapeHtml(nm)}</td>
+          <td class="name">${playerTitleHtml(cos.titleByPlayer.get(p.n) || 0)}${escapeHtml(nm)}</td>
           <td class="num">${Number(p.p) || 0}</td>
           <td class="num">${pp.toFixed(1)}%</td>
         </tr>
@@ -583,3 +537,10 @@ export function renderTeamHudImpl(deps) {
   `
   );
 }
+
+/* Метки последней перерисовки таблицы команды: их читают троттлинги в
+   client_render.js (renderTeamHud._at) и на экране смерти
+   (renderTeamHudState._u). Раньше нули проставлял client.js — начальное
+   значение принадлежит самой функции. */
+renderTeamHudImpl._u = 0;
+renderTeamHudImpl._at = 0;
