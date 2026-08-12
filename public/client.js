@@ -34,6 +34,14 @@ import {
   onError as onErrorImpl,
   onState as onStateImpl
 } from './client_ws_handlers.js';
+import {
+  applyMatchPhaseImpl,
+  updateMatchCountdownImpl,
+  resetClientForNewMatchImpl,
+  onMatchEndImpl,
+  onMatchStartImpl,
+  runMatchResultsCascadeImpl
+} from './client_match.js';
 import { trailVisualState } from './client_trail_style.js';
 import { DEATH_REASON, deathReasonSuffix } from './client_death.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
@@ -869,38 +877,25 @@ function phaseIcon(ph) {
 /* Применяет фазу. announce=true только для реальной смены фазы по ходу матча —
    при входе в комнату посреди финала баннер не нужен. */
 function applyMatchPhase(ph, until, announce, seq) {
-  const next = Math.max(0, Math.min(2, Number(ph) || 0));
-  const prev = matchPhase;
-  matchPhase = next;
-  matchPhaseUntil = Math.max(0, Number(until) || 0);
-
-  if (announce && next === PHASE_FINAL && prev !== PHASE_FINAL && started) {
-    const s = Number.isFinite(Number(seq)) ? Number(seq) : matchSeq;
-    if (matchPhaseBannerSeq !== s) {
-      matchPhaseBannerSeq = s;
-      const title = t('phase.final_banner').replace('×2', `×${matchFinalMult}`);
-      if (!showBigBanner('🔥', title, phaseDesc(PHASE_FINAL), 'jackpot')) {
-        addToast('🔥', title, 'big', phaseDesc(PHASE_FINAL), {
-          tab: 'match',
-          key: 'match_phase_final',
-          prio: 'jackpot'
-        });
-      }
-      try {
-        sfx.jackpot?.();
-      } catch {}
-    }
-  } else if (announce && next !== prev && started) {
-    addToast(phaseIcon(next), `${t('phase.label')}: ${phaseLabel(next)}`, null, phaseDesc(next), {
-      tab: 'match',
-      key: 'match_phase',
-      prio: 'important'
-    });
-  }
-
-  try {
-    renderTopHud();
-  } catch {}
+  const res = applyMatchPhaseImpl(ph, until, announce, seq, {
+    matchPhase,
+    started,
+    matchPhaseBannerSeq,
+    matchSeq,
+    matchFinalMult,
+    t,
+    showBigBanner,
+    phaseDesc,
+    addToast,
+    sfx,
+    phaseLabel,
+    phaseIcon,
+    renderTopHud,
+    PHASE_FINAL
+  });
+  matchPhase = res.matchPhase;
+  matchPhaseUntil = res.matchPhaseUntil;
+  matchPhaseBannerSeq = res.matchPhaseBannerSeq;
 }
 
 function onMatchPhase(d) {
@@ -3264,30 +3259,8 @@ function firstSkinHookHtml() {
       </div>`;
 }
 
-// J6: каскад чисел — место → очки → зона → киллы → награда,
-// по 250 мс со сдвигом 180 мс, каждое со своим восходящим бипом.
-const MATCH_CASCADE_ORDER = ['place', 'points', 'zone', 'kills', 'reward'];
-
 function runMatchResultsCascade() {
-  if (!matchResultsEl) return;
-  if (!fxCountUpEnabled()) return;
-  let step = 0;
-  for (const key of MATCH_CASCADE_ORDER) {
-    const el = matchResultsEl.querySelector(`[data-count="${key}"]`);
-    if (!el) continue;
-    const to = Number(el.dataset.to) || 0;
-    if (to <= 0) continue;
-    const prefix = String(el.dataset.prefix || '');
-    const delay = step * 180;
-    animateNumber(el, 0, to, 250, {
-      delay,
-      prefix,
-      onDone: () => {}
-    });
-    const i = step;
-    setTimeout(() => sfx.countStep(i), delay);
-    step++;
-  }
+  runMatchResultsCascadeImpl({ matchResultsEl, fxCountUpEnabled, animateNumber, sfx });
 }
 
 function renderMatchResults(results) {
@@ -3352,199 +3325,133 @@ function styleBreakdownText(sb) {
 }
 
 function updateMatchCountdown() {
-  if (!matchCountdownEl) return;
-  if (!matchEnded || !matchResetAt) {
-    matchCountdownEl.textContent = '—';
-    syncMatchOverlayActions();
-    return;
-  }
-  const nt = approxNowTick();
-  if (nt == null) {
-    matchCountdownEl.textContent = '—';
-    syncMatchOverlayActions();
-    return;
-  }
-  const remTicks = Math.max(0, matchResetAt - nt);
-  const remMs = tickMs ? remTicks * tickMs : 0;
-  const sec = Math.max(0, Math.ceil(remMs / 1000));
-  matchCountdownEl.textContent = `${sec}s`;
-  syncMatchOverlayActions();
+  updateMatchCountdownImpl({ matchCountdownEl, matchEnded, matchResetAt, approxNowTick, tickMs, syncMatchOverlayActions });
 }
 
 function resetClientForNewMatch() {
-  matchContinuePending = false;
-  if (matchContinueTimeout) {
-    clearTimeout(matchContinueTimeout);
-    matchContinueTimeout = 0;
-  }
-
-  matchStyleEarned = 0;
-
-  // K2: номера игроков в новом матче раздаются заново — кэши по номеру нужно
-  // обнулить, иначе враг ещё несколько минут рисуется цветом прошлого хозяина
-  // номера, а два игрока могут оказаться одного цвета.
-  colors.clear();
-  ownerFillStyleCache.clear();
-  minimapOwnerRgbCache.clear();
-  botIds = new Set();
-  coolDeadlineByOwner.clear();
-  lastRoi = null;
-  /* C7: карты «по номеру игрока» здесь НЕ чистятся намеренно. Сервер при
-     matchStart не пересылает ни nameUpdateBatch, ни cosExtra (main.go: обе
-     рассылки привязаны к входу в комнату), поэтому очистка оставила бы всех
-     без имён и косметики до следующего события. Номера внутри комнаты между
-     матчами не переигрываются — переигрываются они при входе, там очистка и
-     стоит (см. onInit). Ограничены по размеру: ключ — номер игрока, а их в
-     комнате не больше roomLimit + ботов. */
-  captureAnchorByOwner.clear();
-
-  eventFeed.length = 0;
-  lastEventsTick = 0;
-  lastEventsAt = 0;
-  bigToastCooldownUntil = 0;
-
-  try {
-    for (const it of toastByKey.values()) {
-      if (it?.timer) clearTimeout(it.timer);
-    }
-  } catch {}
-  toastByKey.clear();
-  toastQueue.length = 0;
-
-  lastDeathInfo = null;
-  lastYouStats = null;
-
-  mutatorType = 0;
-  mutatorUntil = 0;
-  bountyTarget = 0;
-  bountyUntil = 0;
-  powerUps = new Map();
-
-  youKills = 0;
-  youStreak = 0;
-  youTrailLen = 0;
-  youInOwnZone = true;
-  youNearestHomeX = -1;
-  youNearestHomeY = -1;
-  youNearestHomeAt = 0;
-  comboReset();
-  youContractType = 0;
-  youContractGoal = 0;
-  youContractProgress = 0;
-  youContractUntil = 0;
-  youShield = false;
-  youSpeedUntilTick = 0;
-  youSpeedType = 0;
-  // keep youStyle; it is a persistent currency, not match-scoped
-
-  try {
-    if (killfeedEl) killfeedEl.replaceChildren();
-    if (eventToastsEl) eventToastsEl.replaceChildren();
-  } catch {}
-  // C8: DOM киллфида очищен вручную — подпись обязана протухнуть.
-  renderKillfeed._sig = null;
-  // C7: у мета-панели теперь такая же подпись — сбрасываем по той же причине.
-  renderMetaHudImpl._sig = null;
-  renderTopHudImpl._placeSig = null;
-
-  clientState.lastState = null;
-  prevPlayers = new Map();
-  currPlayers = new Map();
-  headIndexByOwner = new Map();
-  lastPacketAt = performance.now();
-  clientState.camX = null;
-  clientState.camY = null;
-  clientState.camLeadX = 0;
-  clientState.camLeadY = 0;
-
-  shakeX = 0;
-  shakeY = 0;
-  shakeVelX = 0;
-  shakeVelY = 0;
-
-  minimapDirty = true;
-  minimapHadChunkUpdate = false;
-  lastMinimapDrawAt = 0;
-
-  resetLeaderboardUi();
-
-  renderKillfeed();
-  renderMetaHud();
-  renderTopHud();
-  syncMatchOverlayActions();
+  const res = resetClientForNewMatchImpl({
+    matchContinueTimeout,
+    colors,
+    ownerFillStyleCache,
+    minimapOwnerRgbCache,
+    coolDeadlineByOwner,
+    captureAnchorByOwner,
+    eventFeed,
+    toastByKey,
+    toastQueue,
+    powerUps,
+    comboReset,
+    killfeedEl,
+    eventToastsEl,
+    renderKillfeed,
+    renderMetaHudImpl,
+    renderTopHudImpl,
+    clientState,
+    resetLeaderboardUi,
+    renderMetaHud,
+    renderTopHud,
+    syncMatchOverlayActions
+  });
+  matchContinuePending = res.matchContinuePending;
+  matchContinueTimeout = res.matchContinueTimeout;
+  matchStyleEarned = res.matchStyleEarned;
+  botIds = res.botIds;
+  lastRoi = res.lastRoi;
+  lastEventsTick = res.lastEventsTick;
+  lastEventsAt = res.lastEventsAt;
+  bigToastCooldownUntil = res.bigToastCooldownUntil;
+  lastDeathInfo = res.lastDeathInfo;
+  lastYouStats = res.lastYouStats;
+  mutatorType = res.mutatorType;
+  mutatorUntil = res.mutatorUntil;
+  bountyTarget = res.bountyTarget;
+  bountyUntil = res.bountyUntil;
+  powerUps = res.powerUps;
+  youKills = res.youKills;
+  youStreak = res.youStreak;
+  youTrailLen = res.youTrailLen;
+  youInOwnZone = res.youInOwnZone;
+  youNearestHomeX = res.youNearestHomeX;
+  youNearestHomeY = res.youNearestHomeY;
+  youNearestHomeAt = res.youNearestHomeAt;
+  youContractType = res.youContractType;
+  youContractGoal = res.youContractGoal;
+  youContractProgress = res.youContractProgress;
+  youContractUntil = res.youContractUntil;
+  youShield = res.youShield;
+  youSpeedUntilTick = res.youSpeedUntilTick;
+  youSpeedType = res.youSpeedType;
+  prevPlayers = res.prevPlayers;
+  currPlayers = res.currPlayers;
+  headIndexByOwner = res.headIndexByOwner;
+  lastPacketAt = res.lastPacketAt;
+  shakeX = res.shakeX;
+  shakeY = res.shakeY;
+  shakeVelX = res.shakeVelX;
+  shakeVelY = res.shakeVelY;
+  minimapDirty = res.minimapDirty;
+  minimapHadChunkUpdate = res.minimapHadChunkUpdate;
+  lastMinimapDrawAt = res.lastMinimapDrawAt;
 }
 
 function onMatchEnd(d) {
-  if (typeof d?.tick === 'number' && Number.isFinite(d.tick)) {
-    lastEventsTick = d.tick;
-    lastEventsAt = Date.now();
-  }
-  matchSeq = Number(d?.seq) || matchSeq;
-  matchEndTick = Number(d?.endTick) || matchEndTick;
-  matchResetAt = Number(d?.resetAt) || 0;
-  matchEnded = true;
-
-  matchContinuePending = false;
-  if (matchContinueTimeout) {
-    clearTimeout(matchContinueTimeout);
-    matchContinueTimeout = 0;
-  }
-
-  youAlive = false;
-  lastDirSent = null;
-  started = false;
-
-  hideOverlays();
-
-  lastMatchResults = d?.results || null;
-
-  bumpMatchesPlayed();
-  renderMatchResults(lastMatchResults);
-  updateMatchCountdown();
-  showMatchOverlay();
+  const res = onMatchEndImpl(d, {
+    lastEventsTick,
+    lastEventsAt,
+    matchSeq,
+    matchEndTick,
+    matchContinueTimeout,
+    hideOverlays,
+    bumpMatchesPlayed,
+    renderMatchResults,
+    updateMatchCountdown,
+    showMatchOverlay
+  });
+  lastEventsTick = res.lastEventsTick;
+  lastEventsAt = res.lastEventsAt;
+  matchSeq = res.matchSeq;
+  matchEndTick = res.matchEndTick;
+  matchResetAt = res.matchResetAt;
+  matchEnded = res.matchEnded;
+  matchContinuePending = res.matchContinuePending;
+  matchContinueTimeout = res.matchContinueTimeout;
+  youAlive = res.youAlive;
+  lastDirSent = res.lastDirSent;
+  started = res.started;
+  lastMatchResults = res.lastMatchResults;
 }
 
 function onMatchStart(d) {
-  if (typeof d?.tick === 'number' && Number.isFinite(d.tick)) {
-    lastEventsTick = d.tick;
-    lastEventsAt = Date.now();
-  }
-  matchSeq = Number(d?.seq) || matchSeq;
-  matchEndTick = Number(d?.endTick) || 0;
-  matchResetAt = 0;
-  matchEnded = false;
-  // C2: новый матч всегда начинается с фазы расширения; сервер дублирует её в
-  // payload matchStart.
-  matchPhaseBannerSeq = -1;
-  applyMatchPhase(d?.phase ?? PHASE_EXPANSION, d?.phaseUntil, false, matchSeq);
-
-  matchContinuePending = false;
-  if (matchContinueTimeout) {
-    clearTimeout(matchContinueTimeout);
-    matchContinueTimeout = 0;
-  }
-
-  youAlive = false;
-  lastDirSent = null;
-
-  if (matchAutoJoin) {
-    resetClientForNewMatch();
-    hideMatchOverlay();
-    hideOverlays();
-    toggleEmojiPanel(false);
-    syncMatchOverlayActions();
-    started = true;
-    obResetMatch();
-    obAnnounceShop();
-    try {
-      document.body.classList.add('inGame');
-    } catch {}
-  } else {
-    // stay in results overlay until user clicks "Играть дальше"
-    started = false;
-    updateMatchCountdown();
-    showMatchOverlay();
-  }
+  const res = onMatchStartImpl(d, {
+    lastEventsTick,
+    lastEventsAt,
+    matchSeq,
+    matchContinueTimeout,
+    matchAutoJoin,
+    applyMatchPhase,
+    resetClientForNewMatch,
+    hideMatchOverlay,
+    hideOverlays,
+    toggleEmojiPanel,
+    syncMatchOverlayActions,
+    obResetMatch,
+    obAnnounceShop,
+    updateMatchCountdown,
+    showMatchOverlay,
+    PHASE_EXPANSION
+  });
+  lastEventsTick = res.lastEventsTick;
+  lastEventsAt = res.lastEventsAt;
+  matchSeq = res.matchSeq;
+  matchEndTick = res.matchEndTick;
+  matchResetAt = res.matchResetAt;
+  matchEnded = res.matchEnded;
+  matchPhaseBannerSeq = res.matchPhaseBannerSeq;
+  matchContinuePending = res.matchContinuePending;
+  matchContinueTimeout = res.matchContinueTimeout;
+  youAlive = res.youAlive;
+  lastDirSent = res.lastDirSent;
+  started = res.started;
 }
 
 function hideOverlays() {

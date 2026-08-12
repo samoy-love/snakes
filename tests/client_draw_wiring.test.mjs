@@ -33,6 +33,7 @@ const CLIENT_JS = readFileSync(path.join(__dirname, '../public/client.js'), 'utf
 const CLIENT_SHOP_UI_JS = readFileSync(path.join(__dirname, '../public/client_shop_ui.js'), 'utf8');
 const CLIENT_DRAW_JS = readFileSync(path.join(__dirname, '../public/client_draw.js'), 'utf8');
 const CLIENT_ROOMS_UI_JS = readFileSync(path.join(__dirname, '../public/client_rooms_ui.js'), 'utf8');
+const CLIENT_MATCH_JS = readFileSync(path.join(__dirname, '../public/client_match.js'), 'utf8');
 
 function extractFunctionBody(source, name) {
   const start = source.indexOf(`function ${name}(`);
@@ -282,6 +283,36 @@ for (const fn of [
 ]) {
   test(`${fn}() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_rooms_ui.js`, () => {
     const masked = maskNonCode(CLIENT_ROOMS_UI_JS);
+    const body = extractFunctionBody(masked, fn);
+    const topLevel = extractDeclared(masked);
+
+    const unknown = unknownIdentifiers(body, [...topLevel]);
+
+    assert.deepEqual(
+      unknown,
+      [],
+      `${fn}() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+    );
+  });
+}
+
+// Жизненный цикл матча (applyMatchPhase/onMatchStart/onMatchEnd/
+// resetClientForNewMatch/updateMatchCountdown/runMatchResultsCascade)
+// переехал в client_match.js — тот же класс риска, что и у остальных Impl-
+// функций: изменяемое состояние client.js (matchPhase, botIds, powerUps...)
+// приходит через deps и возвращается объектом res, который тонкая обёртка в
+// client.js раскладывает обратно по переменным, поэтому верхний уровень у
+// этих функций собственный (client_match.js), без доступа к client.js.
+for (const fn of [
+  'applyMatchPhaseImpl',
+  'updateMatchCountdownImpl',
+  'resetClientForNewMatchImpl',
+  'onMatchEndImpl',
+  'onMatchStartImpl',
+  'runMatchResultsCascadeImpl'
+]) {
+  test(`${fn}() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_match.js`, () => {
+    const masked = maskNonCode(CLIENT_MATCH_JS);
     const body = extractFunctionBody(masked, fn);
     const topLevel = extractDeclared(masked);
 
