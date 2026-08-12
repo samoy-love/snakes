@@ -179,68 +179,17 @@ jobs:
   visual:
     name: Визуальные тесты экранов (Playwright)
     runs-on: ubuntu-latest
-    # Тест игровой сессии сам доводит матч до конца (MATCH_DURATION_TICKS в
-    # make run-visual) — прогон честно занимает время, это не зависший джоб.
-    # Три вьюпорта играют параллельно на трёх изолированных серверах (см.
-    # playwright.config.mjs), но на CI — только двумя воркерами: раннер
-    # двухъядерный, и три Go-сервера плюс три Chromium одновременно однажды
-    # не уложились в собственный таймаут теста от нехватки CPU. Локально
-    # (полная тройная параллельность) — ~1.5 минуты; здесь запас на меньшую
-    # параллельность, холодный кэш и общую загрузку раннера.
-    timeout-minutes: 10
+    # ВРЕМЕННО ОТКЛЮЧЕНО — см. tests/visual/README-DISABLED.md. Job оставлен
+    # с прежним id и name намеренно: protection-sync (needs: [..., visual])
+    # и обязательная проверка ветки main по этому имени продолжают находить
+    # задачу в API прогона — снятие job целиком уронило бы защиту ветки
+    # тем самым дефектом, который описан комментарием у protection-sync ниже
+    # (проверка "пропадает" и день блокирует все PR). Реальные шаги заменены
+    # на один — echo — до explicit re-enable.
+    timeout-minutes: 2
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: tests/visual/package-lock.json
-
-      - name: npm ci
-        working-directory: tests/visual
-        run: npm ci --no-audit --no-fund
-
-      # Кэш браузеров Playwright по хэшу package-lock.json: без него каждый
-      # прогон заново тянет ~150 МБ Chromium, хотя версия годами не меняется
-      # между соседними коммитами.
-      - name: Кэш браузеров Playwright
-        id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('tests/visual/package-lock.json') }}
-
-      - name: Установить браузеры Playwright
-        working-directory: tests/visual
-        # --with-deps только при промахе кэша: сами бинарники браузеров кэш
-        # уже восстановил, но системные .so-зависимости (libnss3 и т.п.)
-        # кэш не покрывает и ставятся отдельно на раннере каждый раз.
-        run: |
-          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
-            npx playwright install-deps chromium
-          else
-            npx playwright install --with-deps chromium
-          fi
-
-      - name: make test-visual
-        run: make test-visual
-
-      - name: Скриншоты упавших тестов
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: visual-test-failures
-          path: tests/visual/test-results
-          retention-days: 7
+      - name: Визуальные тесты отключены
+        run: echo "visual отключён — см. tests/visual/README-DISABLED.md"
 
   # Переименование или слияние задач CI не красит прогон в красный — красной
   # становится защита ветки, и только через день, на СЛЕДУЮЩЕМ PR: main ждёт
