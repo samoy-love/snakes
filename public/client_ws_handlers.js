@@ -873,3 +873,146 @@ export function handleEventsMessage(dv, offset, ctx) {
   renderTopHud();
   return { offset: o, lastEventsTick, lastEventsAt, mutatorType, mutatorUntil, bountyTarget, bountyUntil, powerUps, youKills, youStreak, youShield, youSpeedUntilTick, youSpeedType, matchStyleEarned, styleToastAcc, styleToastReason, styleToastCount, styleToastTimer, youContractType, youContractGoal, youContractProgress, youContractUntil, killfeedDirty, lastDeathInfo };
 }
+
+// JSON-сообщение type === 'cosmetics': применение серверного снимка косметики
+// игрока (инвентарь, титулы, прогресс ачивок, стиль). Перенесена ЦЕЛИКОМ как
+// есть из onCosmetics() в client.js, порядок вызовов и побочные эффекты не
+// менялись.
+//
+// Как и handleEventsMessage(), эта функция и читает, и переприсваивает
+// module-level let-переменные client.js (youStyle, cosmeticsLoaded,
+// cosmeticsSource, youTitleMask, youTitleId) — их читают другие части
+// client.js (рендер HUD, магазин). Присваивание внутри функции меняет только
+// ЛОКАЛЬНУЮ копию, поэтому контракт тот же: ctx передаёт НАЧАЛЬНЫЕ значения,
+// функция возвращает объект с итоговыми значениями — вызывающий код в
+// client.js обязан переприсвоить свои module-level let из этого объекта.
+//
+// ctx — явные зависимости из client.js:
+//   значения для обратной записи: youStyle, cosmeticsLoaded, cosmeticsSource, youTitleMask, youTitleId
+//   объекты, мутируемые на месте (ссылка не переприсваивается): youCos, achvProgressById
+//   функции/константы только на чтение:
+//     applyCosPayload, COS_TITLE_MAX, cosmeticsCacheSave, pendingCosmeticsOp,
+//     cosmeticsOpClear, COSMETICS_MAX_ID, t, cosmeticsLabel, cosmeticsVariantName,
+//     setCosmeticsStatus, addToast, playBeep, cosmeticsOpen,
+//     cosmeticsApplyDesiredServer, syncCosmeticsUi, renderMetaHud, renderMenuSkinPreview
+export function handleCosmeticsMessage(msg, ctx) {
+  const { youCos, achvProgressById, applyCosPayload, COS_TITLE_MAX, cosmeticsCacheSave, pendingCosmeticsOp, cosmeticsOpClear, COSMETICS_MAX_ID, t, cosmeticsLabel, cosmeticsVariantName, setCosmeticsStatus, addToast, playBeep, cosmeticsOpen, cosmeticsApplyDesiredServer, syncCosmeticsUi, renderMetaHud, renderMenuSkinPreview } = ctx;
+  let youStyle = ctx.youStyle;
+  let cosmeticsLoaded = ctx.cosmeticsLoaded;
+  let cosmeticsSource = ctx.cosmeticsSource;
+  let youTitleMask = ctx.youTitleMask;
+  let youTitleId = ctx.youTitleId;
+
+  // C4: remember the previous inventory so we can detect what was just bought.
+  const prevInv = {
+    capturefx: Number(youCos.inv.capturefx) || 0,
+    head: Number(youCos.inv.head) || 0,
+    seg: Number(youCos.inv.seg) || 0,
+    nameplate: Number(youCos.inv.nameplate) || 0,
+    frame: Number(youCos.inv.frame) || 0,
+    terr: Number(youCos.inv.terr) || 0,
+    death: Number(youCos.inv.death) || 0
+  };
+  const hadServerState = cosmeticsSource === 'server';
+
+  const st = Number(msg?.style);
+  if (Number.isFinite(st)) youStyle = Math.max(0, st);
+
+  cosmeticsLoaded = true;
+  cosmeticsSource = 'server';
+
+  // Полный снимок: категории, которых в сообщении нет, обнуляются.
+  applyCosPayload(youCos, msg, 'replace');
+
+
+  // Новые категории и титулы: сервер может их ещё не присылать. В этом случае
+  // поля undefined -> нули, магазин показывает только базовый вариант, а
+  // «Титулы» честно сообщают, что список пока недоступен.
+  // Частичное сообщение: трогаем только присланное.
+  applyCosPayload(youCos, msg, 'patch');
+  if (msg?.titleMask !== undefined) youTitleMask = Number(msg.titleMask) || 0;
+  if (msg?.titleId !== undefined) youTitleId = Math.max(0, Math.min(COS_TITLE_MAX, Number(msg.titleId) || 0));
+  /* C3: прогресс по незакрытым ачивкам. Массив содержит ТОЛЬКО закрытые ещё
+     ачивки — открытые сервер опускает, они и так видны по titleMask. Поле
+     может отсутствовать (старый сервер) — тогда карту не трогаем вовсе,
+     чтобы не стереть уже показанный прогресс. */
+  if (Array.isArray(msg?.achvProgress)) {
+    achvProgressById.clear();
+    for (const it of msg.achvProgress) {
+      const id = Number(it?.id);
+      const cur = Number(it?.cur);
+      const max = Number(it?.max);
+      if (!Number.isFinite(id) || id < 0) continue;
+      if (!Number.isFinite(max) || max <= 0) continue;
+      achvProgressById.set(id, {
+        cur: Math.max(0, Math.min(max, Number.isFinite(cur) ? cur : 0)),
+        max,
+      });
+    }
+  }
+  // Базовый вариант всегда доступен — иначе магазин выглядит полностью пустым.
+  youCos.inv.terr |= 1;
+  youCos.inv.death |= 1;
+
+  cosmeticsCacheSave();
+
+  // C4: report the purchase that just landed.
+  const pending = pendingCosmeticsOp;
+  cosmeticsOpClear();
+
+  if (hadServerState) {
+    const nextInv = {
+      capturefx: Number(youCos.inv.capturefx) || 0,
+      head: Number(youCos.inv.head) || 0,
+      seg: Number(youCos.inv.seg) || 0,
+      nameplate: Number(youCos.inv.nameplate) || 0,
+      frame: Number(youCos.inv.frame) || 0,
+      terr: Number(youCos.inv.terr) || 0,
+      death: Number(youCos.inv.death) || 0
+    };
+    let boughtCat = '';
+    let boughtId = -1;
+    for (const cat of Object.keys(nextInv)) {
+      const added = nextInv[cat] & ~prevInv[cat];
+      if (!added) continue;
+      for (let id = 0; id <= COSMETICS_MAX_ID; id++) {
+        if (added & (1 << id)) {
+          boughtCat = cat;
+          boughtId = id;
+          break;
+        }
+      }
+      if (boughtCat) break;
+    }
+    if (!boughtCat && pending) {
+      // Server confirmed but nothing new appeared (already owned).
+      boughtCat = '';
+    }
+    if (boughtCat) {
+      const bc = boughtCat;
+      const bi = boughtId;
+      const boughtText = () => `${t('cosmetics.bought_prefix')}: ${cosmeticsLabel(bc)} — ${cosmeticsVariantName(bc, bi)}`;
+      setCosmeticsStatus(boughtText, 'success');
+      addToast('✨', boughtText(), null);
+      playBeep(880, 150, 0.9);
+    } else if (pending) {
+      setCosmeticsStatus('', '');
+    }
+  } else if (cosmeticsOpen) {
+    // Магазин был открыт ещё без серверного подтверждения (см. showCosmeticsOverlay)
+    // и статус-строка застыла на «не подтверждено» — теперь оно пришло, гасим подсказку.
+    setCosmeticsStatus('', '');
+  }
+
+  cosmeticsApplyDesiredServer();
+
+  syncCosmeticsUi();
+
+  renderMetaHud();
+  // C3: инвентарь/экипировка обновились — перерисовываем «Ваш облик».
+  try {
+    renderMenuSkinPreview();
+  } catch {}
+
+  return { youStyle, cosmeticsLoaded, cosmeticsSource, youTitleMask, youTitleId };
+}

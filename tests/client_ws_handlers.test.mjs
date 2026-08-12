@@ -77,3 +77,17 @@ test('handleEventsMessage() не читает идентификаторы, ко
     `handleEventsMessage() читает необъявленные идентификаторы: ${unknown.join(', ')}`
   );
 });
+
+test('handleCosmeticsMessage() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_ws_handlers.js', () => {
+  const masked = maskNonCode(CLIENT_WS_HANDLERS_JS);
+  const body = extractFunctionBody(masked, 'handleCosmeticsMessage');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `handleCosmeticsMessage() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
