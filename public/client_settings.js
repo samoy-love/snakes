@@ -1,269 +1,192 @@
-/* Настройки (оверлей, HUD-параметры, FX-пресеты). Вынесено из client.js —
-   вызовы и порядок выполнения не менялись, только источник импорта. Как и
-   client_shop_ui.js/client_hud.js, функции принимают deps — геттеры/сеттеры
-   для переменных состояния client.js и ссылки на DOM/хелперы. */
+/* Настройки: оверлей, сохранение, HUD-параметры, тактильный отклик.
 
-export function applyHudSettingsImpl(deps) {
-  const { getHudBrightness, getHudContrast, getHudPanelOpacity } = deps;
+   Раньше модуль не владел ничем: значения жили в client.js плоскими `let`, и
+   каждая функция получала их набором геттеров/сеттеров — тридцать пар на
+   двенадцать настроек. Половина файла была этой прокачкой, а не логикой:
+   ensureSettingsStateImpl() начинался с деструктуризации двадцати шести имён.
+
+   Теперь состояние лежит в settings (client_store.js) и правится напрямую, а
+   узлы берутся из dom (client_dom.js). Осталась собственно логика: чтение и
+   запись localStorage, синхронизация полей формы и обработчики. */
+
+import { dom } from './client_dom.js';
+import { KEYS, storageGet, storageGetJson, storageSet, storageSetJson } from './client_storage.js';
+import { settings } from './client_store.js';
+import { onLangChange, t } from './client_i18n_rt.js';
+import { overlayManager } from './client_util.js';
+import { syncOverlayUiState, registerOverlayCloser } from './client_overlays.js';
+import { normalizeFxPreset, prefersReducedMotion } from './client_fx_preset.js';
+import { playBeep, sfx } from './client_sfx.js';
+
+
+/* Настройки, которые едут в localStorage как есть, с их диапазонами.
+   Раньше этот список был выписан четырежды: в чтении, в записи, в сбросе и в
+   синхронизации полей формы — и уже разъезжался (soundMutedByBlur сбрасывался,
+   но не сохранялся). Теперь список один, а четыре прохода идут по нему. */
+const FIELDS = {
+  fxEnabled: { def: true, kind: 'bool', input: () => dom.fxEnabledInput },
+  fxIntensity: { def: 0.85, kind: 'range', min: 0, max: 1, input: () => dom.fxIntensityInput },
+  shakeIntensity: { def: 0.55, kind: 'range', min: 0, max: 1, input: () => dom.shakeIntensityInput },
+  perfEnabled: { def: false, kind: 'bool', input: () => dom.perfEnabledInput },
+  perfCompact: { def: false, kind: 'bool', input: () => dom.perfCompactInput },
+  soundEnabled: { def: true, kind: 'bool', input: () => dom.soundEnabledInput },
+  soundVolume: { def: 0.7, kind: 'range', min: 0, max: 1, input: () => dom.soundVolumeInput },
+  muteOnBlur: { def: true, kind: 'bool', input: () => dom.muteOnBlurInput },
+  hapticsEnabled: { def: true, kind: 'bool', input: () => dom.hapticsInput },
+  hudBrightness: { def: 1, kind: 'range', min: 0.5, max: 2, input: () => dom.hudBrightnessInput },
+  hudContrast: { def: 1, kind: 'range', min: 0.5, max: 2, input: () => dom.hudContrastInput },
+  hudPanelOpacity: { def: 0.82, kind: 'range', min: 0.3, max: 1, input: () => dom.hudPanelOpacityInput }
+};
+
+const clampField = (name, raw) => {
+  const f = FIELDS[name];
+  if (f.kind === 'bool') return !!raw;
+  const v = Number(raw);
+  return Math.max(f.min, Math.min(f.max, Number.isFinite(v) ? v : f.def));
+};
+
+/* --- Применение к странице -------------------------------------------- */
+
+function applyHudSettings() {
   const b = document.body;
   if (!b) return;
   try {
-    b.style.setProperty('--hud-brightness', String(getHudBrightness()));
-    b.style.setProperty('--hud-contrast', String(getHudContrast()));
-    b.style.setProperty('--hud-panel-alpha', String(getHudPanelOpacity()));
+    b.style.setProperty('--hud-brightness', String(settings.hudBrightness));
+    b.style.setProperty('--hud-contrast', String(settings.hudContrast));
+    b.style.setProperty('--hud-panel-alpha', String(settings.hudPanelOpacity));
   } catch {}
 }
 
-export function applyFxPresetImpl(next, fromUser, deps) {
-  const { normalizeFxPreset, setFxPreset, setFxPresetUserSet, getFxPreset } = deps;
+export function applyPerfUi() {
+  if (dom.perf) {
+    dom.perf.classList.toggle('perfCompact', !!settings.perfCompact);
+    dom.perf.style.display = settings.perfEnabled ? '' : 'none';
+  }
+}
+
+function applyFxPreset(next, fromUser) {
   const v = normalizeFxPreset(next);
   if (!v) return;
-  setFxPreset(v);
-  if (fromUser) setFxPresetUserSet(true);
+  settings.fxPreset = v;
+  if (fromUser) settings.fxPresetUserSet = true;
   try {
-    document.body.dataset.fxPreset = getFxPreset();
+    document.body.dataset.fxPreset = v;
   } catch {}
   const sel = document.getElementById('fxPresetSelect');
   if (sel) {
     try {
-      sel.value = getFxPreset();
+      sel.value = v;
     } catch {}
   }
 }
 
-function syncSettingsInputsUi(deps) {
-  const {
-    fxEnabledInput,
-    fxIntensityInput,
-    shakeIntensityInput,
-    perfEnabledInput,
-    perfCompactInput,
-    soundEnabledInput,
-    soundVolumeInput,
-    muteOnBlurInput,
-    hapticsInput,
-    hudBrightnessInput,
-    hudContrastInput,
-    hudPanelOpacityInput,
-    getFxEnabled,
-    getFxIntensity,
-    getShakeIntensity,
-    getPerfEnabled,
-    getPerfCompact,
-    getSoundEnabled,
-    getSoundVolume,
-    getMuteOnBlur,
-    getHapticsEnabled,
-    getHudBrightness,
-    getHudContrast,
-    getHudPanelOpacity
-  } = deps;
-
-  if (fxEnabledInput) fxEnabledInput.checked = !!getFxEnabled();
-  if (fxIntensityInput) fxIntensityInput.value = String(getFxIntensity());
-  if (shakeIntensityInput) shakeIntensityInput.value = String(getShakeIntensity());
-  if (perfEnabledInput) perfEnabledInput.checked = !!getPerfEnabled();
-  if (perfCompactInput) perfCompactInput.checked = !!getPerfCompact();
-  if (soundEnabledInput) soundEnabledInput.checked = !!getSoundEnabled();
-  if (soundVolumeInput) soundVolumeInput.value = String(getSoundVolume());
-  if (muteOnBlurInput) muteOnBlurInput.checked = !!getMuteOnBlur();
-  if (hapticsInput) hapticsInput.checked = !!getHapticsEnabled();
-  if (hudBrightnessInput) hudBrightnessInput.value = String(getHudBrightness());
-  if (hudContrastInput) hudContrastInput.value = String(getHudContrast());
-  if (hudPanelOpacityInput) hudPanelOpacityInput.value = String(getHudPanelOpacity());
+function getHudDensityDefault() {
+  const raw = storageGet(KEYS.hudDensity);
+  return raw === 'comfy' || raw === 'compact' ? raw : 'comfy';
 }
 
-export function ensureSettingsStateImpl(deps) {
-  const {
-    setFxEnabled,
-    setFxIntensity,
-    setShakeIntensity,
-    setPerfEnabled,
-    setPerfCompact,
-    setSoundEnabled,
-    setSoundVolume,
-    setMuteOnBlur,
-    setHapticsEnabled,
-    setHudBrightness,
-    setHudContrast,
-    setHudPanelOpacity,
-    getFxEnabled,
-    getFxIntensity,
-    getShakeIntensity,
-    getPerfEnabled,
-    getPerfCompact,
-    getSoundEnabled,
-    getSoundVolume,
-    getMuteOnBlur,
-    getHapticsEnabled,
-    getHudBrightness,
-    getHudContrast,
-    getHudPanelOpacity,
-    setFxPreset,
-    getFxPreset,
-    setFxPresetUserSet,
-    getFxPresetUserSet,
-    normalizeFxPreset,
-    prefersReducedMotion,
-    applyFxPreset,
-    applyHudSettings,
-    applyPerfUi,
-    applyHudDensity,
-    getHudDensityDefault,
-    syncHapticsRowUi,
-    perfEl
-  } = deps;
-
+function applyHudDensity(next) {
+  const v = String(next || 'comfy');
+  if (v !== 'comfy' && v !== 'compact') return;
+  settings.hudDensity = v;
   try {
-    const raw = localStorage.getItem('snakes_settings_v1');
-    if (raw) {
-      const s = JSON.parse(raw);
-      if (s.fxEnabled != null) setFxEnabled(s.fxEnabled);
-      if (s.fxIntensity != null) setFxIntensity(s.fxIntensity);
-      if (s.shakeIntensity != null) setShakeIntensity(s.shakeIntensity);
-      if (s.perfEnabled != null) setPerfEnabled(s.perfEnabled);
-      if (s.perfCompact != null) setPerfCompact(s.perfCompact);
-      if (s.soundEnabled != null) setSoundEnabled(s.soundEnabled);
-      if (s.soundVolume != null) setSoundVolume(s.soundVolume);
-      if (s.muteOnBlur != null) setMuteOnBlur(s.muteOnBlur);
-      if (s.hapticsEnabled != null) setHapticsEnabled(s.hapticsEnabled);
-      if (s.hudBrightness != null) setHudBrightness(s.hudBrightness);
-      if (s.hudContrast != null) setHudContrast(s.hudContrast);
-      if (s.hudPanelOpacity != null) setHudPanelOpacity(s.hudPanelOpacity);
-      const p = normalizeFxPreset(s.fxPreset);
-      if (p) {
-        setFxPreset(p);
-        setFxPresetUserSet(!!s.fxPresetUserSet);
-      }
-    }
+    document.body.dataset.hudDensity = v;
   } catch {}
-
-  // J22: без явного выбора пользователя уважаем системный запрет анимаций.
-  if (!getFxPresetUserSet() && prefersReducedMotion()) setFxPreset('calm');
-  applyFxPreset(getFxPreset(), false);
-
-  syncSettingsInputsUi(deps);
-
-  syncHapticsRowUi();
-
-  if (perfEl) perfEl.style.display = getPerfEnabled() ? '' : 'none';
-  applyPerfUi();
-  applyHudSettings();
-
-  applyHudDensity(getHudDensityDefault());
+  storageSet(KEYS.hudDensity, v);
 }
 
-export function saveSettingsStateImpl(deps) {
-  const {
-    getFxEnabled,
-    getFxIntensity,
-    getShakeIntensity,
-    getPerfEnabled,
-    getPerfCompact,
-    getSoundEnabled,
-    getSoundVolume,
-    getMuteOnBlur,
-    getHapticsEnabled,
-    getHudBrightness,
-    getHudContrast,
-    getHudPanelOpacity,
-    getFxPreset,
-    getFxPresetUserSet
-  } = deps;
+/* --- Тактильный отклик -------------------------------------------------
+   navigator.vibrate есть только на части устройств (Android/Chrome), и на
+   десктопе он бессмысленен. Строку настройки показываем лишь там, где API
+   реально существует, — иначе игрок щёлкает выключателем в пустоту. */
+function hapticsSupported() {
   try {
-    localStorage.setItem(
-      'snakes_settings_v1',
-      JSON.stringify({
-        fxEnabled: getFxEnabled(),
-        fxIntensity: getFxIntensity(),
-        shakeIntensity: getShakeIntensity(),
-        perfEnabled: getPerfEnabled(),
-        perfCompact: getPerfCompact(),
-        soundEnabled: getSoundEnabled(),
-        soundVolume: getSoundVolume(),
-        muteOnBlur: getMuteOnBlur(),
-        hapticsEnabled: getHapticsEnabled(),
-        hudBrightness: getHudBrightness(),
-        hudContrast: getHudContrast(),
-        hudPanelOpacity: getHudPanelOpacity(),
-        fxPreset: getFxPreset(),
-        fxPresetUserSet: getFxPresetUserSet()
-      })
-    );
+    if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return false;
+    /* Desktop Chrome объявляет vibrate и молча ничего не делает — по одному
+       наличию метода строка настройки вылезала бы на десктопе. Требуем ещё и
+       признак тач-устройства. */
+    const coarse = !!window.matchMedia?.('(pointer: coarse)')?.matches;
+    return coarse && Number(navigator.maxTouchPoints) > 0;
+  } catch {
+    return false;
+  }
+}
+
+export function vibrate(pattern) {
+  if (!settings.hapticsEnabled) return;
+  if (prefersReducedMotion()) return;
+  if (!hapticsSupported()) return;
+  try {
+    navigator.vibrate(pattern);
   } catch {}
 }
 
-export function resetSettingsStateImpl(deps) {
-  const {
-    setFxEnabled,
-    setFxIntensity,
-    setShakeIntensity,
-    setPerfEnabled,
-    setPerfCompact,
-    setSoundEnabled,
-    setSoundVolume,
-    setMuteOnBlur,
-    setHapticsEnabled,
-    setHudBrightness,
-    setHudContrast,
-    setHudPanelOpacity,
-    setSoundMutedByBlur,
-    setFxPresetUserSet,
-    getPerfEnabled,
-    prefersReducedMotion,
-    applyFxPreset,
-    applyPerfUi,
-    applyHudSettings,
-    saveSettingsState,
-    perfEl
-  } = deps;
+function syncHapticsRowUi() {
+  if (dom.hapticsRow) dom.hapticsRow.classList.toggle('hidden', !hapticsSupported());
+}
 
-  setFxEnabled(true);
-  setFxIntensity(0.85);
-  setShakeIntensity(0.55);
-  setPerfEnabled(false);
-  setPerfCompact(false);
-  setSoundEnabled(true);
-  setSoundVolume(0.7);
-  setMuteOnBlur(true);
-  setHapticsEnabled(true);
-  setHudBrightness(1);
-  setHudContrast(1);
-  setHudPanelOpacity(0.82);
-  setSoundMutedByBlur(false);
-  setFxPresetUserSet(false);
+/* --- Хранилище ---------------------------------------------------------- */
+
+function syncInputs() {
+  for (const [name, f] of Object.entries(FIELDS)) {
+    const el = f.input();
+    if (!el) continue;
+    if (f.kind === 'bool') el.checked = !!settings[name];
+    else el.value = String(settings[name]);
+  }
+}
+
+export function saveSettings() {
+  const out = { fxPreset: settings.fxPreset, fxPresetUserSet: settings.fxPresetUserSet };
+  for (const name of Object.keys(FIELDS)) out[name] = settings[name];
+  storageSetJson(KEYS.settings, out);
+}
+
+function loadSettings() {
+  const s = storageGetJson(KEYS.settings);
+  if (!s) return;
+  for (const name of Object.keys(FIELDS)) {
+    if (s[name] != null) settings[name] = clampField(name, s[name]);
+  }
+  const p = normalizeFxPreset(s.fxPreset);
+  if (p) {
+    settings.fxPreset = p;
+    settings.fxPresetUserSet = !!s.fxPresetUserSet;
+  }
+}
+
+function resetSettings() {
+  for (const [name, f] of Object.entries(FIELDS)) settings[name] = f.def;
+  settings.soundMutedByBlur = false;
+  settings.fxPresetUserSet = false;
   applyFxPreset(prefersReducedMotion() ? 'calm' : 'normal', false);
-
-  syncSettingsInputsUi(deps);
-
-  if (perfEl) perfEl.style.display = getPerfEnabled() ? '' : 'none';
+  syncInputs();
   applyPerfUi();
   applyHudSettings();
-  saveSettingsState();
+  saveSettings();
 }
 
-export function showSettingsOverlayImpl(deps) {
-  const { settingsOverlay, overlayManager, syncOverlayUiState } = deps;
-  if (settingsOverlay) settingsOverlay.classList.remove('hidden');
+/* --- Оверлей ------------------------------------------------------------ */
+
+function showSettingsOverlay() {
+  if (dom.settingsOverlay) dom.settingsOverlay.classList.remove('hidden');
   overlayManager.open('settings');
   syncOverlayUiState();
   overlayManager.focusDefault('settings');
 }
 
-export function hideSettingsOverlayImpl(deps) {
-  const { settingsOverlay, overlayManager, syncOverlayUiState } = deps;
-  if (settingsOverlay) settingsOverlay.classList.add('hidden');
+function hideSettingsOverlay() {
+  if (dom.settingsOverlay) dom.settingsOverlay.classList.add('hidden');
   overlayManager.close('settings');
   syncOverlayUiState();
 }
 
-// J22: тумблер пресета. Разметку добавляет вёрсточный агент (#fxPresetSelect);
-// пока её нет — создаём поле сами, чтобы настройка была доступна.
-export function ensureFxPresetControlImpl(deps) {
-  const { fxEnabledInput, t, getFxPreset } = deps;
+/* J22: тумблер пресета. Разметки под него нет — создаём поле сами, чтобы
+   настройка была доступна. Пересобирается на смену языка. */
+function ensureFxPresetControl() {
   let sel = document.getElementById('fxPresetSelect');
   if (!sel) {
-    const anchor = fxEnabledInput?.closest?.('.fieldInline') || null;
+    const anchor = dom.fxEnabledInput?.closest?.('.fieldInline') || null;
     const host = anchor?.parentElement || null;
     if (!host) return null;
     try {
@@ -275,8 +198,7 @@ export function ensureFxPresetControlImpl(deps) {
       span.textContent = t('settings.fx_preset');
       sel = document.createElement('select');
       sel.id = 'fxPresetSelect';
-      label.appendChild(span);
-      label.appendChild(sel);
+      label.append(span, sel);
 
       const hint = document.createElement('div');
       hint.className = 'fieldHint';
@@ -296,8 +218,7 @@ export function ensureFxPresetControlImpl(deps) {
       ['normal', t('settings.fx_preset_normal')],
       ['casino', t('settings.fx_preset_casino')]
     ];
-    const need = sel.options?.length !== opts.length;
-    if (need) sel.replaceChildren();
+    if (sel.options?.length !== opts.length) sel.replaceChildren();
     for (let i = 0; i < opts.length; i++) {
       let op = sel.options?.[i];
       if (!op) {
@@ -307,157 +228,89 @@ export function ensureFxPresetControlImpl(deps) {
       op.value = opts[i][0];
       op.textContent = opts[i][1];
     }
-    sel.value = getFxPreset();
+    sel.value = settings.fxPreset;
   } catch {}
   return sel;
 }
 
-export function bindSettingsUiImpl(deps) {
-  const {
-    ensureSettingsState,
-    applyFxPreset,
-    saveSettingsState,
-    sfx,
-    settingsBtn,
-    closeSettingsBtn,
-    settingsOverlay,
-    showSettingsOverlay,
-    hideSettingsOverlay,
-    fxEnabledInput,
-    fxIntensityInput,
-    shakeIntensityInput,
-    perfEnabledInput,
-    perfCompactInput,
-    soundEnabledInput,
-    soundVolumeInput,
-    muteOnBlurInput,
-    hapticsInput,
-    hudBrightnessInput,
-    hudContrastInput,
-    hudPanelOpacityInput,
-    testBeepBtn,
-    resetSettingsBtn,
-    setFxEnabled,
-    setFxIntensity,
-    setShakeIntensity,
-    setPerfEnabled,
-    setPerfCompact,
-    setSoundEnabled,
-    setSoundVolume,
-    setMuteOnBlur,
-    setSoundMutedByBlur,
-    setHapticsEnabled,
-    setHudBrightness,
-    setHudContrast,
-    setHudPanelOpacity,
-    getPerfEnabled,
-    getMuteOnBlur,
-    perfEl,
-    applyPerfUi,
-    applyHudSettings,
-    playBeep,
-    resetSettingsState,
-    vibrate
-  } = deps;
+/* --- Инициализация ------------------------------------------------------ */
 
-  ensureSettingsState();
+export function initSettings() {
+  loadSettings();
 
-  const fxPresetSelect = ensureFxPresetControlImpl(deps);
+  // J22: без явного выбора игрока уважаем системный запрет анимаций.
+  if (!settings.fxPresetUserSet && prefersReducedMotion()) settings.fxPreset = 'calm';
+  applyFxPreset(settings.fxPreset, false);
+
+  syncInputs();
+  syncHapticsRowUi();
+  applyPerfUi();
+  applyHudSettings();
+  applyHudDensity(getHudDensityDefault());
+
+  const fxPresetSelect = ensureFxPresetControl();
   fxPresetSelect?.addEventListener('change', () => {
     applyFxPreset(fxPresetSelect.value, true);
-    saveSettingsState();
+    saveSettings();
     sfx.ui();
   });
+  onLangChange(ensureFxPresetControl);
 
-  settingsBtn?.addEventListener('click', () => {
-    showSettingsOverlay();
-  });
-  closeSettingsBtn?.addEventListener('click', (e) => {
+  registerOverlayCloser('settings', hideSettingsOverlay);
+  dom.settingsBtn?.addEventListener('click', showSettingsOverlay);
+  dom.closeSettingsBtn?.addEventListener('click', (e) => {
     e.preventDefault();
     hideSettingsOverlay();
   });
-
-  settingsOverlay?.addEventListener('click', (e) => {
-    if (e.target === settingsOverlay) {
-      hideSettingsOverlay();
-    }
+  dom.settingsOverlay?.addEventListener('click', (e) => {
+    if (e.target === dom.settingsOverlay) hideSettingsOverlay();
   });
 
-  fxEnabledInput?.addEventListener('change', () => {
-    setFxEnabled(!!fxEnabledInput.checked);
-    saveSettingsState();
-  });
-  fxIntensityInput?.addEventListener('input', () => {
-    setFxIntensity(Math.max(0, Math.min(1, Number(fxIntensityInput.value) || 0)));
-    saveSettingsState();
-  });
-  shakeIntensityInput?.addEventListener('input', () => {
-    setShakeIntensity(Math.max(0, Math.min(1, Number(shakeIntensityInput.value) || 0)));
-    saveSettingsState();
-  });
-  perfEnabledInput?.addEventListener('change', () => {
-    setPerfEnabled(!!perfEnabledInput.checked);
-    if (perfEl) perfEl.style.display = getPerfEnabled() ? '' : 'none';
-    saveSettingsState();
-  });
-  perfCompactInput?.addEventListener('change', () => {
-    setPerfCompact(!!perfCompactInput.checked);
-    applyPerfUi();
-    saveSettingsState();
-  });
-  soundEnabledInput?.addEventListener('change', () => {
-    setSoundEnabled(!!soundEnabledInput.checked);
-    saveSettingsState();
-  });
-  soundVolumeInput?.addEventListener('input', () => {
-    setSoundVolume(Math.max(0, Math.min(1, Number(soundVolumeInput.value) || 0)));
-    saveSettingsState();
-  });
+  /* Один обработчик на поле вместо двенадцати почти одинаковых блоков.
+     after — то немногое, что действительно различается: перерисовать HUD,
+     показать панель производительности, дать отклик на сам переключатель. */
+  const bind = (name, after) => {
+    const el = FIELDS[name].input();
+    if (!el) return;
+    const isBool = FIELDS[name].kind === 'bool';
+    el.addEventListener(isBool ? 'change' : 'input', () => {
+      settings[name] = clampField(name, isBool ? el.checked : el.value);
+      after?.();
+      saveSettings();
+    });
+  };
 
-  muteOnBlurInput?.addEventListener('change', () => {
-    setMuteOnBlur(!!muteOnBlurInput.checked);
-    if (!muteOnBlurInput.checked) setSoundMutedByBlur(false);
-    saveSettingsState();
+  bind('fxEnabled');
+  bind('fxIntensity');
+  bind('shakeIntensity');
+  bind('perfEnabled', applyPerfUi);
+  bind('perfCompact', applyPerfUi);
+  bind('soundEnabled');
+  bind('soundVolume');
+  bind('muteOnBlur', () => {
+    if (!settings.muteOnBlur) settings.soundMutedByBlur = false;
   });
+  // Отклик на сам переключатель: игрок сразу чувствует, что именно включил.
+  bind('hapticsEnabled', () => {
+    if (settings.hapticsEnabled) vibrate(30);
+  });
+  bind('hudBrightness', applyHudSettings);
+  bind('hudContrast', applyHudSettings);
+  bind('hudPanelOpacity', applyHudSettings);
 
-  hapticsInput?.addEventListener('change', () => {
-    setHapticsEnabled(!!hapticsInput.checked);
-    saveSettingsState();
-    // Отклик на сам переключатель: игрок сразу чувствует, что именно включил.
-    if (hapticsInput.checked) vibrate(30);
-  });
-
-  hudBrightnessInput?.addEventListener('input', () => {
-    setHudBrightness(Math.max(0.5, Math.min(2, Number(hudBrightnessInput.value) || 1)));
-    applyHudSettings();
-    saveSettingsState();
-  });
-  hudContrastInput?.addEventListener('input', () => {
-    setHudContrast(Math.max(0.5, Math.min(2, Number(hudContrastInput.value) || 1)));
-    applyHudSettings();
-    saveSettingsState();
-  });
-  hudPanelOpacityInput?.addEventListener('input', () => {
-    setHudPanelOpacity(Math.max(0.3, Math.min(1, Number(hudPanelOpacityInput.value) || 0.82)));
-    applyHudSettings();
-    saveSettingsState();
-  });
-
-  testBeepBtn?.addEventListener('click', (e) => {
+  dom.testBeepBtn?.addEventListener('click', (e) => {
     e.preventDefault();
     playBeep(660, 120, 1);
   });
-
-  resetSettingsBtn?.addEventListener('click', (e) => {
+  dom.resetSettingsBtn?.addEventListener('click', (e) => {
     e.preventDefault();
-    resetSettingsState();
+    resetSettings();
   });
 
   window.addEventListener('blur', () => {
-    if (!getMuteOnBlur()) return;
-    setSoundMutedByBlur(true);
+    if (settings.muteOnBlur) settings.soundMutedByBlur = true;
   });
   window.addEventListener('focus', () => {
-    setSoundMutedByBlur(false);
+    settings.soundMutedByBlur = false;
   });
 }

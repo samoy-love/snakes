@@ -20,10 +20,13 @@ import { dirname, join } from 'node:path';
 import { COSMETICS_CATS } from '../public/client_cos_model.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// MINI_COSMETIC_PREVIEW_BY_CAT переехала в client_shop_ui.js вместе с
-// остальной DOM-обвязкой магазина (Фаза 4.2) — ищем таблицы в обоих файлах.
+// MINI_COSMETIC_PREVIEW_BY_CAT переехала в client_shop_ui.js, а таблицы
+// подписей и названий вариантов — в client_shop.js вместе с остальной
+// обвязкой магазина. Таблицы ищем во всех трёх файлах.
 const CLIENT_JS =
   readFileSync(join(HERE, '../public/client.js'), 'utf8') +
+  '\n' +
+  readFileSync(join(HERE, '../public/client_shop.js'), 'utf8') +
   '\n' +
   readFileSync(join(HERE, '../public/client_shop_ui.js'), 'utf8');
 
@@ -32,7 +35,7 @@ const ALL_TABS = [...COSMETICS_CATS, 'title'];
 function objectLiteralBody(source, constName) {
   const marker = `const ${constName} = {`;
   const start = source.indexOf(marker);
-  assert.ok(start >= 0, `не нашли ${constName} в client.js`);
+  assert.ok(start >= 0, `не нашли ${constName} в исходниках клиента`);
   const braceStart = start + marker.length - 1;
   let depth = 0;
   for (let i = braceStart; i < source.length; i++) {

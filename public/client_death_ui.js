@@ -205,7 +205,7 @@ export function renderDeathStatsImpl(deps) {
   const top = ordered.slice(0, 5);
   const rows = top
     .map((p, i) => {
-      const pid = String(p.n);
+      const pid = escapeHtml(String(p.n));
       const nm = p.nm || String(p.n);
       const isMe = p.n === you;
       return `
@@ -330,8 +330,7 @@ export function renderMatchResultsImpl(deps) {
     matchMenuBtn,
     hideMatchOverlay,
     showCosmeticsOverlay,
-    setMatchAutoJoin,
-    localStorage
+    setMatchAutoJoin
   } = deps;
 
   if (!matchResultsEl) return;
@@ -509,7 +508,6 @@ export function renderMatchResultsImpl(deps) {
   if (autoJoinEl) {
     autoJoinEl.addEventListener('change', () => {
       setMatchAutoJoin(!!autoJoinEl.checked);
-      localStorage.setItem('matchAutoJoin', autoJoinEl.checked ? '1' : '0');
     });
   }
 }

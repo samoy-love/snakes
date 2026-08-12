@@ -1,30 +1,36 @@
-/* Управление змейкой — вынесено из client.js: смена направления (клавиатура)
-   и свайпы на канвасе (тач), включая визуальный индикатор свайпа.
+/* Логика управления змейкой: смена направления (клавиатура) и свайпы на
+   канвасе (тач), включая визуальный индикатор свайпа.
 
-   Функции принимают явные deps вместо захвата глобалов client.js. Изменяемые
-   примитивы client.js (lastDirSent, swipeActive, swipeX0/Y0, swipePointerId,
-   swipeIndicatorEl) объявлены там через let — записать их отсюда напрямую
-   нельзя, поэтому импл-функции возвращают объект res с новыми значениями, а
-   тонкие обёртки в client.js раскладывают его обратно по переменным (тот же
-   приём, что и у applyMatchPhase()/onMatchStart() в client_match.js). Порядок
-   вызовов и побочные эффекты не менялись — только источник переменных. */
+   Отдельно от навешивания слушателей (client_controls.js), чтобы правила
+   «какое направление считать допустимым» и «какой жест куда переводится»
+   проверялись тестом без живого DOM и без событий браузера.
+
+   Изменяемые примитивы (lastDirSent, swipeActive, swipeX0/Y0, swipePointerId)
+   раньше жили плоскими let в client.js — записать их отсюда было нельзя, и
+   импл-функции возвращали объект res, который вызывающий раскладывал обратно
+   по переменным. Теперь lastDirSent — поле session в client_store.js, а
+   состояние жеста лежит в локальном swipe: и то и другое правится на месте,
+   возвращать нечего. */
+
+import { session } from './client_store.js';
 
 export function setDirImpl(dir, deps) {
-  const { youAlive, lastDirSent, getMenuControlsSeen, setMenuControlsSeen, syncMenuOnboardingUi, wsSend } = deps;
-  if (!youAlive) return { lastDirSent };
-  if (dir === lastDirSent) return { lastDirSent };
+  const { getMenuControlsSeen, setMenuControlsSeen, syncMenuOnboardingUi, wsSend } = deps;
+  if (!session.youAlive) return;
+  // Дубль того же направления серверу не нужен.
+  if (dir === session.lastDirSent) return;
   // F13: подсказка про управление гаснет по факту действия, а не по факту входа.
   if (!getMenuControlsSeen()) {
     setMenuControlsSeen();
     syncMenuOnboardingUi();
   }
   wsSend('input', { dir });
-  return { lastDirSent: dir };
+  session.lastDirSent = dir;
 }
 
-// Хвост главного keydown-обработчика client.js: сама смена направления
-// стрелками/WASD. Проверки оверлеев/фокуса чата остаются в client.js — они
-// решают, стоит ли вообще давать ходу дойти сюда.
+// Хвост главного keydown-обработчика: сама смена направления стрелками/WASD.
+// Проверки оверлеев/фокуса чата остаются в client_controls.js — они решают,
+// стоит ли вообще давать ходу дойти сюда.
 export function handleMovementKeydownImpl(e, deps) {
   const { overlayManager, nameInput, chat, setDir } = deps;
   // C6: never steer the snake while an overlay is on top of the game.
@@ -38,7 +44,7 @@ export function handleMovementKeydownImpl(e, deps) {
   else if (e.code === 'ArrowRight' || e.code === 'KeyD') setDir('right');
 }
 
-export function swipeDirImpl(dx, dy) {
+function swipeDirImpl(dx, dy) {
   if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'right' : 'left';
   return dy > 0 ? 'down' : 'up';
 }
@@ -86,48 +92,63 @@ export function hideSwipeIndicatorImpl(deps) {
   if (dot) dot.style.transform = 'translate(0, 0)';
 }
 
-export function handleSwipePointerDownImpl(e, deps) {
-  const { youAlive, swipeActive, swipeX0, swipeY0, swipePointerId, showSwipeIndicator, canvas } = deps;
-  if (!youAlive) return { swipeActive, swipeX0, swipeY0, swipePointerId };
-  if (e.pointerType !== 'touch') return { swipeActive, swipeX0, swipeY0, swipePointerId };
+/* Состояние жеста живёт здесь, а не у вызывающего: три обработчика читают и
+   пишут одни и те же четыре поля, и раньше каждый возвращал их объектом,
+   который вызывающий раскладывал обратно по переменным. Сам по себе жест
+   наружу не виден — наружу видно только setDir(). */
+const swipe = {
+  active: false,
+  x0: 0,
+  y0: 0,
+  pointerId: null
+};
 
-  const nextSwipeX0 = e.clientX;
-  const nextSwipeY0 = e.clientY;
-  showSwipeIndicator(nextSwipeX0, nextSwipeY0);
+/* Порог срабатывания в пикселях: ниже него палец считается дрожащим, а не
+   ведущим змейку. */
+export const SWIPE_PX = 22;
+
+export function handleSwipePointerDownImpl(e, deps) {
+  const { showSwipeIndicator, canvas } = deps;
+  if (!session.youAlive) return;
+  if (e.pointerType !== 'touch') return;
+
+  swipe.active = true;
+  swipe.x0 = e.clientX;
+  swipe.y0 = e.clientY;
+  swipe.pointerId = e.pointerId;
+  showSwipeIndicator(swipe.x0, swipe.y0);
   try {
     canvas.setPointerCapture?.(e.pointerId);
   } catch {
-    // Захват — оптимизация: свайп работает и без него, а setPointerCapture
-    // кидает NotFoundError, если указатель уже отпущен.
+    /* Захват — оптимизация: свайп работает и без него, а setPointerCapture
+       кидает NotFoundError, если указатель уже отпущен. */
   }
   e.preventDefault();
-
-  return { swipeActive: true, swipeX0: nextSwipeX0, swipeY0: nextSwipeY0, swipePointerId: e.pointerId };
 }
 
 export function handleSwipePointerMoveImpl(e, deps) {
-  const { swipeActive, swipeX0, swipeY0, swipePointerId, SWIPE_PX, moveSwipeIndicator, showSwipeIndicator, setDir } =
-    deps;
-  if (!swipeActive) return { swipeX0, swipeY0 };
-  if (swipePointerId != null && e.pointerId !== swipePointerId) return { swipeX0, swipeY0 };
+  const { moveSwipeIndicator, showSwipeIndicator, setDir } = deps;
+  if (!swipe.active) return;
+  if (swipe.pointerId != null && e.pointerId !== swipe.pointerId) return;
 
-  const dx = e.clientX - swipeX0;
-  const dy = e.clientY - swipeY0;
+  const dx = e.clientX - swipe.x0;
+  const dy = e.clientY - swipe.y0;
   moveSwipeIndicator(dx, dy);
-  if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return { swipeX0, swipeY0 };
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return;
 
   setDir(swipeDirImpl(dx, dy));
-  const nextSwipeX0 = e.clientX;
-  const nextSwipeY0 = e.clientY;
-  showSwipeIndicator(nextSwipeX0, nextSwipeY0);
+  /* Точка отсчёта переносится под палец: иначе один длинный жест давал бы
+     только один поворот. */
+  swipe.x0 = e.clientX;
+  swipe.y0 = e.clientY;
+  showSwipeIndicator(swipe.x0, swipe.y0);
   e.preventDefault();
-
-  return { swipeX0: nextSwipeX0, swipeY0: nextSwipeY0 };
 }
 
 export function endSwipeImpl(e, deps) {
-  const { swipePointerId, hideSwipeIndicator } = deps;
-  if (swipePointerId != null && e.pointerId !== swipePointerId) return { swipeActive: true, swipePointerId };
+  const { hideSwipeIndicator } = deps;
+  if (swipe.pointerId != null && e.pointerId !== swipe.pointerId) return;
+  swipe.active = false;
+  swipe.pointerId = null;
   hideSwipeIndicator();
-  return { swipeActive: false, swipePointerId: null };
 }

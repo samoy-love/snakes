@@ -30,15 +30,21 @@ import { maskNonCode, extractDeclared, unknownIdentifiers } from './helpers/js_s
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_JS = readFileSync(path.join(__dirname, '../public/client.js'), 'utf8');
+// draw() переехала из client.js в client_render.js вместе со всей отрисовкой
+// кадра — проверка идёт по новому файлу, класс регрессии тот же.
+const CLIENT_RENDER_JS = readFileSync(path.join(__dirname, '../public/client_render.js'), 'utf8');
 const CLIENT_SHOP_UI_JS = readFileSync(path.join(__dirname, '../public/client_shop_ui.js'), 'utf8');
 const CLIENT_DRAW_JS = readFileSync(path.join(__dirname, '../public/client_draw.js'), 'utf8');
 const CLIENT_ROOMS_UI_JS = readFileSync(path.join(__dirname, '../public/client_rooms_ui.js'), 'utf8');
 const CLIENT_MATCH_JS = readFileSync(path.join(__dirname, '../public/client_match.js'), 'utf8');
 const CLIENT_INPUT_JS = readFileSync(path.join(__dirname, '../public/client_input.js'), 'utf8');
+// handleStateBinary() переехала из client.js в client_net_bind.js вместе со
+// всей работой с сокетом — верхний уровень у неё теперь тамошний.
+const CLIENT_NET_BIND_JS = readFileSync(path.join(__dirname, '../public/client_net_bind.js'), 'utf8');
 
 function extractFunctionBody(source, name) {
   const start = source.indexOf(`function ${name}(`);
-  assert.ok(start >= 0, `не нашли function ${name}() в client.js`);
+  assert.ok(start >= 0, `не нашли function ${name}()`);
   let depth = 0;
   let bodyStart = -1;
   for (let i = start; i < source.length; i++) {
@@ -54,11 +60,11 @@ function extractFunctionBody(source, name) {
   throw new Error(`не нашли конец function ${name}()`);
 }
 
-test('draw() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client.js', () => {
-  const masked = maskNonCode(CLIENT_JS);
+test('draw() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_render.js', () => {
+  const masked = maskNonCode(CLIENT_RENDER_JS);
   const drawBody = extractFunctionBody(masked, 'draw');
 
-  // Верхний уровень client.js — то, что draw() видит через замыкание:
+  // Верхний уровень client_render.js — то, что draw() видит через замыкание:
   // импорты, module-scope const/let/var/function. draw() объявлена на
   // верхнем уровне (не вложена), поэтому её доступная внешняя область — ровно
   // это множество плюс имена, объявленные внутри самой draw().
@@ -75,14 +81,17 @@ test('draw() не читает идентификаторы, которых не
   );
 });
 
-// syncCosmeticsUi() — тот же класс риска, что и draw() (§7 отчёта разведки от
-// 2026-08-05): распил на первые чистые куски (buyButtonState, equipButtonState,
-// visibleItems, renderCosmeticsSkeleton) должен оставить проводку вокруг них
-// целой — вынесенная переменная, использование которой забыли поправить дальше
-// по функции, ломает магазин так же тихо, как #33 сломал draw().
-test('syncCosmeticsUi() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client.js', () => {
-  const masked = maskNonCode(CLIENT_JS);
-  const body = extractFunctionBody(masked, 'syncCosmeticsUi');
+// syncCosmeticsUiImpl() — тот же класс риска, что и draw() (§7 отчёта разведки
+// от 2026-08-05): распил на первые чистые куски (buyButtonState,
+// equipButtonState, visibleItems, renderCosmeticsSkeleton) должен оставить
+// проводку вокруг них целой — вынесенная переменная, использование которой
+// забыли поправить дальше по функции, ломает магазин так же тихо, как #33
+// сломал draw(). Функция живёт в client_shop_ui.js и больше не получает deps:
+// состояние она читает из client_store.js, а обвязку — из client_shop.js,
+// поэтому её верхний уровень — верхний уровень собственного файла.
+test('syncCosmeticsUiImpl() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_shop_ui.js', () => {
+  const masked = maskNonCode(CLIENT_SHOP_UI_JS);
+  const body = extractFunctionBody(masked, 'syncCosmeticsUiImpl');
   const topLevel = extractDeclared(masked);
 
   const unknown = unknownIdentifiers(body, [...topLevel]);
@@ -90,7 +99,7 @@ test('syncCosmeticsUi() не читает идентификаторы, кото
   assert.deepEqual(
     unknown,
     [],
-    `syncCosmeticsUi() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+    `syncCosmeticsUiImpl() читает необъявленные идентификаторы: ${unknown.join(', ')}`
   );
 });
 
@@ -252,8 +261,8 @@ test('renderPerfPanel() не читает идентификаторы, кото
 // двигается вручную по всей функции (§6.4 отчёта разведки от 2026-08-05),
 // и вынос куска вроде pickPlayerRecordSize должен оставить обвязку вокруг
 // него (o, bl, pc, DIR_NAMES и т.д.) нетронутой.
-test('handleStateBinary() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client.js', () => {
-  const masked = maskNonCode(CLIENT_JS);
+test('handleStateBinary() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_net_bind.js', () => {
+  const masked = maskNonCode(CLIENT_NET_BIND_JS);
   const body = extractFunctionBody(masked, 'handleStateBinary');
   const topLevel = extractDeclared(masked);
 
@@ -298,16 +307,17 @@ for (const fn of [
 }
 
 // Жизненный цикл матча (applyMatchPhase/onMatchStart/onMatchEnd/
-// resetClientForNewMatch/updateMatchCountdown/runMatchResultsCascade)
-// переехал в client_match.js — тот же класс риска, что и у остальных Impl-
-// функций: изменяемое состояние client.js (matchPhase, botIds, powerUps...)
-// приходит через deps и возвращается объектом res, который тонкая обёртка в
-// client.js раскладывает обратно по переменным, поэтому верхний уровень у
-// этих функций собственный (client_match.js), без доступа к client.js.
+// updateMatchCountdown/runMatchResultsCascade) живёт в client_match.js — тот
+// же класс риска, что и у остальных Impl-функций: верхний уровень у них
+// собственный, без доступа к client.js, поэтому забытое имя не подхватится
+// само и упадёт только в рантайме.
+// resetClientForNewMatch в списке нет намеренно: сброс матча переписан на
+// общее состояние (client_store.js: resetForNewMatch) и живёт в
+// client_endgame.js — deps-объекта, полноту которого нужно было бы стеречь,
+// у него больше нет.
 for (const fn of [
   'applyMatchPhaseImpl',
   'updateMatchCountdownImpl',
-  'resetClientForNewMatchImpl',
   'onMatchEndImpl',
   'onMatchStartImpl',
   'runMatchResultsCascadeImpl'

@@ -11,8 +11,8 @@
    как *Impl(..., deps) — как и в client_death_ui.js/client_hud.js, client.js
    держит тонкую обёртку с тем же именем, которая передаёт deps. */
 
-export const OB_DEATHS_KEY = 'snakes_deaths_seen_v1';
-export const OB_STAGE_KEY = 'snakes_onboarding_stages_v1';
+import { KEYS, storageBump, storageGet, storageSet } from './client_storage.js';
+
 
 // Пороги подобраны так, чтобы первый захват (15-20 с) успел случиться раньше
 // любой мета-системы: сначала правило игры, потом надстройки над ним.
@@ -36,27 +36,23 @@ export const OB_STAGES = [
 let obMatchStartAt = 0;
 let obStagesShown = null;
 
-export function obLoadStages() {
+function obLoadStages() {
   if (obStagesShown) return obStagesShown;
   obStagesShown = new Set();
-  try {
-    const raw = localStorage.getItem(OB_STAGE_KEY);
-    if (raw) for (const s of String(raw).split(',')) if (s) obStagesShown.add(s);
-  } catch {}
+  const raw = storageGet(KEYS.obStage);
+  if (raw) for (const s of String(raw).split(',')) if (s) obStagesShown.add(s);
   return obStagesShown;
 }
 
-export function obMarkStageShown(id) {
+function obMarkStageShown(id) {
   const set = obLoadStages();
   if (set.has(id)) return;
   set.add(id);
-  try {
-    localStorage.setItem(OB_STAGE_KEY, Array.from(set).join(','));
-  } catch {}
+  storageSet(KEYS.obStage, Array.from(set).join(','));
 }
 
 // Первый матч в жизни игрока: только в нём мета-системы придерживаются.
-export function obFirstMatch() {
+function obFirstMatch() {
   return obMatchesEntered() <= 1;
 }
 
@@ -66,19 +62,17 @@ export function obSecondMatchPlus() {
 }
 
 export function obDeathsSeen() {
-  try {
-    return Math.max(0, Number(localStorage.getItem(OB_DEATHS_KEY)) || 0);
-  } catch {}
-  return 99;
+  /* Хранилище недоступно (onFail=99) — считаем игрока опытным: подсказки
+     новичка лучше не показать вовсе, чем показывать их каждую сессию. Ключа
+     нет — игрок действительно новый, ноль смертей. */
+  return Math.max(0, Number(storageGet(KEYS.obDeaths, '99')) || 0);
 }
 
 export function obBumpDeaths() {
-  try {
-    localStorage.setItem(OB_DEATHS_KEY, String(obDeathsSeen() + 1));
-  } catch {}
+  storageBump(KEYS.obDeaths);
 }
 
-export function obMatchElapsed() {
+function obMatchElapsed() {
   if (!obMatchStartAt) return 0;
   return performance.now() - obMatchStartAt;
 }
@@ -87,28 +81,22 @@ export function obMatchElapsed() {
    в onMatchEnd, а тот приходит не всегда (умер и досидел до конца в оверлее
    смерти — экран итогов не показывается). Онбординг на таком счётчике завис бы
    в режиме «первый матч» навсегда, поэтому у него свой, по входам. */
-export const OB_ENTERED_KEY = 'snakes_ob_matches_v1';
 
 /* C10: значение читалось из localStorage по 3-4 раза за кадр (obTick +
    obUnlocked + obSecondMatchPlus в renderTopHud) — ~180 синхронных чтений в
    секунду. Кэшируем в памяти: писать в ключ может только этот же модуль. */
 let obEnteredCache = null;
 
-export function obMatchesEntered() {
+function obMatchesEntered() {
   if (obEnteredCache != null) return obEnteredCache;
-  try {
-    obEnteredCache = Math.max(0, Number(localStorage.getItem(OB_ENTERED_KEY)) || 0);
-    return obEnteredCache;
-  } catch {}
-  return 99;
+  obEnteredCache = Math.max(0, Number(storageGet(KEYS.obEntered, '99')) || 0);
+  return obEnteredCache;
 }
 
-export function obBumpMatchesEntered() {
+function obBumpMatchesEntered() {
   const next = obMatchesEntered() + 1;
   obEnteredCache = next;
-  try {
-    localStorage.setItem(OB_ENTERED_KEY, String(next));
-  } catch {}
+  storageSet(KEYS.obEntered, next);
 }
 
 // Разблокирована ли мета-система. Вне первого матча — всё открыто.
@@ -123,7 +111,7 @@ export function obUnlocked(id) {
 }
 
 // K5: показать ступень (один раз за всю жизнь профиля). deps: addToast, t.
-export function obShowStageImpl(st, deps) {
+function obShowStageImpl(st, deps) {
   if (!st) return;
   const { addToast, t } = deps;
   const set = obLoadStages();

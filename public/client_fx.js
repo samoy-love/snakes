@@ -1,3 +1,9 @@
+/* Накопители визуальных эффектов: всплывающие числа, вспышки захвата, частицы.
+
+   Модуль-фабрика без DOM и без глобалов — состояние приходит геттером, а
+   массивы мутируются на месте. Так правила «что показывать и сколько это
+   живёт» проверяются тестом отдельно от отрисовки (client_draw.js). */
+
 export function createFxModule() {
   function addFxBurst(x, y, kind, getState, extra) {
     const st = typeof getState === 'function' ? getState() : null;

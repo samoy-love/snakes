@@ -4,10 +4,64 @@
    Чистая логика (цены, тиры, инвентарь, desired-состояние) остаётся в
    client_cos_*.js, здесь только рендер и обработчики событий.
 
-   Как и client_menu_ui.js/client_rooms_ui.js, функции принимают deps —
-   геттеры/сеттеры для переменных состояния client.js и ссылки на элементы
-   DOM/хелперы. Это не меняет, КОГДА что вызывается, только ОТКУДА берётся
-   код функции. */
+   Раньше каждая функция принимала deps — объект на сотню ключей с геттерами и
+   сеттерами состояния client.js, узлами разметки и ссылками на соседние
+   модули. Собирался он заново на каждый вызов, а любое переименование поля в
+   client.js молча превращалось в undefined на этой стороне. Теперь состояние
+   берётся из client_store.js по ссылке, узлы — из client_dom.js, а обвязка
+   магазина — из client_shop.js. Кольцо импортов с client_shop.js безопасно:
+   на верхнем уровне обоих файлов друг у друга ничего не вызывается. */
+
+import { cos, session, world } from './client_store.js';
+import { dom } from './client_dom.js';
+import { escapeHtml, overlayManager, setSafeHtml } from './client_util.js';
+import { t, tfmt } from './client_i18n_rt.js';
+import { fmtInt } from './client_labels.js';
+import { formatGroupedCount } from './client_format.js';
+import { syncOverlayUiState } from './client_overlays.js';
+import { boostHsl, hslToRgb } from './client_color.js';
+import { COSMETICS_MAX_ID, tierClass } from './client_cos_model.js';
+import { buyButtonState, equipButtonState, visibleItems } from './client_cos_ui.js';
+import { COS_TITLE_MAX, cosTitleName, cosTitlePrefix, cosTitleReq } from './client_identity.js';
+import {
+  COS_DEATH_MS,
+  COS_FONT,
+  cosClampId,
+  cosPrepCanvas,
+  drawCaptureFx,
+  drawDeathFx,
+  drawFrameRow,
+  drawHead,
+  drawNamePlate,
+  drawSegTile,
+  drawTerrSeam,
+  drawTerrTile
+} from './client_cos_draw.js';
+import {
+  COSMETICS_TABS,
+  COSMETICS_TAB_ICON_BY_CAT,
+  cosmeticsBuyLocal,
+  cosmeticsCacheSave,
+  cosmeticsEnsureLocalReady,
+  cosmeticsEqForCat,
+  cosmeticsEquipLocal,
+  cosmeticsFormatCost,
+  cosmeticsLabel,
+  cosmeticsMaskForCat,
+  cosmeticsOpBegin,
+  cosmeticsOpClear,
+  cosmeticsOpIsPending,
+  cosmeticsOwnedCount,
+  cosmeticsServerReady,
+  cosmeticsSetDesiredEq,
+  cosmeticsTierLabel,
+  cosmeticsVariantName,
+  scheduleMenuSkinPreview,
+  setCosmeticsStatus,
+  wsIsConnected,
+  wsSend,
+  youCos
+} from './client_shop.js';
 
 /* Пропорции единой сцены предпросмотра (магазин и панель «Ваш облик» в меню
    рисуют один и тот же кусок поля в одном масштабе). */
@@ -24,7 +78,7 @@ export const COS_SCENE = {
 };
 
 /* Подложка поля сцены предпросмотра — сетка и виньетка под цвет игрового поля. */
-export function drawCosmeticsFieldBackdrop(ctx2, x, y, w, h, step, originX, originY) {
+function drawCosmeticsFieldBackdrop(ctx2, x, y, w, h, step, originX, originY) {
   ctx2.save();
   const bg = ctx2.createLinearGradient(x, y, x + w, y + h);
   bg.addColorStop(0, '#05100f');
@@ -69,9 +123,8 @@ export function drawCosmeticsFieldBackdrop(ctx2, x, y, w, h, step, originX, orig
 }
 
 /* Территория в сцене предпросмотра — теми же плитками, что и в игре. */
-export function drawCosmeticsZone(ctx2, rect, ownerId, alpha, terrId, cellHint, deps) {
-  const { colors, boostHsl, hslToRgb, cosClampId, drawTerrTile } = deps;
-  const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
+function drawCosmeticsZone(ctx2, rect, ownerId, alpha, terrId, cellHint) {
+  const base = boostHsl(world.colors.get(ownerId) || 'hsl(210 20% 60%)');
   const id = cosClampId(terrId);
   const a = Math.max(0, Math.min(1, alpha));
   const now = performance.now();
@@ -113,9 +166,8 @@ export function drawCosmeticsZone(ctx2, rect, ownerId, alpha, terrId, cellHint, 
 
 /* Змейка в сцене предпросмотра: голова + хвост, обрезанный там, где ложится
    на уже нарисованную территорию. */
-export function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, headColor, tileCount, zone, deps) {
-  const { colors, boostHsl, drawSegTile, drawHead } = deps;
-  const base = boostHsl(colors.get(ownerId) || 'hsl(210 20% 60%)');
+function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, headId, headColor, tileCount, zone) {
+  const base = boostHsl(world.colors.get(ownerId) || 'hsl(210 20% 60%)');
   const c = headColor || base;
   const scell = Math.max(14, Math.round(cell));
   const now = performance.now();
@@ -132,7 +184,7 @@ export function drawCosmeticsSnake(ctx2, headX, headY, cell, ownerId, segId, hea
 
 /* Единая сцена предпросмотра — кусок игрового поля: своя территория, из неё
    выезжает змейка нормального размера, над головой плашка с ником. */
-export function drawCosmeticsScene(ctx2, rect, opts, deps) {
+export function drawCosmeticsScene(ctx2, rect, opts) {
   const { x: fx, y: fy, w: fw, h: fh } = rect;
   const {
     cat = '',
@@ -142,9 +194,8 @@ export function drawCosmeticsScene(ctx2, rect, opts, deps) {
     highlight = false,
     ids = {}
   } = opts || {};
-  const { colors, boostHsl, you, drawNamePlate, drawDeathFx, drawCaptureFx, COS_DEATH_MS } = deps;
 
-  const baseC = boostHsl(colors.get(you) || 'hsl(210 20% 60%)');
+  const baseC = boostHsl(world.colors.get(session.you) || 'hsl(210 20% 60%)');
   const scell = Math.max(
     COS_SCENE.cellMin,
     Math.min(COS_SCENE.cellMax, Math.round(COS_SCENE.cellRefMin * COS_SCENE.cellK))
@@ -173,11 +224,11 @@ export function drawCosmeticsScene(ctx2, rect, opts, deps) {
   const p = reduceMotion ? 0.55 : (now % period) / period;
 
   if (cat === 'death') {
-    drawCosmeticsZone(ctx2, zone, you, 0.55, ids.terr, scell, deps);
+    drawCosmeticsZone(ctx2, zone, session.you, 0.55, ids.terr, scell);
     const dieStart = 0.45;
     const dieP = p < dieStart ? -1 : Math.min(1, (p - dieStart) / (COS_DEATH_MS / period));
     if (dieP < 0) {
-      drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, 6, zone, deps);
+      drawCosmeticsSnake(ctx2, headX, headY, scell, session.you, ids.seg, ids.head, baseC, 6, zone);
       drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
     } else {
       drawDeathFx(ctx2, headX, headY, Math.max(16, Math.round(scell * 1.25)), baseC, ids.death, dieP);
@@ -186,8 +237,8 @@ export function drawCosmeticsScene(ctx2, rect, opts, deps) {
     return { scell, zone, headX, headY };
   }
 
-  drawCosmeticsZone(ctx2, zone, you, 0.55, ids.terr, scell, deps);
-  drawCosmeticsSnake(ctx2, headX, headY, scell, you, ids.seg, ids.head, baseC, cat === 'seg' ? 8 : 6, zone, deps);
+  drawCosmeticsZone(ctx2, zone, session.you, 0.55, ids.terr, scell);
+  drawCosmeticsSnake(ctx2, headX, headY, scell, session.you, ids.seg, ids.head, baseC, cat === 'seg' ? 8 : 6, zone);
   drawNamePlate(ctx2, label, headX, headY - scell * 0.95, baseC, ids.nameplate, 0.95, plateFont, now);
 
   const burstStart = 0.58;
@@ -230,14 +281,12 @@ export function drawCosmeticsScene(ctx2, rect, opts, deps) {
   return { scell, zone, headX, headY };
 }
 
-function cosmeticsFrameSampleName(i, deps) {
-  const { t } = deps;
+function cosmeticsFrameSampleName(i) {
   return i === 1 ? t('cosmetics.balance_you') : `${t('leaderboard.player')} ${i + 2}`;
 }
 
 /* Сцена предпросмотра рамки профиля — таблица лидеров в миниатюре. */
-export function drawCosmeticsFramesScene(ctx2, w, h, frameId, deps) {
-  const { t, fmtInt, drawFrameRow, COS_FONT } = deps;
+function drawCosmeticsFramesScene(ctx2, w, h, frameId) {
   const pad = Math.round(Math.min(w, h) * 0.09);
   const th = Math.max(22, Math.round(h * 0.12));
   const rowH = Math.max(22, Math.round(h * 0.12));
@@ -281,7 +330,7 @@ export function drawCosmeticsFramesScene(ctx2, w, h, frameId, deps) {
       rowH,
       frameId,
       i + 1,
-      cosmeticsFrameSampleName(i, deps),
+      cosmeticsFrameSampleName(i),
       fmtInt(1200 - i * 180),
       i === youRow
     );
@@ -290,52 +339,52 @@ export function drawCosmeticsFramesScene(ctx2, w, h, frameId, deps) {
 
 /* Одна функция на категорию для мини-иконки карточки в списке, вместо
    цепочки if (cat === ...). Ключи — COSMETICS_TABS (без 'title', у титулов
-   своя иконка-медаль в разметке карточки, см. renderCosmeticsTitles в
-   client.js) — забытая категория провалит tests/client_cosmetics_cats_usage. */
+   своя иконка-медаль в разметке карточки, см. renderCosmeticsTitlesImpl ниже
+   по файлу) — забытая категория провалит tests/client_cosmetics_cats_usage. */
 const MINI_COSMETIC_PREVIEW_BY_CAT = {
-  frame(c, { W, id }, deps) {
-    deps.drawFrameRow(c, 2, 8, W - 4, 13, id, 1, '', '', false);
-    deps.drawFrameRow(c, 2, 22, W - 4, 14, id, 2, '', '', true);
+  frame(c, { W, id }) {
+    drawFrameRow(c, 2, 8, W - 4, 13, id, 1, '', '', false);
+    drawFrameRow(c, 2, 22, W - 4, 14, id, 2, '', '', true);
   },
-  capturefx(c, { cx, cy, base, id, now }, deps) {
+  capturefx(c, { cx, cy, base, id, now }) {
     const p = ((now % 1400) / 1400);
     c.save();
     c.translate(0, 0);
-    deps.drawCaptureFx(c, cx, cy, 13, base, id, p);
+    drawCaptureFx(c, cx, cy, 13, base, id, p);
     c.restore();
   },
-  seg(c, { cy, base, id, now }, deps) {
+  seg(c, { cy, base, id, now }) {
     const cell = 10;
     for (let i = 0; i < 3; i++) {
-      deps.drawSegTile(c, 2 + i * cell, cy - cell / 2, cell, base, id, i, 0.95, now);
+      drawSegTile(c, 2 + i * cell, cy - cell / 2, cell, base, id, i, 0.95, now);
     }
-    deps.drawHead(c, 2 + 3 * cell + cell * 0.55, cy, cell, base, 0, 1, 0, now);
+    drawHead(c, 2 + 3 * cell + cell * 0.55, cy, cell, base, 0, 1, 0, now);
   },
-  nameplate(c, { cx, cy, base, id, now }, deps) {
-    deps.drawNamePlate(c, 'YOU', cx, cy + 9, base, id, 0.98, 10, now);
+  nameplate(c, { cx, cy, base, id, now }) {
+    drawNamePlate(c, 'YOU', cx, cy + 9, base, id, 0.98, 10, now);
   },
-  head(c, { cx, cy, base, id, now }, deps) {
-    deps.drawHead(c, cx - 3, cy, 34, base, id, 1, 0, now);
+  head(c, { cx, cy, base, id, now }) {
+    drawHead(c, cx - 3, cy, 34, base, id, 1, 0, now);
   },
-  terr(c, { W, H, base, id, now }, deps) {
+  terr(c, { W, H, base, id, now }) {
     const cell = 20;
     const ox = (W - cell * 2) / 2;
     const oy = (H - cell * 2) / 2;
     for (let gy = 0; gy < 2; gy++) {
       for (let gx = 0; gx < 2; gx++) {
-        deps.drawTerrTile(c, ox + gx * cell, oy + gy * cell, cell, base, id, gx, gy, 0.72, now);
+        drawTerrTile(c, ox + gx * cell, oy + gy * cell, cell, base, id, gx, gy, 0.72, now);
       }
     }
-    if (deps.cosClampId(id) === 5) {
-      deps.drawTerrSeam(c, ox, oy, cell * 2, base, 15, 0.9, true);
+    if (cosClampId(id) === 5) {
+      drawTerrSeam(c, ox, oy, cell * 2, base, 15, 0.9, true);
     }
   },
-  death(c, { cx, cy, base, id }, deps) {
-    deps.drawDeathFx(c, cx, cy, 11, base, id, 0.42);
+  death(c, { cx, cy, base, id }) {
+    drawDeathFx(c, cx, cy, 11, base, id, 0.42);
   },
-  title(c, { cx, cy, id }, deps) {
+  title(c, { cx, cy, id }) {
     c.save();
-    c.font = `700 11px ${deps.COS_FONT}`;
+    c.font = `700 11px ${COS_FONT}`;
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.fillStyle = 'rgba(255,255,255,0.9)';
@@ -345,9 +394,8 @@ const MINI_COSMETIC_PREVIEW_BY_CAT = {
 };
 
 /* Мини-превью в карточке списка магазина. */
-export function drawMiniCosmeticPreview(canvasEl, cat, id, deps) {
+function drawMiniCosmeticPreview(canvasEl, cat, id) {
   if (!canvasEl) return;
-  const { colors, boostHsl, you, cosPrepCanvas } = deps;
   const W = 44;
   const H = 44;
   const c = cosPrepCanvas(canvasEl, W, H);
@@ -362,62 +410,49 @@ export function drawMiniCosmeticPreview(canvasEl, cat, id, deps) {
     H,
     cx: W / 2,
     cy: H / 2,
-    base: boostHsl(colors.get(you) || 'hsl(210 20% 60%)'),
+    base: boostHsl(world.colors.get(session.you) || 'hsl(210 20% 60%)'),
     now: performance.now(),
     id
-  }, deps);
+  });
 }
 
 /* Какой id показывать в большом превью: у титулов свой потолок (16, а не 8). */
-export function cosmeticsPreviewIdImpl(deps) {
-  const { getCosmeticsCat, getCosmeticsSelId, COS_TITLE_MAX, cosClampId } = deps;
-  const cat = getCosmeticsCat();
+function cosmeticsPreviewIdImpl() {
+  const cat = cos.cat;
   const clamp = cat === 'title'
     ? (v) => Math.max(0, Math.min(COS_TITLE_MAX, Number(v) || 0))
     : cosClampId;
-  return clamp(getCosmeticsSelId());
+  return clamp(cos.selId);
 }
 
 /* Большое превью выбранного/наведённого предмета. Ни одной собственной
    отрисовки предметов: всё рисуют drawSegTile/drawHead/drawNamePlate/
    drawCaptureFx/drawFrameRow — то же самое, что и игровой цикл. */
-export function renderCosmeticsPreviewImpl(deps) {
-  const {
-    cosmeticsPreview,
-    cosPrepCanvas,
-    cosmeticsHintEl,
-    getCosmeticsCat,
-    cosmeticsLabel,
-    cosmeticsVariantName,
-    getYouTitleId,
-    youCos,
-    t,
-    cosTitlePrefix
-  } = deps;
-  if (!cosmeticsPreview) return;
-  const cssW = Math.max(200, Math.round(cosmeticsPreview.clientWidth || 420));
-  const cssH = Math.max(140, Math.round(cosmeticsPreview.clientHeight || 260));
-  const ctx2 = cosPrepCanvas(cosmeticsPreview, cssW, cssH);
+function renderCosmeticsPreviewImpl() {
+  if (!dom.cosmeticsPreview) return;
+  const cssW = Math.max(200, Math.round(dom.cosmeticsPreview.clientWidth || 420));
+  const cssH = Math.max(140, Math.round(dom.cosmeticsPreview.clientHeight || 260));
+  const ctx2 = cosPrepCanvas(dom.cosmeticsPreview, cssW, cssH);
   if (!ctx2) return;
 
   const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
   const now = reduceMotion ? 0 : performance.now();
-  const selId = cosmeticsPreviewIdImpl(deps);
-  const cat = getCosmeticsCat();
+  const selId = cosmeticsPreviewIdImpl();
+  const cat = cos.cat;
 
   const setHint = () => {
-    if (!cosmeticsHintEl) return;
-    cosmeticsHintEl.textContent = `${cosmeticsLabel(cat)}: ${cosmeticsVariantName(cat, selId)}`;
+    if (!dom.cosmeticsHint) return;
+    dom.cosmeticsHint.textContent = `${cosmeticsLabel(cat)}: ${cosmeticsVariantName(cat, selId)}`;
   };
 
   if (cat === 'frame') {
-    drawCosmeticsFramesScene(ctx2, cssW, cssH, selId, deps);
+    drawCosmeticsFramesScene(ctx2, cssW, cssH, selId);
     setHint();
     return;
   }
 
   const pick = (c, equipped) => (cat === c ? selId : equipped);
-  const titleId = pick('title', getYouTitleId());
+  const titleId = pick('title', cos.titleId);
 
   const pad = Math.round(Math.min(cssW, cssH) * COS_SCENE.pad);
   drawCosmeticsScene(
@@ -437,8 +472,7 @@ export function renderCosmeticsPreviewImpl(deps) {
         terr: pick('terr', youCos.eq.terr),
         death: pick('death', youCos.eq.death)
       }
-    },
-    deps
+    }
   );
 
   setHint();
@@ -446,61 +480,52 @@ export function renderCosmeticsPreviewImpl(deps) {
 
 /* Анимационный цикл большого превью — сцена «дышит» (захват, гибель), пока
    магазин открыт и предпочтения пользователя не просят убрать движение. */
-export function scheduleCosmeticsPreviewAnimImpl(deps) {
-  const {
-    getCosmeticsPreviewRaf,
-    setCosmeticsPreviewRaf,
-    getCosmeticsPreviewLastAt,
-    setCosmeticsPreviewLastAt,
-    cosmeticsOverlay
-  } = deps;
-  if (getCosmeticsPreviewRaf()) return;
+export function scheduleCosmeticsPreviewAnimImpl() {
+  if (cos.previewRaf) return;
   const tick = () => {
-    setCosmeticsPreviewRaf(0);
-    if (!cosmeticsOverlay || cosmeticsOverlay.classList.contains('hidden')) return;
+    cos.previewRaf = 0;
+    if (!dom.cosmeticsOverlay || dom.cosmeticsOverlay.classList.contains('hidden')) return;
     const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
     if (!reduceMotion) {
       const now = performance.now();
-      if (!getCosmeticsPreviewLastAt() || now - getCosmeticsPreviewLastAt() > 33) {
-        setCosmeticsPreviewLastAt(now);
-        renderCosmeticsPreviewImpl(deps);
+      if (!cos.previewLastAt || now - cos.previewLastAt > 33) {
+        cos.previewLastAt = now;
+        renderCosmeticsPreviewImpl();
       }
-      setCosmeticsPreviewRaf(requestAnimationFrame(tick));
+      cos.previewRaf = requestAnimationFrame(tick);
     }
   };
-  setCosmeticsPreviewRaf(requestAnimationFrame(tick));
+  cos.previewRaf = requestAnimationFrame(tick);
 }
 
 /* Смена выбранного предмета в списке. K7: не пересобирает весь список —
    только переключает класс на уже существующих карточках, иначе фокус с
    клавиатуры улетал в <body>. Полная пересборка — только если карточек с
    data-cosid в DOM ещё нет (список только загружается). */
-export function cosmeticsSelectItemImpl(id, deps) {
-  const { getCosmeticsSelId, setCosmeticsSelId, cosmeticsItemsEl, syncCosmeticsUi } = deps;
+function cosmeticsSelectItemImpl(id) {
   const next = Number(id) || 0;
-  if (getCosmeticsSelId() === next) {
-    renderCosmeticsPreviewImpl(deps);
+  if (cos.selId === next) {
+    renderCosmeticsPreviewImpl();
     return;
   }
-  setCosmeticsSelId(next);
+  cos.selId = next;
   let patched = false;
   try {
-    const cards = cosmeticsItemsEl?.querySelectorAll?.('.cosmeticsItem[data-cosid], .titleItem[data-cosid]');
+    const cards = dom.cosmeticsItems?.querySelectorAll?.('.cosmeticsItem[data-cosid], .titleItem[data-cosid]');
     if (cards && cards.length) {
       for (const c of cards) c.classList.toggle('isSelected', Number(c.dataset.cosid) === next);
       patched = true;
     }
   } catch {}
-  if (patched) renderCosmeticsPreviewImpl(deps);
-  else syncCosmeticsUi();
+  if (patched) renderCosmeticsPreviewImpl();
+  else syncCosmeticsUiImpl();
 }
 
 /* Скелетон списка/шапки, пока локальное состояние ещё не готово (первая
    загрузка страницы, кэш ещё не прочитан). */
-export function renderCosmeticsSkeletonImpl(deps) {
-  const { cosmeticsEarnStyleEl, cosmeticsTabsEl, cosmeticsItemsEl, cosmeticsHintEl } = deps;
+function renderCosmeticsSkeletonImpl() {
   try {
-    if (cosmeticsEarnStyleEl) {
+    if (dom.cosmeticsEarnStyle) {
       const wrap = document.createElement('div');
       wrap.style.display = 'grid';
       wrap.style.gap = '8px';
@@ -516,10 +541,10 @@ export function renderCosmeticsSkeletonImpl(deps) {
       wrap.appendChild(l1);
       wrap.appendChild(l2);
       wrap.appendChild(l3);
-      cosmeticsEarnStyleEl.replaceChildren(wrap);
+      dom.cosmeticsEarnStyle.replaceChildren(wrap);
     }
 
-    if (cosmeticsTabsEl) {
+    if (dom.cosmeticsTabs) {
       const btns = Array.from({ length: 5 }).map(() => {
         const b = document.createElement('button');
         b.type = 'button';
@@ -532,10 +557,10 @@ export function renderCosmeticsSkeletonImpl(deps) {
         b.appendChild(sk);
         return b;
       });
-      cosmeticsTabsEl.replaceChildren(...btns);
+      dom.cosmeticsTabs.replaceChildren(...btns);
     }
 
-    if (cosmeticsItemsEl) {
+    if (dom.cosmeticsItems) {
       const items = Array.from({ length: 5 }).map(() => {
         const card = document.createElement('div');
         card.className = 'cosmeticsItem';
@@ -568,174 +593,86 @@ export function renderCosmeticsSkeletonImpl(deps) {
         card.insertBefore(prev, left);
         return card;
       });
-      cosmeticsItemsEl.replaceChildren(...items);
+      dom.cosmeticsItems.replaceChildren(...items);
     }
 
-    if (cosmeticsHintEl) cosmeticsHintEl.textContent = '';
+    if (dom.cosmeticsHint) dom.cosmeticsHint.textContent = '';
   } catch {}
 }
 
 /* Открыть оверлей магазина: гарантирует локально готовое состояние, ставит
    превью на реально надетый предмет и синхронизирует список. */
-export function showCosmeticsOverlayImpl(deps) {
-  const {
-    cosmeticsOverlay,
-    getCosmeticsLoaded,
-    cosmeticsEnsureLocalReady,
-    setCosmeticsOpen,
-    overlayManager,
-    cosmeticsOpClear,
-    getCosmeticsCat,
-    getYouTitleId,
-    cosmeticsEqForCat,
-    setCosmeticsSelId,
-    setCosmeticsStatus,
-    wsIsConnected,
-    getCosmeticsSource,
-    t,
-    syncOverlayUiState,
-    syncCosmeticsUi
-  } = deps;
-  if (!cosmeticsOverlay) return;
-  if (!getCosmeticsLoaded()) {
+export function showCosmeticsOverlayImpl() {
+  if (!dom.cosmeticsOverlay) return;
+  if (!cos.loaded) {
     cosmeticsEnsureLocalReady();
   }
-  setCosmeticsOpen(true);
-  cosmeticsOverlay.classList.remove('hidden');
+  cos.open = true;
+  dom.cosmeticsOverlay.classList.remove('hidden');
   overlayManager.open('cosmetics');
   cosmeticsOpClear();
-  const cat = getCosmeticsCat();
-  const eq0 = cat === 'title' ? getYouTitleId() : cosmeticsEqForCat(cat);
-  setCosmeticsSelId(Number.isFinite(Number(eq0)) ? Number(eq0) : 0);
+  const cat = cos.cat;
+  const eq0 = cat === 'title' ? cos.titleId : cosmeticsEqForCat(cat);
+  cos.selId = Number.isFinite(Number(eq0)) ? Number(eq0) : 0;
   setCosmeticsStatus('', '');
   if (!wsIsConnected()) setCosmeticsStatus(() => t('cosmetics.no_connection'), 'info');
-  else if (getCosmeticsSource() !== 'server') setCosmeticsStatus(() => t('cosmetics.unconfirmed_hint'), 'info');
+  else if (cos.source !== 'server') setCosmeticsStatus(() => t('cosmetics.unconfirmed_hint'), 'info');
   syncOverlayUiState();
-  syncCosmeticsUi();
+  syncCosmeticsUiImpl();
   overlayManager.focusDefault('cosmetics');
 }
 
 /* Скрыть оверлей магазина и вернуть жизнь панели «Ваш облик» в меню. */
-export function hideCosmeticsOverlayImpl(deps) {
-  const {
-    scheduleMenuSkinPreview,
-    cosmeticsOverlay,
-    setCosmeticsOpen,
-    overlayManager,
-    cosmeticsOpClear,
-    setCosmeticsStatus,
-    syncOverlayUiState,
-    getCosmeticsPreviewRaf,
-    setCosmeticsPreviewRaf
-  } = deps;
+export function hideCosmeticsOverlayImpl() {
   try {
     setTimeout(() => scheduleMenuSkinPreview(), 0);
   } catch {}
-  if (!cosmeticsOverlay) return;
-  setCosmeticsOpen(false);
-  cosmeticsOverlay.classList.add('hidden');
+  if (!dom.cosmeticsOverlay) return;
+  cos.open = false;
+  dom.cosmeticsOverlay.classList.add('hidden');
   overlayManager.close('cosmetics');
   cosmeticsOpClear();
   setCosmeticsStatus('', '');
   syncOverlayUiState();
-  const raf = getCosmeticsPreviewRaf();
+  const raf = cos.previewRaf;
   if (raf) {
     try {
       cancelAnimationFrame(raf);
     } catch {}
-    setCosmeticsPreviewRaf(0);
+    cos.previewRaf = 0;
   }
 }
 
 /* Полная синхронизация списка/шапки магазина с текущим состоянием (баланс,
    вкладки, фильтр, карточки предметов) + большое превью. */
-export function syncCosmeticsUiImpl(deps) {
-  const {
-    cosmeticsOverlay,
-    getCosmeticsLoaded,
-    cosmeticsEnsureLocalReady,
-    cosmeticsStyleEl,
-    getYouStyle,
-    cosmeticsFilterAllBtn,
-    cosmeticsFilterOwnedBtn,
-    cosmeticsFilterAvailableBtn,
-    getCosmeticsFilter,
-    cosmeticsEarnStyleEl,
-    getCosmeticsEarnExpanded,
-    setCosmeticsEarnExpanded,
-    escapeHtml,
-    t,
-    getCosmeticsSource,
-    setSafeHtml,
-    cosmeticsTabsEl,
-    COSMETICS_TABS,
-    COS_TITLE_MAX,
-    COSMETICS_MAX_ID,
-    cosTitlesUnlockedCount,
-    cosmeticsOwnedCount,
-    cosmeticsLabel,
-    COSMETICS_TAB_ICON_BY_CAT,
-    getCosmeticsCat,
-    setCosmeticsCat,
-    getCosmeticsSelId,
-    setCosmeticsSelId,
-    getYouTitleId,
-    cosmeticsEqForCat,
-    getCosmeticsTabsScrolledCat,
-    setCosmeticsTabsScrolledCat,
-    cosmeticsWhereEl,
-    cosmeticsItemsEl,
-    renderCosmeticsTitles,
-    cosmeticsMaskForCat,
-    wsIsConnected,
-    visibleItems,
-    cosmeticsPrices,
-    tierClass,
-    cosmeticsTierLabel,
-    cosmeticsVariantName,
-    drawMiniCosmeticPreview: drawMini,
-    buyButtonState,
-    getPendingCosmeticsOp,
-    cosmeticsOpIsPending,
-    fmtInt,
-    cosmeticsFormatCost,
-    cosmeticsOpBegin,
-    setCosmeticsStatus,
-    cosmeticsServerReady,
-    cosmeticsBuyLocal,
-    wsSend,
-    equipButtonState,
-    cosmeticsEquipLocal,
-    cosmeticsSetDesiredEq
-  } = deps;
+export function syncCosmeticsUiImpl() {
+  if (!dom.cosmeticsOverlay || dom.cosmeticsOverlay.classList.contains('hidden')) return;
 
-  if (!cosmeticsOverlay || cosmeticsOverlay.classList.contains('hidden')) return;
-
-  if (!getCosmeticsLoaded()) {
+  if (!cos.loaded) {
     cosmeticsEnsureLocalReady();
   }
 
-  if (!getCosmeticsLoaded()) {
-    if (cosmeticsStyleEl) cosmeticsStyleEl.textContent = '—';
-    renderCosmeticsSkeletonImpl(deps);
+  if (!cos.loaded) {
+    if (dom.cosmeticsStyle) dom.cosmeticsStyle.textContent = '—';
+    renderCosmeticsSkeletonImpl();
     return;
   }
 
-  if (cosmeticsStyleEl) cosmeticsStyleEl.textContent = String(Math.floor(getYouStyle() || 0));
+  if (dom.cosmeticsStyle) dom.cosmeticsStyle.textContent = String(Math.floor(cos.style || 0));
 
-  const filter = getCosmeticsFilter();
-  if (cosmeticsFilterAllBtn) cosmeticsFilterAllBtn.classList.toggle('isActive', filter === 'all');
-  if (cosmeticsFilterOwnedBtn) cosmeticsFilterOwnedBtn.classList.toggle('isActive', filter === 'owned');
-  if (cosmeticsFilterAvailableBtn) cosmeticsFilterAvailableBtn.classList.toggle('isActive', filter === 'available');
+  const filter = cos.filter;
+  if (dom.cosmeticsFilterAllBtn) dom.cosmeticsFilterAllBtn.classList.toggle('isActive', filter === 'all');
+  if (dom.cosmeticsFilterOwnedBtn) dom.cosmeticsFilterOwnedBtn.classList.toggle('isActive', filter === 'owned');
+  if (dom.cosmeticsFilterAvailableBtn) dom.cosmeticsFilterAvailableBtn.classList.toggle('isActive', filter === 'available');
 
-  if (cosmeticsEarnStyleEl) {
-    if (!getCosmeticsEarnExpanded()) {
+  if (dom.cosmeticsEarnStyle) {
+    if (!cos.earnExpanded) {
       const hint = `<div>${escapeHtml(t('cosmetics.style_hint'))}</div>`;
-      const off = getCosmeticsSource() === 'cache' ? `<div style="margin-top:6px">${escapeHtml(t('cosmetics.offline_hint'))}</div>` : '';
-      setSafeHtml(cosmeticsEarnStyleEl, hint + off);
+      const off = cos.source === 'cache' ? `<div style="margin-top:6px">${escapeHtml(t('cosmetics.offline_hint'))}</div>` : '';
+      setSafeHtml(dom.cosmeticsEarnStyle, hint + off);
     } else {
       setSafeHtml(
-        cosmeticsEarnStyleEl,
+        dom.cosmeticsEarnStyle,
         `
         <div><b>${escapeHtml(t('cosmetics.earn_title'))}</b></div>
         <div class="row"><span class="k">${escapeHtml(t('cosmetics.earn_kills'))}</span><span>${escapeHtml(t('cosmetics.earn_kills_desc'))}</span></div>
@@ -748,13 +685,13 @@ export function syncCosmeticsUiImpl(deps) {
     }
   }
 
-  if (cosmeticsTabsEl) {
+  if (dom.cosmeticsTabs) {
     const btns = COSMETICS_TABS.map((cid) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = cid === 'title' ? 'cosmeticsTabBtn isTitles' : 'cosmeticsTabBtn';
       const total = cid === 'title' ? COS_TITLE_MAX : COSMETICS_MAX_ID + 1;
-      const have = cid === 'title' ? cosTitlesUnlockedCount() : cosmeticsOwnedCount(cid);
+      const have = cid === 'title' ? cosTitlesUnlockedCountImpl() : cosmeticsOwnedCount(cid);
       const fullLabel = `${cosmeticsLabel(cid)} ${have}/${total}`;
       const icon = document.createElement('span');
       icon.className = 'cosmeticsTabIcon';
@@ -768,17 +705,17 @@ export function syncCosmeticsUiImpl(deps) {
       b.title = fullLabel;
       b.setAttribute('aria-label', fullLabel);
       b.setAttribute('role', 'tab');
-      b.setAttribute('aria-selected', cid === getCosmeticsCat() ? 'true' : 'false');
+      b.setAttribute('aria-selected', cid === cos.cat ? 'true' : 'false');
       b.addEventListener('click', () => {
-        setCosmeticsCat(cid);
-        setCosmeticsSelId(cid === 'title' ? Math.max(0, Number(getYouTitleId()) || 0) : (Number(cosmeticsEqForCat(cid)) || 0));
-        syncCosmeticsUiImpl(deps);
+        cos.cat = cid;
+        cos.selId = cid === 'title' ? Math.max(0, Number(cos.titleId) || 0) : (Number(cosmeticsEqForCat(cid)) || 0);
+        syncCosmeticsUiImpl();
       });
       return b;
     });
-    cosmeticsTabsEl.replaceChildren(...btns);
-    if (getCosmeticsTabsScrolledCat() !== getCosmeticsCat()) {
-      setCosmeticsTabsScrolledCat(getCosmeticsCat());
+    dom.cosmeticsTabs.replaceChildren(...btns);
+    if (cos.tabsScrolledCat !== cos.cat) {
+      cos.tabsScrolledCat = cos.cat;
       try {
         const active = btns.find((b) => b.getAttribute('aria-selected') === 'true');
         active?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
@@ -786,29 +723,29 @@ export function syncCosmeticsUiImpl(deps) {
     }
   }
 
-  const cosmeticsCat = getCosmeticsCat();
+  const cosmeticsCat = cos.cat;
 
   try {
-    if (cosmeticsWhereEl) cosmeticsWhereEl.textContent = t(`cosmetics.where_${cosmeticsCat}`) || '';
+    if (dom.cosmeticsWhere) dom.cosmeticsWhere.textContent = t(`cosmetics.where_${cosmeticsCat}`) || '';
   } catch {}
 
-  if (cosmeticsItemsEl && cosmeticsCat === 'title') {
-    renderCosmeticsTitles();
-    renderCosmeticsPreviewImpl(deps);
-    scheduleCosmeticsPreviewAnimImpl(deps);
+  if (dom.cosmeticsItems && cosmeticsCat === 'title') {
+    renderCosmeticsTitlesImpl();
+    renderCosmeticsPreviewImpl();
+    scheduleCosmeticsPreviewAnimImpl();
     return;
   }
 
-  if (cosmeticsItemsEl) {
-    cosmeticsItemsEl.classList.remove('isTitles');
+  if (dom.cosmeticsItems) {
+    dom.cosmeticsItems.classList.remove('isTitles');
     const mask = cosmeticsMaskForCat(cosmeticsCat);
     const eq = cosmeticsEqForCat(cosmeticsCat);
-    const confirmed = getCosmeticsSource() === 'server';
+    const confirmed = cos.source === 'server';
     const online = wsIsConnected();
     const items = [];
-    const balance = Math.max(0, Math.floor(Number(getYouStyle()) || 0));
+    const balance = Math.max(0, Math.floor(Number(cos.style) || 0));
 
-    const order = visibleItems(cosmeticsCat, filter, balance, mask, eq, cosmeticsPrices, COSMETICS_MAX_ID);
+    const order = visibleItems(cosmeticsCat, filter, balance, mask, eq, cos.prices, COSMETICS_MAX_ID);
 
     let lastTier = '';
     for (const entry of order) {
@@ -830,20 +767,20 @@ export function syncCosmeticsUiImpl(deps) {
       }
 
       const card = document.createElement('div');
-      card.className = `cosmeticsItem ${tierClass(tier)}` + (getCosmeticsSelId() === id ? ' isSelected' : '');
+      card.className = `cosmeticsItem ${tierClass(tier)}` + (cos.selId === id ? ' isSelected' : '');
       card.dataset.cosid = String(id);
       card.classList.toggle('isOwned', owned);
       card.classList.toggle('isEquipped', owned && equipped);
       card.classList.toggle('isLocked', !owned && balance < price);
       card.tabIndex = 0;
       card.addEventListener('click', () => {
-        cosmeticsSelectItemImpl(id, deps);
+        cosmeticsSelectItemImpl(id);
       });
-      card.addEventListener('focus', () => cosmeticsSelectItemImpl(id, deps));
+      card.addEventListener('focus', () => cosmeticsSelectItemImpl(id));
       card.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          cosmeticsSelectItemImpl(id, deps);
+          cosmeticsSelectItemImpl(id);
         }
       });
 
@@ -851,7 +788,7 @@ export function syncCosmeticsUiImpl(deps) {
       prev.className = 'cosmeticsItemPreview';
       const cvs = document.createElement('canvas');
       prev.appendChild(cvs);
-      drawMini(cvs, cosmeticsCat, id, deps);
+      drawMiniCosmeticPreview(cvs, cosmeticsCat, id);
 
       const left = document.createElement('div');
       left.className = 'cosmeticsItemLeft';
@@ -901,7 +838,7 @@ export function syncCosmeticsUiImpl(deps) {
         const pending = cosmeticsOpIsPending(cat, id);
         const poor = balance < price;
 
-        const state = buyButtonState({ pending, online, confirmed, pendingOtherOp: getPendingCosmeticsOp(), poor });
+        const state = buyButtonState({ pending, online, confirmed, pendingOtherOp: cos.pendingOp, poor });
 
         const buy = document.createElement('button');
         buy.type = 'button';
@@ -917,16 +854,16 @@ export function syncCosmeticsUiImpl(deps) {
         buy.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (getPendingCosmeticsOp()) return;
+          if (cos.pendingOp) return;
           if (poor) {
             setCosmeticsStatus(
               () => `${t('cosmetics.need_more')} ${fmtInt(missing)} ✨ — ${t('cosmetics.need_more_hint')}`,
               'error'
             );
-            if (!getCosmeticsEarnExpanded()) setCosmeticsEarnExpanded(true);
-            syncCosmeticsUiImpl(deps);
+            if (!cos.earnExpanded) cos.earnExpanded = true;
+            syncCosmeticsUiImpl();
             try {
-              cosmeticsEarnStyleEl?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+              dom.cosmeticsEarnStyle?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
             } catch {}
             return;
           }
@@ -940,9 +877,9 @@ export function syncCosmeticsUiImpl(deps) {
           cosmeticsOpBegin(cat, id);
           setCosmeticsStatus(() => t('cosmetics.op_pending'), 'info');
           if (!wsSend('cosmeticsBuy', { cat, id })) {
-            deps.cosmeticsOpClear();
+            cosmeticsOpClear();
             setCosmeticsStatus(() => t('cosmetics.no_connection'), 'error');
-            syncCosmeticsUiImpl(deps);
+            syncCosmeticsUiImpl();
           }
         });
         right.appendChild(buy);
@@ -993,7 +930,7 @@ export function syncCosmeticsUiImpl(deps) {
 
     if (!items.length) {
       setSafeHtml(
-        cosmeticsItemsEl,
+        dom.cosmeticsItems,
         `
         <div class="roomsEmpty">
           <div class="roomsEmptyTitle">${escapeHtml(t('cosmetics.empty_title'))}</div>
@@ -1002,12 +939,12 @@ export function syncCosmeticsUiImpl(deps) {
         `
       );
     } else {
-      cosmeticsItemsEl.replaceChildren(...items);
+      dom.cosmeticsItems.replaceChildren(...items);
     }
   }
 
-  renderCosmeticsPreviewImpl(deps);
-  scheduleCosmeticsPreviewAnimImpl(deps);
+  renderCosmeticsPreviewImpl();
+  scheduleCosmeticsPreviewAnimImpl();
 }
 
 /* --- Титулы в магазине -----------------------------------------------------
@@ -1015,65 +952,59 @@ export function syncCosmeticsUiImpl(deps) {
    а вместо «Купить» — «Надеть». Отправка идёт сообщением `titleEquip`.
    Вынесено из client.js вместе с остальной DOM-обвязкой магазина. */
 
-export function cosTitleUnlockedImpl(id, deps) {
-  const { COS_TITLE_MAX, getYouTitleMask } = deps;
+function cosTitleUnlockedImpl(id) {
   const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
   if (i === 0) return true;
-  return (Number(getYouTitleMask()) & (1 << i)) !== 0;
+  return (Number(cos.titleMask) & (1 << i)) !== 0;
 }
 
 /* C3: прогресс к титулу. Возвращает {frac, cur, max} либо null, если данных
    нет. Открытый титул — {frac:1}, без счётчика: сервер не присылает прогресс
    по уже закрытым ачивкам, и придумывать «10/10» было бы враньём. */
-export function cosTitleProgressImpl(id, deps) {
-  const { COS_TITLE_MAX, cosTitleAchvById, achvProgressById } = deps;
+function cosTitleProgressImpl(id) {
   const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
   if (i === 0) return null;
-  if (cosTitleUnlockedImpl(i, deps)) return { frac: 1, cur: 0, max: 0 };
-  const achv = cosTitleAchvById.get(i);
+  if (cosTitleUnlockedImpl(i)) return { frac: 1, cur: 0, max: 0 };
+  const achv = cos.titleAchvById.get(i);
   if (achv == null) return null;
-  const p = achvProgressById.get(achv);
+  const p = cos.achvProgressById.get(achv);
   if (!p || !(p.max > 0)) return null;
   return { frac: Math.max(0, Math.min(1, p.cur / p.max)), cur: p.cur, max: p.max };
 }
 
 /* C3: «37/100», «0/100 000» — разряды через УЗКИЙ НЕРАЗРЫВНЫЙ пробел (U+202F).
    Сама группировка и константа разделителя — в client_format.js. */
-export function cosFormatCountImpl(n, deps) {
-  return deps.formatGroupedCount(n);
+function cosFormatCountImpl(n) {
+  return formatGroupedCount(n);
 }
 
-export function cosTitlesUnlockedCountImpl(deps) {
-  const { COS_TITLE_MAX } = deps;
+function cosTitlesUnlockedCountImpl() {
   let n = 0;
   for (let i = 1; i <= COS_TITLE_MAX; i++) {
-    if (cosTitleUnlockedImpl(i, deps)) n++;
+    if (cosTitleUnlockedImpl(i)) n++;
   }
   return n;
 }
 
-export function cosTitleEquipImpl(id, deps) {
-  const { COS_TITLE_MAX, setYouTitleId, getYou, cosTitleByPlayer, cosmeticsCacheSave, wsSend, setCosmeticsStatus, t, wsIsConnected, syncCosmeticsUi } = deps;
+function cosTitleEquipImpl(id) {
   const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
-  if (!cosTitleUnlockedImpl(i, deps)) return;
-  setYouTitleId(i);
-  const you = getYou();
-  if (you) {
-    if (i) cosTitleByPlayer.set(you, i);
-    else cosTitleByPlayer.delete(you);
+  if (!cosTitleUnlockedImpl(i)) return;
+  cos.titleId = i;
+  if (session.you) {
+    if (i) cos.titleByPlayer.set(session.you, i);
+    else cos.titleByPlayer.delete(session.you);
   }
   cosmeticsCacheSave();
   if (!wsSend('titleEquip', { id: i })) {
     setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'info');
   }
-  syncCosmeticsUi();
+  syncCosmeticsUiImpl();
 }
 
-export function renderCosmeticsTitlesImpl(deps) {
-  const { cosmeticsItemsEl, t, tierClass, getCosmeticsFilter, getYouTitleMask, getCosmeticsSource, COS_TITLE_MAX, getYouTitleId, getCosmeticsSelId, cosmeticsSelectItem, cosTitleName, cosTitleReq, tfmt, escapeHtml, setSafeHtml } = deps;
-  if (!cosmeticsItemsEl) return;
-  const cosmeticsFilter = getCosmeticsFilter();
-  const cosmeticsSelId = getCosmeticsSelId();
+function renderCosmeticsTitlesImpl() {
+  if (!dom.cosmeticsItems) return;
+  const cosmeticsFilter = cos.filter;
+  const cosmeticsSelId = cos.selId;
   const items = [];
 
   const hint = document.createElement('div');
@@ -1081,7 +1012,7 @@ export function renderCosmeticsTitlesImpl(deps) {
   hint.textContent = t('cosmetics.title_free_hint');
   items.push(hint);
 
-  if (!getYouTitleMask() && getCosmeticsSource() !== 'server') {
+  if (!cos.titleMask && cos.source !== 'server') {
     const note = document.createElement('div');
     note.className = 'cosmeticsItemWhere';
     note.textContent = t('cosmetics.titles_unavailable');
@@ -1089,8 +1020,8 @@ export function renderCosmeticsTitlesImpl(deps) {
   }
 
   for (let id = 0; id <= COS_TITLE_MAX; id++) {
-    const unlocked = cosTitleUnlockedImpl(id, deps);
-    const worn = Number(getYouTitleId()) === id;
+    const unlocked = cosTitleUnlockedImpl(id);
+    const worn = Number(cos.titleId) === id;
     if (cosmeticsFilter === 'owned' && !unlocked) continue;
     if (cosmeticsFilter === 'available' && unlocked) continue;
 
@@ -1107,10 +1038,10 @@ export function renderCosmeticsTitlesImpl(deps) {
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
     card.addEventListener('click', () => {
-      cosmeticsSelectItem(id);
+      cosmeticsSelectItemImpl(id);
     });
     // Фокус с клавиатуры равен выбору: Tab по списку сразу меняет превью.
-    card.addEventListener('focus', () => cosmeticsSelectItem(id));
+    card.addEventListener('focus', () => cosmeticsSelectItemImpl(id));
 
     const medal = document.createElement('span');
     medal.className = 'titleMedal';
@@ -1143,7 +1074,7 @@ export function renderCosmeticsTitlesImpl(deps) {
        титула счётчика нет — там полная полоса без подписи. Если сервер старый
        или связка «титул → ачивка» не пришла, cosTitleProgressImpl() вернёт
        null и блок просто не рисуется, как и раньше. */
-    const prog = cosTitleProgressImpl(id, deps);
+    const prog = cosTitleProgressImpl(id);
     if (prog != null) {
       const row = document.createElement('div');
       row.className = 'cosmeticsProgressRow';
@@ -1157,8 +1088,8 @@ export function renderCosmeticsTitlesImpl(deps) {
         const lab = document.createElement('span');
         lab.className = 'cosmeticsItemProgressLabel';
         lab.textContent = tfmt('cosmetics.progress_of', {
-          cur: cosFormatCountImpl(prog.cur, deps),
-          max: cosFormatCountImpl(prog.max, deps),
+          cur: cosFormatCountImpl(prog.cur),
+          max: cosFormatCountImpl(prog.max),
         });
         row.appendChild(lab);
       }
@@ -1181,7 +1112,7 @@ export function renderCosmeticsTitlesImpl(deps) {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        cosTitleEquipImpl(id, deps);
+        cosTitleEquipImpl(id);
       });
     }
     right.appendChild(btn);
@@ -1193,11 +1124,11 @@ export function renderCosmeticsTitlesImpl(deps) {
   }
 
   // Контейнер несёт --title-accent для вкладки титулов (см. .cosmeticsItems.isTitles).
-  cosmeticsItemsEl.classList.add('isTitles');
+  dom.cosmeticsItems.classList.add('isTitles');
 
   if (items.length <= 1) {
     setSafeHtml(
-      cosmeticsItemsEl,
+      dom.cosmeticsItems,
       `
       <div class="roomsEmpty">
         <div class="roomsEmptyTitle">${escapeHtml(t('cosmetics.empty_title'))}</div>
@@ -1207,5 +1138,5 @@ export function renderCosmeticsTitlesImpl(deps) {
     );
     return;
   }
-  cosmeticsItemsEl.replaceChildren(...items);
+  dom.cosmeticsItems.replaceChildren(...items);
 }
