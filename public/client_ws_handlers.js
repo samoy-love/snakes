@@ -1212,7 +1212,7 @@ export function onState(s, ctx) {
 // через замыкание client.js. Поля, которые тело переприсваивает (не мутирует
 // на месте), возвращаются вместе.
 export function onInit(msg, ctx) {
-  const { markJoinFunnelInit, rejoinPending, rejoinFinish, addToast, t, applyMatchPhase, updateRoomInfo, resetClientForNewMatch, hideMatchOverlay, showMatchOverlay, renderMatchResults, updateMatchCountdown, setRoomsCreateOpen, updateRoomsCreateUi, hideMenuOverlay, hideOverlays, syncMenuOnboardingUi, obResetMatch, obAnnounceShop, colors, ownerFillStyleCache, minimapOwnerRgbCache, nameById, nameEnById, cosTerrByPlayer, cosDeathByPlayer, cosTitleByPlayer, botArchByPlayer, captureAnchorByOwner, coolDeadlineByOwner, minimap, mmCtx, storedName, wsSend, onCosmetics, renderTopHud, PHASE_FINAL } = ctx;
+  const { markJoinFunnelInit, rejoinPending, rejoinFinish, addToast, t, applyMatchPhase, resetClientForNewMatch, hideMatchOverlay, showMatchOverlay, renderMatchResults, updateMatchCountdown, setRoomsCreateOpen, updateRoomsCreateUi, hideMenuOverlay, hideOverlays, syncMenuOnboardingUi, obResetMatch, obAnnounceShop, colors, ownerFillStyleCache, minimapOwnerRgbCache, nameById, nameEnById, cosTerrByPlayer, cosDeathByPlayer, cosTitleByPlayer, botArchByPlayer, captureAnchorByOwner, coolDeadlineByOwner, minimap, mmCtx, storedName, wsSend, onCosmetics, renderTopHud, PHASE_FINAL } = ctx;
   let { W, H, N, tickMs, lastEventsTick, lastEventsAt, you, mapCells, roomId, roomLimit, rejoinRoomId, userLeftRoom, matchSeq, matchEndTick, matchEnded, matchResetAt, matchPhaseBannerSeq, matchContinuePending, matchContinueTimeout, createRoomPending, selectedRoomId, started, gridOwner, trailOwner, minimapGridOwner, botIds, lastRoi, gridFillAt, coolSeenAt, minimapImage, youKills, youStreak, lastMatchResults } = ctx;
 
   markJoinFunnelInit();
@@ -1245,7 +1245,10 @@ export function onInit(msg, ctx) {
   // C2: фаза приходит прямо в init — при входе посреди матча баннер не нужен.
   matchPhaseBannerSeq = Number(msg?.phase) === PHASE_FINAL ? matchSeq : -1;
   applyMatchPhase(msg?.phase, msg?.phaseUntil, false, matchSeq);
-  updateRoomInfo();
+  // updateRoomInfo() отсюда убран: он читает roomId/roomLimit из client.js
+  // через геттеры, а туда значения попадают только после возврата из этого
+  // обработчика — вызов здесь показывал прежнее состояние. Перерисовку
+  // делает сам client.js сразу после присваивания результата.
 
   matchContinuePending = false;
   if (matchContinueTimeout) {

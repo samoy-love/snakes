@@ -4669,6 +4669,13 @@ function onInit(msg) {
   youKills = res.youKills;
   youStreak = res.youStreak;
   lastMatchResults = res.lastMatchResults;
+
+  // Строку «Комната: N / M» перерисовываем ЗДЕСЬ, а не внутри обработчика.
+  // handleInit ведёт свои копии roomId/roomLimit и возвращает их наружу, а
+  // updateRoomInfo() читает переменные этого модуля через getRoomId() —
+  // вызванная до присваиваний выше, она видела прежний roomId (null) и писала
+  // в HUD «Комната: … / 16» на весь матч.
+  updateRoomInfo();
 }
 
 function onCosmetics(msg) {
