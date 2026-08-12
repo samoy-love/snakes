@@ -107,6 +107,23 @@ test('renderCosmeticsSkeletonImpl() не читает идентификатор
   );
 });
 
+// renderCosmeticsTitlesImpl() — раздел «Титулы» магазина косметики, вынесен
+// из client.js вместе с остальной DOM-обвязкой магазина (renderCosmeticsTitles
+// в client.js теперь тонкая обёртка над этой функцией с deps).
+test('renderCosmeticsTitlesImpl() не читает идентификаторы, которых нет ни в её теле, ни на верхнем уровне client_shop_ui.js', () => {
+  const masked = maskNonCode(CLIENT_SHOP_UI_JS);
+  const body = extractFunctionBody(masked, 'renderCosmeticsTitlesImpl');
+  const topLevel = extractDeclared(masked);
+
+  const unknown = unknownIdentifiers(body, [...topLevel]);
+
+  assert.deepEqual(
+    unknown,
+    [],
+    `renderCosmeticsTitlesImpl() читает необъявленные идентификаторы: ${unknown.join(', ')}`
+  );
+});
+
 // computeDrawCamera() — вынесена из draw() (§ шаг «Камера/зум/screenBounds»).
 // Живёт в своём файле и не тянет ничего из client.js через замыкание — все
 // значения приходят параметром deps, поэтому её верхний уровень собственный.

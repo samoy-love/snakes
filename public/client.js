@@ -78,10 +78,16 @@ import { buyButtonState, equipButtonState, visibleItems } from './client_cos_ui.
 import { renderMenuMetaImpl, showMenuOverlayImpl, updateMenuNameUiImpl } from './client_menu_ui.js';
 import {
   COS_SCENE,
+  cosFormatCountImpl,
   cosmeticsSelectItemImpl,
+  cosTitleEquipImpl,
+  cosTitleProgressImpl,
+  cosTitlesUnlockedCountImpl,
+  cosTitleUnlockedImpl,
   drawCosmeticsScene,
   drawMiniCosmeticPreview as drawMiniCosmeticPreviewImpl,
   hideCosmeticsOverlayImpl,
+  renderCosmeticsTitlesImpl,
   scheduleCosmeticsPreviewAnimImpl,
   showCosmeticsOverlayImpl,
   syncCosmeticsUiImpl
@@ -5200,193 +5206,32 @@ function cosmeticsVariantName(cat, id) {
 
 /* --- Титулы в магазине -----------------------------------------------------
    Отдельная вкладка: покупать нечего, поэтому вместо цены — условие открытия,
-   а вместо «Купить» — «Надеть». Отправка идёт сообщением `titleEquip`. */
+   а вместо «Купить» — «Надеть». Отправка идёт сообщением `titleEquip`.
+   DOM-обвязка (renderCosmeticsTitles и связанные хелперы) — в
+   client_shop_ui.js, здесь только тонкие обёртки с deps. */
 
 function cosTitleUnlocked(id) {
-  const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
-  if (i === 0) return true;
-  return (Number(youTitleMask) & (1 << i)) !== 0;
+  return cosTitleUnlockedImpl(id, shopUiDeps());
 }
 
-/* C3: прогресс к титулу. Возвращает {frac, cur, max} либо null, если данных
-   нет. Открытый титул — {frac:1}, без счётчика: сервер не присылает прогресс
-   по уже закрытым ачивкам, и придумывать «10/10» было бы враньём. */
 function cosTitleProgress(id) {
-  const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
-  if (i === 0) return null;
-  if (cosTitleUnlocked(i)) return { frac: 1, cur: 0, max: 0 };
-  const achv = cosTitleAchvById.get(i);
-  if (achv == null) return null;
-  const p = achvProgressById.get(achv);
-  if (!p || !(p.max > 0)) return null;
-  return { frac: Math.max(0, Math.min(1, p.cur / p.max)), cur: p.cur, max: p.max };
+  return cosTitleProgressImpl(id, shopUiDeps());
 }
 
-/* C3: «37/100», «0/100 000» — разряды через УЗКИЙ НЕРАЗРЫВНЫЙ пробел (U+202F).
-   Сама группировка и константа разделителя — в client_format.js. */
 function cosFormatCount(n) {
-  return formatGroupedCount(n);
+  return cosFormatCountImpl(n, shopUiDeps());
 }
 
 function cosTitlesUnlockedCount() {
-  let n = 0;
-  for (let i = 1; i <= COS_TITLE_MAX; i++) {
-    if (cosTitleUnlocked(i)) n++;
-  }
-  return n;
+  return cosTitlesUnlockedCountImpl(shopUiDeps());
 }
 
 function cosTitleEquip(id) {
-  const i = Math.max(0, Math.min(COS_TITLE_MAX, Number(id) || 0));
-  if (!cosTitleUnlocked(i)) return;
-  youTitleId = i;
-  if (you) {
-    if (i) cosTitleByPlayer.set(you, i);
-    else cosTitleByPlayer.delete(you);
-  }
-  cosmeticsCacheSave();
-  if (!wsSend('titleEquip', { id: i })) {
-    setCosmeticsStatus(() => (wsIsConnected() ? t('cosmetics.unconfirmed_hint') : t('cosmetics.no_connection')), 'info');
-  }
-  syncCosmeticsUi();
+  cosTitleEquipImpl(id, shopUiDeps());
 }
 
 function renderCosmeticsTitles() {
-  if (!cosmeticsItemsEl) return;
-  const items = [];
-
-  const hint = document.createElement('div');
-  hint.className = `cosmeticsTierSep ${tierClass()}`;
-  hint.textContent = t('cosmetics.title_free_hint');
-  items.push(hint);
-
-  if (!youTitleMask && cosmeticsSource !== 'server') {
-    const note = document.createElement('div');
-    note.className = 'cosmeticsItemWhere';
-    note.textContent = t('cosmetics.titles_unavailable');
-    items.push(note);
-  }
-
-  for (let id = 0; id <= COS_TITLE_MAX; id++) {
-    const unlocked = cosTitleUnlocked(id);
-    const worn = Number(youTitleId) === id;
-    if (cosmeticsFilter === 'owned' && !unlocked) continue;
-    if (cosmeticsFilter === 'available' && unlocked) continue;
-
-    // Разметка карточки титула согласована с вёрсткой (.titleItem): медаль
-    // вместо превью-канваса, условие получения вместо цены, никакой валюты.
-    const card = document.createElement('div');
-    card.className = 'titleItem' + (cosmeticsSelId === id ? ' isSelected' : '');
-    // K7: тот же приём, что и для карточек предметов — выбор не пересобирает
-    // список и не роняет фокус.
-    card.dataset.cosid = String(id);
-    card.classList.toggle('isUnlocked', unlocked);
-    card.classList.toggle('isEquipped', worn);
-    card.classList.toggle('isLocked', !unlocked);
-    card.tabIndex = 0;
-    card.setAttribute('role', 'button');
-    card.addEventListener('click', () => {
-      cosmeticsSelectItem(id);
-    });
-    // Фокус с клавиатуры равен выбору: Tab по списку сразу меняет превью.
-    card.addEventListener('focus', () => cosmeticsSelectItem(id));
-
-    const medal = document.createElement('span');
-    medal.className = 'titleMedal';
-    medal.setAttribute('aria-hidden', 'true');
-    medal.textContent = id === 0 ? '—' : '🏅';
-
-    const left = document.createElement('div');
-    left.className = 'titleItemLeft';
-
-    const nameEl = document.createElement('div');
-    nameEl.className = 'titleName';
-    nameEl.textContent = id === 0 ? t('cosmetics.title_none') : `«${cosTitleName(id)}»`;
-    left.appendChild(nameEl);
-
-    if (unlocked) {
-      const desc = document.createElement('div');
-      desc.className = 'titleDesc';
-      desc.textContent =
-        id === 0 ? t('cosmetics.title_none_desc') : `${t('cosmetics.title_earned_for')}: ${cosTitleReq(id)}`;
-      left.appendChild(desc);
-    } else {
-      const req = document.createElement('div');
-      req.className = 'titleReq';
-      req.textContent = cosTitleReq(id) || t('cosmetics.title_locked');
-      left.appendChild(req);
-    }
-
-    /* C3: реальный прогресс к ачивке. Сервер присылает накопленные счётчики
-       в `cosmetics.achvProgress` (только по НЕ открытым ачивкам). У открытого
-       титула счётчика нет — там полная полоса без подписи. Если сервер старый
-       или связка «титул → ачивка» не пришла, cosTitleProgress() вернёт null и
-       блок просто не рисуется, как и раньше. */
-    const prog = cosTitleProgress(id);
-    if (prog != null) {
-      const row = document.createElement('div');
-      row.className = 'cosmeticsProgressRow';
-      const bar = document.createElement('div');
-      bar.className = 'cosmeticsItemProgress';
-      const fill = document.createElement('span');
-      fill.style.width = `${Math.round(Math.max(0, Math.min(1, prog.frac)) * 100)}%`;
-      bar.appendChild(fill);
-      row.appendChild(bar);
-      if (prog.max > 0) {
-        const lab = document.createElement('span');
-        lab.className = 'cosmeticsItemProgressLabel';
-        lab.textContent = tfmt('cosmetics.progress_of', {
-          cur: cosFormatCount(prog.cur),
-          max: cosFormatCount(prog.max),
-        });
-        row.appendChild(lab);
-      }
-      left.appendChild(row);
-    }
-
-    const right = document.createElement('div');
-    right.className = 'titleItemRight';
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'btnSecondary';
-    if (!unlocked) {
-      btn.disabled = true;
-      btn.textContent = t('cosmetics.locked');
-    } else if (worn) {
-      btn.disabled = true;
-      btn.textContent = t('cosmetics.title_equipped');
-    } else {
-      btn.textContent = t('cosmetics.wear');
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        cosTitleEquip(id);
-      });
-    }
-    right.appendChild(btn);
-
-    card.appendChild(medal);
-    card.appendChild(left);
-    card.appendChild(right);
-    items.push(card);
-  }
-
-  // Контейнер несёт --title-accent для вкладки титулов (см. .cosmeticsItems.isTitles).
-  cosmeticsItemsEl.classList.add('isTitles');
-
-  if (items.length <= 1) {
-    setSafeHtml(
-      cosmeticsItemsEl,
-      `
-      <div class="roomsEmpty">
-        <div class="roomsEmptyTitle">${escapeHtml(t('cosmetics.empty_title'))}</div>
-        <div class="roomsEmptyDesc">${escapeHtml(t('cosmetics.empty_desc'))}</div>
-      </div>
-      `
-    );
-    return;
-  }
-  cosmeticsItemsEl.replaceChildren(...items);
+  renderCosmeticsTitlesImpl(shopUiDeps());
 }
 
 function cosmeticsSetFilter(next) {
@@ -5832,8 +5677,15 @@ function shopUiDeps() {
     setCosmeticsPreviewLastAt: (v) => { cosmeticsPreviewLastAt = v; },
     getYouStyle: () => youStyle,
     getYouTitleId: () => youTitleId,
+    setYouTitleId: (v) => { youTitleId = v; },
+    getYouTitleMask: () => youTitleMask,
+    getYou: () => you,
     getPendingCosmeticsOp: () => pendingCosmeticsOp,
     youCos,
+    cosTitleByPlayer,
+    cosTitleAchvById,
+    achvProgressById,
+    formatGroupedCount,
     // Функции/таблицы, общие с остальным client.js
     t,
     tfmt,
@@ -5841,6 +5693,9 @@ function shopUiDeps() {
     escapeHtml,
     setSafeHtml,
     cosTitlePrefix,
+    cosTitleName,
+    cosTitleReq,
+    cosmeticsCacheSave,
     cosmeticsEnsureLocalReady,
     cosmeticsServerReady,
     cosmeticsBuyLocal,
