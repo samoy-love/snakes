@@ -642,57 +642,14 @@
 }
 
 /* ==========================================================================
-   ТИТУЛЫ: страховка на текущую разметку client.js.
-   Правила .titleItem/.titleMedal/... выше рассчитаны на выделенную разметку.
-   Фактически renderCosmeticsTitles() переиспользует .cosmeticsItem — поэтому
-   золотой «наградной» вид навешиваем и на него, через контейнер .isTitles.
-   Когда client.js перейдёт на .titleItem, оба набора дадут один результат.
+   ТИТУЛЫ. Здесь лежала страховка «на случай, если renderCosmeticsTitles()
+   всё ещё рисует карточку титула как .cosmeticsItem»: полный дубль золотого
+   оформления, навешенный через контейнер .isTitles. Переход состоялся —
+   client_shop_ui.js собирает .titleItem/.titleMedal/.titleName/.titleReq
+   (см. renderCosmeticsTitles), и внутри .cosmeticsItems.isTitles карточек
+   .cosmeticsItem больше нет. Дубль удалён; единственный набор правил титулов
+   живёт в 02-cosmetics.css.
    ========================================================================== */
-.cosmeticsItems.isTitles .cosmeticsItem {
-  border-color: color-mix(in srgb, var(--gold) 22%, var(--border2));
-  /* Карточка теперь вертикальная плитка — акцент сверху, не слева. */
-  border-top: 3px solid color-mix(in srgb, var(--gold) 45%, transparent);
-  background: radial-gradient(
-      140% 90% at 50% 0%,
-      color-mix(in srgb, var(--gold) 10%, transparent),
-      transparent 60%
-    ),
-    rgba(0, 0, 0, 0.18);
-}
-
-/* Титул не покупается — тировая раскраска и валюта сюда не приходят */
-.cosmeticsItems.isTitles .cosmeticsItem::before {
-  content: none;
-}
-
-.cosmeticsItems.isTitles .cosmeticsItem.isLocked {
-  border-top-color: var(--border);
-  background: rgba(0, 0, 0, 0.26);
-}
-
-.cosmeticsItems.isTitles .cosmeticsItem.isLocked .cosmeticsItemPreview {
-  filter: grayscale(1);
-  opacity: 0.7;
-}
-
-.cosmeticsItems.isTitles .cosmeticsItem.isEquipped {
-  border-color: color-mix(in srgb, var(--gold) 60%, transparent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 24%, transparent);
-}
-
-.cosmeticsItems.isTitles .cosmeticsItem.isEquipped .cosmeticsItemTitle {
-  color: color-mix(in srgb, var(--gold) 45%, #fff);
-}
-
-/* «Условие получения» вместо «где это видно» — тот же элемент, другой смысл */
-.cosmeticsItems.isTitles .cosmeticsItemWhere {
-  color: color-mix(in srgb, var(--gold) 62%, var(--text));
-  font-weight: 800;
-}
-
-.cosmeticsItems.isTitles .cosmeticsItemProgress {
-  --tier-color: var(--gold);
-}
 
 /* Список из 13 карточек длиннее экрана. Прокручивается сама лента предметов,
    а фильтры и вкладки категорий остаются на месте — иначе на 375px до

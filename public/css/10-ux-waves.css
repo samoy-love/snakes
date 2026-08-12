@@ -160,8 +160,7 @@
 .overlay .card .cosmeticsItemSub,
 .overlay .card .cosmeticsItemWhere,
 .overlay .card .cosmeticsPrice,
-.overlay .card .cosmeticsStatus,
-.overlay .card .tierBadge {
+.overlay .card .cosmeticsStatus {
   font-size: var(--fs-meta);
   font-weight: 600;
 }
@@ -269,15 +268,10 @@
   display: none;
 }
 
-/* Редкость названа разделителем группы («ОБЫЧНЫЙ») — бейдж в заголовке лишний. */
-.cosmeticsItemTitle .tierBadge {
-  display: none;
-}
-
-/* «До покупки N стиль» дублирует и ценник, и подпись кнопки покупки. */
-.cosmeticsItemSub.isBlocked {
-  display: none;
-}
+/* Правила «спрятать бейдж редкости в заголовке» (.tierBadge) и «спрятать
+   „до покупки N стиль“» (.cosmeticsItemSub.isBlocked) удалены: с той же волны
+   клиент перестал создавать оба элемента, и правила гасили пустоту. Вместе с
+   ними убрано их оформление в 02-cosmetics.css и 01-base.css. */
 
 .cosmeticsWhere {
   margin-top: 10px;

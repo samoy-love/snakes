@@ -8,7 +8,8 @@
    Цвет тира живёт ТОЛЬКО здесь — в полоске карточки, бейдже и цвете цены.
    В самом предмете (превью, канвас) он не появляется: иначе игрок читает
    «фиолетовый = дорогой», а не «предмет интересный».
-   client.js вешает модификатор тира и на .cosmeticsItem, и на .tierBadge.
+   Модификатор тира клиент вешает на .cosmeticsItem и на разделитель группы
+   .cosmeticsTierSep — цвет приходит оттуда через --tier-color.
    ========================================================================== */
 
  .tierBase {
@@ -30,26 +31,12 @@
    --tier-color: var(--tier-mythic);
  }
 
- .tierBadge {
-   display: inline-flex;
-   align-items: center;
-   justify-content: center;
-   flex: 0 0 auto;
-   /* .cosmeticsItemLeft — grid, поэтому без justify-self бейдж растянется на строку */
-   justify-self: start;
-   width: fit-content;
-   padding: 1px 7px;
-   border-radius: 999px;
-   font-size: var(--fs-11);
-   font-weight: 800;
-   letter-spacing: 0.4px;
-   text-transform: uppercase;
-   line-height: 1.6;
-   white-space: nowrap;
-   color: var(--tier-color, var(--tier-base));
-   border: 1px solid color-mix(in srgb, var(--tier-color, var(--tier-base)) 55%, transparent);
-   background: color-mix(in srgb, var(--tier-color, var(--tier-base)) 16%, rgba(0, 0, 0, 0.35));
- }
+ /* .tierBadge удалён целиком. Бейдж редкости в заголовке карточки перестал
+    существовать ещё в волне 6 (U8: редкость названа разделителем группы
+    «ОБЫЧНЫЙ», второй раз повторять её в каждой карточке незачем) — клиент
+    такой элемент не создаёт ни в одной ветке рендера. Оформление осталось
+    висеть вместе с правилом `display: none` на него же в 10-ux-waves.css:
+    сорок строк красили и тут же гасили то, чего нет. */
 
  /* --- Полоса тира и цвет цены ---------------------------------------------- */
  .cosmeticsItem {
