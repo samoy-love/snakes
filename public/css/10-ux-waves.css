@@ -388,10 +388,15 @@
   max-height: min(30dvh, 260px);
 }
 
-/* Подсказка, что список игроков длиннее видимой области: тот же fade-приём,
-   что уже есть у ленты предметов магазина (.cosmeticsItems, 09-hud-details.css) —
-   низ плавно затемняется, mask лежит на самом скроллящемся контейнере. */
-#rightInfo > #rightTeamDetails > #teamHud {
+/* Подсказка, что список игроков/содержимое «Матча» длиннее видимой области:
+   тот же fade-приём, что уже есть у ленты предметов магазина (.cosmeticsItems,
+   09-hud-details.css) — низ плавно затемняется, mask лежит на самом
+   скроллящемся контейнере. Итерация 6: #metaHud тоже скроллится (см. правило
+   выше — max-height + overflow-y: auto наравне с #teamHud), но маску имел
+   только #teamHud — пустое состояние «Нет данных» на desktop-1280x720
+   обрубалось серединой строки без плавного затухания и скролл-подсказки. */
+#rightInfo > #rightTeamDetails > #teamHud,
+#rightInfo > #rightMatchDetails > #metaHud {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
 }
@@ -404,12 +409,17 @@
 
 /* Килфид рисует максимум 6 строк (client.js), новые — сверху. Ограничиваем
    высоту четырьмя строками: переполнение срезает самые старые. Тот же
-   fade-хинт снизу, что у списка игроков и ленты предметов магазина. */
+   fade-хинт снизу, что у списка игроков и ленты предметов магазина.
+   152px не делится нацело на высоту строки (~30px + 6px gap) — пятая
+   запись обрезалась серединой строки и её рамка торчала под нижним краем
+   панели необесцвеченным огрызком. Растягиваем зону затухания до ~36px —
+   она гарантированно перекрывает высоту одной строки, поэтому обрезанный
+   остаток всегда попадает под полное затухание, а не торчит нетронутым. */
 #rightInfo #killfeed {
   max-height: var(--killfeed-max, 152px);
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent 100%);
 }
 
 /* При развёрнутом чате сайдбару оставалось ~260px — килфид ужимается до трёх
@@ -438,6 +448,40 @@
 
   #rightInfo > #rightMatchDetails > #metaHud {
     max-height: min(24dvh, 180px);
+  }
+}
+
+/* Высокие экраны (2560x1440 и похожие): потолки 240/260/152px были
+   рассчитаны на обычный ноутбучный вьюпорт и не растут вместе с dvh-долей,
+   которая их ограничивает (min(34dvh,240px) на 1440px высоты — это 490dvh
+   против жёсткого потолка 240px). В результате #rightSidebar заполнял только
+   верхнюю треть экрана, а под ним пустовало ~900px фона карты. Поднимаем
+   потолки, чтобы dvh-доля могла реально работать на большой высоте. */
+@media (min-height: 1100px) {
+  #rightInfo > #rightTeamDetails > #teamHud {
+    max-height: min(34dvh, 420px);
+  }
+
+  #rightInfo > #rightMatchDetails > #metaHud {
+    max-height: min(30dvh, 420px);
+  }
+
+  #rightInfo #killfeed {
+    max-height: var(--killfeed-max, 320px);
+  }
+
+  /* iter-2 (docs/reviews/iter-2.md, #2): подняв потолки выше, всё равно
+     нечем занять освободившийся низ колонки — «Матч»/«Команда»/килфид
+     остаются списками, размер которых определяет их контент (аккордеон
+     ужимается под фактическое число строк), а не пустая ёмкость. Растягивать
+     их flex-grow'ом сочли рискованным без визуальной проверки на реальных
+     заполненных панелях (см. отчёт). #minimap (07-game-minimap.css) —
+     единственная панель ИСКЛЮЧЕНИЕ: canvas всегда рисует поле целиком
+     независимо от количества игроков, так что увеличение её высоты не
+     зависит от контента и ничем не рискует — очевидный кандидат забрать
+     часть пустоты картой, а не растягивать списки. */
+  #rightSidebar #minimap {
+    height: 280px;
   }
 }
 
@@ -514,9 +558,14 @@ body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
 /* --- U3. На телефоне поле важнее правой панели ----------------------------
    Регрессия: правила `#rightInfo { display: none }` (<=720px) и
    `#rightSidebar { display: none }` (<=520px) были перебиты более поздним
-   безусловным `display: flex` из волны 6. Возвращаем, уже после него. */
+   безусловным `display: flex` из волны 6. Возвращаем, уже после него.
+   #rightInfo целиком больше не гасим: контракт скрыт из верхней полосы на
+   этой ширине (.topHudContract, 08-game-sidebar.css) и живёт только в
+   аккордеоне «Матч» (#metaHud) — если спрятать весь #rightInfo, прогресс
+   контракта не увидеть нигде (см. docs/reviews/iter-8.md #1). Гасим только
+   команду и события — их дублирует остальной интерфейс. */
 @media (max-width: 720px) {
-  #rightInfo,
+  #rightInfo > #rightTeamDetails,
   #rightInfo > #rightEventsDetails,
   #rightSidebar #perf,
   #rightSidebar #killfeed {
@@ -524,8 +573,15 @@ body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
   }
 }
 
+/* На <=520px правило `#rightSidebar { display: none }` гасило всю панель
+   целиком — включая #rightInfo > #rightMatchDetails > #metaHud, тот самый
+   аккордеон «Матч», которому строкой выше специально оставили прогресс
+   контракта. Регрессия поверх фикса из iter-8 #1/#2/#3: правило U3 720px
+   было исправлено, а соседнее правило 520px, перебивающее его через
+   родителя, — нет (см. docs/reviews/iter-9.md). Прячем только миникарту,
+   #rightInfo оставляем видимым. */
 @media (max-width: 520px) {
-  #rightSidebar {
+  #rightSidebar > #minimapPanel {
     display: none;
   }
 }
@@ -579,6 +635,17 @@ body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
   display: none;
 }
 
+/* #deathHint называет Space/Esc — их нет на тач-устройстве. Тот же приём
+   переключения, что у #help/#helpTouch выше. */
+#deathHintTouch {
+  display: none;
+}
+
+/* .menuOnboardingDesc называет WASD/Esc/Space — их нет на тач-устройстве. */
+.menuOnboardingDescTouch {
+  display: none;
+}
+
 /* То же на главном экране: menu.hint зовёт нажимать WASD/стрелки, которых
    на тач-устройстве нет — там управление свайпом (menu.hint_touch). Пара
    .overlayHint/.menuHintTouch переключается по (pointer: coarse) так же,
@@ -618,6 +685,22 @@ body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
   }
 
   .menuHintTouch {
+    display: block;
+  }
+
+  #deathHint {
+    display: none;
+  }
+
+  #deathHintTouch {
+    display: block;
+  }
+
+  .menuOnboardingDesc:not(.menuOnboardingDescTouch) {
+    display: none;
+  }
+
+  .menuOnboardingDescTouch {
     display: block;
   }
 }
@@ -870,6 +953,13 @@ body:has(#hud.lbPinned) #rightInfo > #rightTeamDetails {
   gap: 8px;
   margin-top: 5px;
   min-width: 0;
+  /* .cosmeticsItemLeft — grid с justify-items: center (01-base.css), поэтому
+     без явного растяжения сама обёртка получает max-content вместо ширины
+     колонки: полоса схлопывалась в точку на любом вьюпорте шире мобильного
+     брейкпоинта, где раньше жил единственный justify-self:stretch
+     (08-game-sidebar.css, @media max-width:520px, только для Title/Sub). */
+  justify-self: stretch;
+  width: 100%;
 }
 
 .cosmeticsProgressRow .cosmeticsItemProgress {

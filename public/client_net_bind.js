@@ -472,7 +472,10 @@ function onInit(msg) {
   updateRoomInfo();
 }
 
-function onState(s) {
+/* Экспортировано ради public/client_debug.js: каталог состояний матча
+   (см. debug.matchScene) наполняет экран боя через ТОТ ЖЕ путь, которым
+   реально обновляется канвас+HUD, вместо своей копии сборки ctx. */
+export function onState(s) {
   onStateImpl(s, {
     ownerFillStyleCache,
     refreshCaptureAnchors,

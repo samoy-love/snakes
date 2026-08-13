@@ -292,7 +292,7 @@ function updateRoomsStatsLocal(rawRooms) {
       onlineEl: document.getElementById('menuOnlineCount'),
       badgeEl: document.getElementById('menuOnlineBadge')
     },
-    { t, formatNumber, wsStatusSuffix, roomsLoading: rooms.loading, error: rooms.loadError }
+    { t, formatNumber, wsStatusSuffix, loading: rooms.loading, error: rooms.loadError }
   );
 }
 
@@ -300,7 +300,7 @@ function updateRoomsStatsLocal(rawRooms) {
    Здесь остаётся единственное, что действительно принадлежит этому файлу:
    откуда взять режим сортировки и строку поиска. */
 function applyRoomsFilterSort() {
-  return applyRoomsFilterSortImpl({ last: rooms.last, roomsSearchInput: dom.roomsSearchInput, roomsSortSelect: dom.roomsSortSelect });
+  return applyRoomsFilterSortImpl({ lastRooms: rooms.last, roomsSearchInput: dom.roomsSearchInput, roomsSortSelect: dom.roomsSortSelect });
 }
 
 export function updateRoomsUi() {

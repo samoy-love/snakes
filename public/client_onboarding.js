@@ -44,7 +44,10 @@ function obLoadStages() {
   return obStagesShown;
 }
 
-function obMarkStageShown(id) {
+// Экспортируется отдельно от obShowStageImpl — тестовым сценариям (catalog.mjs
+// через client_debug.js) нужно снять замок ступени без addToast/t deps и без
+// побочного тоста, который сценарий не должен показывать.
+export function obMarkStageShown(id) {
   const set = obLoadStages();
   if (set.has(id)) return;
   set.add(id);

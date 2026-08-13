@@ -171,3 +171,12 @@ initViewport({ send: wsSend, onResized: renderMenuSkinPreview });
 initMinimapUi();
 
 startRenderLoop();
+
+/* Мост для широкого каталога состояний визуального ревью
+   (tests/visual/catalog.spec.mjs, docs/reviews/review-loop-prompt.md) —
+   загружается только под ?debug=1, см. client_debug.js. Динамический
+   import() внутри if гарантирует, что на проде без флага файл не запрашивается
+   вовсе. */
+if (new URLSearchParams(location.search).get('debug') === '1') {
+  import('./client_debug.js').catch((e) => console.error('client_debug', e));
+}

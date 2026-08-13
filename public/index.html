@@ -82,6 +82,9 @@
               <div id="menuOnboarding" class="menuOnboarding hidden">
                 <div class="menuOnboardingTitle" data-i18n="menu.controls_title"></div>
                 <div class="menuOnboardingDesc" data-i18n="menu.controls_desc"></div>
+                <!-- Тач-вариант: WASD/Esc/Space бессмысленны на телефоне,
+                     тот же приём переключения, что и у .overlayHint ниже. -->
+                <div class="menuOnboardingDesc menuOnboardingDescTouch" data-i18n="menu.controls_desc_touch"></div>
               </div>
               <!-- На тач-устройстве управление не WASD/стрелками, а свайпом —
                    см. образец #help/#helpTouch в игровом HUD (переключение
@@ -89,7 +92,7 @@
                    вариантах: отдельной кнопки чата на телефоне нет, ввод —
                    тот же текстовый #chat. -->
               <div class="overlayHint" data-i18n="menu.hint">Совет: чат — Enter • управление — WASD/стрелки</div>
-              <div class="overlayHint menuHintTouch" data-i18n="menu.hint_touch">Совет: чат — Enter • управление — свайп по экрану</div>
+              <div class="overlayHint menuHintTouch" data-i18n="menu.hint_touch">Совет: чат — тап по полю ввода • управление — свайп по экрану</div>
             </div>
           </div>
 
@@ -269,6 +272,10 @@
           <div id="deathTitle" class="matchTitle" data-i18n="death.title">Вы проиграли</div>
           <div id="deathReason" class="deathReason"></div>
           <div id="deathHint" class="matchSub" data-i18n="death.hint">Enter — снова • Esc — меню</div>
+          <!-- #deathHint называет клавиши, которых нет на тач-устройстве: тот же
+               паттерн переключения по (pointer: coarse), что и #help/#helpTouch
+               в игровом HUD и .overlayHint/.menuHintTouch в онбординге меню. -->
+          <div id="deathHintTouch" class="matchSub" data-i18n="death.hint_touch">Кнопки ниже — снова или в меню</div>
         </div>
         <div id="deathStats" class="matchResults" aria-live="polite"></div>
         <div class="matchActions">

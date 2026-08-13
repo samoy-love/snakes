@@ -22,11 +22,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 /* Экспортируется, чтобы порты не пришлось дублировать: их читает
-   free-ports.mjs, снимающий серверы от прошлого прогона. */
+   free-ports.mjs, снимающий серверы от прошлого прогона.
+
+   touch: true — только у мобильного вьюпорта. Без него это просто Desktop
+   Chrome с урезанным окном: navigator.maxTouchPoints=0 и
+   matchMedia('(pointer: coarse)') всегда false, потому что devices['Desktop
+   Chrome'] ниже не даёт ни hasTouch, ни isMobile сама по себе — один resize
+   viewport их не включает. hapticsSupported() (client_settings.js) требует
+   ОБА условия и поэтому #hapticsRow физически не мог показаться:
+   settings-haptics-shown висел 300с (test.timeout) на каждом прогоне, ждя
+   узел, которому взяться было неоткуда. Тот же класс условия
+   (`@media (pointer: coarse)`) используют и тач-хинты экрана смерти/
+   онбординга меню (iter-1.md, находки #4/#5) — без hasTouch/isMobile здесь
+   каталог тоже не показывал бы их настоящее мобильное состояние. */
 export const VIEWPORTS = [
-  { name: 'mobile-375x812', width: 375, height: 812, port: 8099 },
-  { name: 'iphone17promax-440x956', width: 440, height: 956, port: 8103 },
-  { name: 'tablet-768x1024', width: 768, height: 1024, port: 8100 },
+  { name: 'iphone-390x844', width: 390, height: 844, port: 8099, touch: true },
   { name: 'desktop-1280x720', width: 1280, height: 720, port: 8101 },
   { name: 'desktop-2560x1440', width: 2560, height: 1440, port: 8102 }
 ];
@@ -60,9 +70,14 @@ export default defineConfig({
     // (маскирование живых зон), но HUD/оверлеи так не «доигрывают» переход.
     reducedMotion: 'reduce'
   },
-  projects: VIEWPORTS.map(({ name, width, height, port }) => ({
+  projects: VIEWPORTS.map(({ name, width, height, port, touch }) => ({
     name,
-    use: { ...devices['Desktop Chrome'], viewport: { width, height }, baseURL: `http://127.0.0.1:${port}` }
+    use: {
+      ...devices['Desktop Chrome'],
+      viewport: { width, height },
+      baseURL: `http://127.0.0.1:${port}`,
+      ...(touch ? { hasTouch: true, isMobile: true } : {})
+    }
   })),
   webServer: VIEWPORTS.map(({ name, port }) => ({
     command: `make run-visual VISUAL_PORT=${port} VISUAL_PROFILES_PATH=tests/visual/.tmp/profiles-${name}.json`,

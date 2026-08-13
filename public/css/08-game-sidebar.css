@@ -384,7 +384,11 @@ img.emoji {
     font-size: var(--fs-12);
   }
 
-  /* длинный текст контракта в одну строку не помещается — он есть в правой панели */
+  /* длинный текст контракта в одну строку не помещается — он есть в правой
+     панели (#metaHud, аккордеон «МАТЧ» в #rightSidebar). Раньше #metaHud
+     чуть ниже в этом же media-блоке тоже скрывался display:none — контракт
+     не показывался вообще нигде на ≤720px. #rightSidebar на мобильном не
+     прячется (см. верх файла), так что прогресс контракта отдаём аккордеону. */
   .topHudContract {
     display: none;
   }
@@ -392,10 +396,6 @@ img.emoji {
   .topHudBar {
     margin-top: 5px;
     height: 4px;
-  }
-
-  #metaHud {
-    display: none;
   }
 
   /* Правило `#hud:not(.lbPinned) #stats, … #help { display: none }` удалено:
@@ -455,6 +455,18 @@ img.emoji {
     min-height: 120px;
   }
 
+  /* Мобильный бюджет #chat зафиксирован (--chat-max-mobile: min(30dvh,220px),
+     09-hud-details.css) и не растёт под контент: header(44)+chatForm(~65) уже
+     съедают почти весь бюджет, а chatLog держит min-height 120px даже пустым.
+     Раньше открытая эмодзи-панель не помещалась в остаток и обрезалась
+     overflow:hidden родителя почти целиком (реально видна полоска в
+     несколько пикселей) — пока панель открыта, отдаём её место историей: она
+     всё равно скрыта под панелью и не читается в этот момент. */
+  #chat:has(#emojiPanel.open) #chatLog {
+    min-height: 0;
+    flex: 0 1 auto;
+  }
+
   #emojiPanel {
     max-height: 170px;
   }
@@ -492,10 +504,6 @@ img.emoji {
     top: calc(8px + var(--sa-top));
     width: 150px;
     gap: 8px;
-  }
-
-  #rightInfo {
-    display: none;
   }
 
   #perf {
@@ -552,14 +560,29 @@ img.emoji {
 
   .cosmeticsItemTitle,
   .cosmeticsItemSub {
+    /* .cosmeticsItemLeft — grid с justify-items: center, поэтому без явного
+       растяжения элемент сам ужимается/растягивается по контенту (max-content),
+       а не по колонке: ellipsis было некому включать, длинный статус
+       («Куплено (не подтверждено)») вылезал за карточку и клипался краем экрана. */
+    justify-self: stretch;
+    width: 100%;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
+  /* .cosmeticsItem — flex-direction: column (01-base.css), поэтому
+     flex-basis идёт вдоль высоты, а не ширины: `flex: 1 0 100%` здесь
+     означал «займи 100% высоты», а не «займи всю строку», и вместе с
+     flex-wrap на родителе выламывал .cosmeticsItemRight в отдельный
+     столбец сетки .cosmeticsItems — кнопка «Экипировано» повисала поверх
+     карточки-призрака справа, а не под текстом (docs/reviews/iter-5.md).
+     Ширина 100% уже наследуется от .cosmeticsItemRight в 01-base.css —
+     явный flex-direction: row достаточен, чтобы цена и кнопка легли в
+     одну строку под остальным содержимым той же карточки. */
   .cosmeticsItemRight {
-    flex: 1 0 100%;
+    flex-direction: row;
     justify-content: space-between;
     gap: 10px;
   }
