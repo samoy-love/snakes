@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Змейки">
+  <rect width="32" height="32" rx="7" fill="#1a2e1a" />
+  <path
+    d="M8 10c0-2.2 1.8-4 4-4s4 1.8 4 4-1.8 4-4 4h8c2.2 0 4 1.8 4 4s-1.8 4-4 4-4-1.8-4-4"
+    fill="none"
+    stroke="#5fd75f"
+    stroke-width="3.4"
+    stroke-linecap="round"
+  />
+  <circle cx="22" cy="10" r="1.6" fill="#101a10" />
+</svg>
