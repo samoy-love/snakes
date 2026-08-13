@@ -21,7 +21,7 @@ export const I18N = {
     'menu.play': 'Играть',
     'menu.cosmetics': 'Косметика',
     'menu.hint': 'Совет: чат — Enter • управление — WASD/стрелки',
-    'menu.hint_touch': 'Совет: чат — Enter • управление — свайп по экрану',
+    'menu.hint_touch': 'Совет: чат — тап по полю ввода • управление — свайп по экрану',
     'menu.online_now': 'сейчас играют',
     'menu.how_title': 'Как играть',
     'menu.how_step1': 'Выйди за свою зону',
@@ -32,6 +32,7 @@ export const I18N = {
 
     'menu.controls_title': 'Управление',
     'menu.controls_desc': 'WASD/стрелки — движение • Enter — чат • Esc — меню • Space — снова (после смерти)',
+    'menu.controls_desc_touch': 'Свайп по экрану — движение • поле ввода — чат • кнопки — снова (после смерти)',
 
     'rooms.title': 'Комнаты',
     'rooms.join': 'Войти',
@@ -72,6 +73,7 @@ export const I18N = {
 
     'death.title': 'Вы проиграли',
     'death.hint': 'Space — снова • Esc — меню',
+    'death.hint_touch': 'Кнопки ниже — снова или в меню',
     'death.play_again': 'Играть снова',
 
     'match.title': 'Матч завершён',
@@ -160,7 +162,11 @@ export const I18N = {
     'right.events': 'События',
 
     'right.match_empty_title': 'Нет данных',
+    'right.match_empty_title_active': 'Показано выше',
+    'right.match_empty_title_no_contract': 'Контракта нет',
     'right.match_empty_desc': 'Начните матч, чтобы увидеть прогресс и задания',
+    'right.match_empty_desc_active': 'Задание и прогресс уже видны в верхней полосе',
+    'right.match_empty_desc_no_contract': 'Возьмите контракт, чтобы увидеть прогресс и задания',
     'right.team_empty_title': 'Пока пусто',
     'right.team_empty_desc': 'Войдите в матч, чтобы увидеть таблицу игроков',
     'right.events_empty_title': 'Тихо',
@@ -441,7 +447,7 @@ export const I18N = {
     'menu.play': 'Play',
     'menu.cosmetics': 'Cosmetics',
     'menu.hint': 'Tip: chat — Enter • movement — WASD/arrows',
-    'menu.hint_touch': 'Tip: chat — Enter • movement — swipe anywhere',
+    'menu.hint_touch': 'Tip: chat — tap the input field • movement — swipe anywhere',
     'menu.online_now': 'playing now',
     'menu.how_title': 'How to play',
     'menu.how_step1': 'Leave your zone',
@@ -452,6 +458,7 @@ export const I18N = {
 
     'menu.controls_title': 'Controls',
     'menu.controls_desc': 'WASD/arrows — move • Enter — chat • Esc — menu • Space — retry (after death)',
+    'menu.controls_desc_touch': 'Swipe on screen — move • message field — chat • buttons — retry (after death)',
 
     'rooms.title': 'Rooms',
     'rooms.join': 'Join',
@@ -513,6 +520,7 @@ export const I18N = {
 
     'death.title': 'You lost',
     'death.hint': 'Space — again • Esc — menu',
+    'death.hint_touch': 'Use the buttons below to retry or go to menu',
     'death.play_again': 'Play again',
 
     'match.title': 'Match finished',
@@ -599,7 +607,11 @@ export const I18N = {
     'right.events': 'Events',
 
     'right.match_empty_title': 'No data',
+    'right.match_empty_title_active': 'Shown above',
+    'right.match_empty_title_no_contract': 'No contract',
     'right.match_empty_desc': 'Start a match to see progress and tasks',
+    'right.match_empty_desc_active': 'The contract and progress are already shown in the top bar',
+    'right.match_empty_desc_no_contract': 'Take a contract to see progress and tasks',
     'right.team_empty_title': 'Nothing yet',
     'right.team_empty_desc': 'Join a match to see the player table',
     'right.events_empty_title': 'Quiet',

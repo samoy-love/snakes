@@ -168,7 +168,7 @@ function resetSettings() {
 
 /* --- Оверлей ------------------------------------------------------------ */
 
-function showSettingsOverlay() {
+export function showSettingsOverlay() {
   if (dom.settingsOverlay) dom.settingsOverlay.classList.remove('hidden');
   overlayManager.open('settings');
   syncOverlayUiState();

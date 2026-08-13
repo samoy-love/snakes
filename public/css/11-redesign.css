@@ -621,6 +621,12 @@ body.inGame #hud:not(.lbPinned) #langToggle {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* height:auto делает главный размер флекс-контейнера неопределённым —
+       flex-grow тогда считается от содержимого, а не от остатка места, и
+       .cosmeticsItems сжимается до пары карточек вместо того, чтобы забрать
+       остаток колонки. Фиксируем ту же высоту, что даёт max-height выше,
+       чтобы flex: 1 1 auto у ленты считался от реального остатка. */
+    height: calc(100dvh - 24px - var(--sa-top) - var(--sa-bottom));
   }
 
   #cosmeticsOverlay .cosmeticsGrid {
@@ -645,10 +651,53 @@ body.inGame #hud:not(.lbPinned) #langToggle {
     overflow-y: auto;
   }
 
+  /* На минимальном десктопном вьюпорте (1280x720) пять статичных блоков
+     над лентой (шапка, статус-баннер, полоса «Стиль», подсказка ✨, вкладки
+     редкости и категорий) съедают почти весь бюджет высоты левой панели —
+     ленте оставалось ~110px, меньше одной карточки товара. Сокращаем
+     вертикальные отступы между блоками и внутри баннеров: свободного места
+     это не прибавляет, но отдаёт его ленте вместо межблочных зазоров. */
+  #cosmeticsOverlay .cosmeticsStatus,
+  #cosmeticsOverlay .cosmeticsStoreBar,
+  #cosmeticsOverlay .cosmeticsEarnStyle,
+  #cosmeticsOverlay .cosmeticsTabs,
+  #cosmeticsOverlay .cosmeticsWhere {
+    margin-top: 6px;
+  }
+
+  #cosmeticsOverlay .cosmeticsStatus {
+    padding: 6px 10px;
+  }
+
+  #cosmeticsOverlay .cosmeticsEarnStyle {
+    padding: 6px 10px;
+  }
+
   /* Превью прижато к верху своей колонки: растягивать канвас на всю высоту
      незачем, у него фиксированная пропорция. */
   #cosmeticsOverlay .cosmeticsGrid > .menuPanel:last-child {
     align-self: start;
+  }
+}
+
+/* iter-10 (docs/reviews/iter-10.md, #5): на 1280×720 сокращения отступов выше
+   отдавали ленте 110px -> 138px — меньше двух рядов карточек. Дальше
+   резервов у межблочных зазоров нет, дело в самой высоте вьюпорта: на более
+   высоких десктопных окнах той же ширины (>760px) блок выше уже не нужен —
+   вертикального места хватает и без него. Отдельный брейкпоинт по высоте, а
+   не по ширине: снимаем рамку/фон у баннера «Стиль» (оставляем текст) —
+   это тот статичный блок, что несёт наименьшую функциональную нагрузку
+   (прогресс уже дублирован полосой «Стиль: N» в шапке), поэтому именно его
+   схлопываем первым, а не режем реальные элементы управления. */
+@media (min-width: 1180px) and (max-height: 760px) {
+  #cosmeticsOverlay .cosmeticsEarnStyle {
+    padding: 2px 0;
+    border: none;
+    background: none;
+  }
+
+  #cosmeticsOverlay .cosmeticsStatus:empty {
+    margin-top: 0;
   }
 }
 

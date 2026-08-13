@@ -681,8 +681,36 @@ function draw() {
         const lx = Math.max(70, Math.min(cw - 70, tx));
         const ly = Math.max(28, Math.min(viewH - 28, ty - cell * 1.4));
         ctx.lineJoin = 'round';
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+        // Раньше «подложкой» была только чёрная обводка самого текста
+        // (lineWidth 4) — на плотных сценах (много статистов рядом с целью,
+        // особенно на узких вьюпортах) под ней читался и мешался нейм-тег
+        // соседнего игрока: обводка недостаточно закрывает фон под буквами,
+        // это лишь контур, а не заливка. Затем табличку сделали полностью
+        // непрозрачной — она стала перекрывать не только фон поля, но и
+        // чужой нейм-тег игрока, случайно оказавшегося за спиной у цели,
+        // целиком (docs/reviews/iter-4.md). Теперь табличка полупрозрачная
+        // (даёт заглянуть под неё), а собственная читаемость подписи
+        // держится за счёт двойного контура текста (тёмная обводка + сама
+        // заливка) — этого было мало без подложки только на однотонном
+        // фоне, а поверх таблички хватает и на пёстрой сцене.
+        const padX = Math.max(8, cell * 0.35);
+        const padY = Math.max(5, cell * 0.22);
+        const tw = ctx.measureText(label).width;
+        const boxW = tw + padX * 2;
+        const boxH = lf + padY * 2;
+        const boxX = lx - boxW / 2;
+        const boxY = ly - boxH / 2;
+        const boxR = Math.min(10, boxH / 2);
+        ctx.fillStyle = 'rgba(6,20,16,0.55)';
+        ctx.beginPath();
+        ctx.roundRect(boxX, boxY, boxW, boxH, boxR);
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(160,255,215,0.55)';
+        ctx.stroke();
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = 'rgba(4,12,10,0.95)';
         ctx.strokeText(label, lx, ly);
         ctx.fillStyle = 'rgba(160,255,215,0.98)';
         ctx.fillText(label, lx, ly);
@@ -705,7 +733,7 @@ function draw() {
   // Всплески событий поля (kill/reclaim/pickup/захват/гибель/очки) —
   // см. client_draw.js: paintBursts(). Мутирует fxRt.bursts in-place.
   paintBursts(ctx, cam, nowFrame, {
-    fxBursts: fxRt.bursts, fxEnabled: settings.fxEnabled, fxIntensity: settings.fxIntensity, SCORE_POPUP_MS, OFFSCREEN_MARGIN_CELLS,
+    bursts: fxRt.bursts, fxEnabled: settings.fxEnabled, fxIntensity: settings.fxIntensity, SCORE_POPUP_MS, OFFSCREEN_MARGIN_CELLS,
     you: session.you, colors: world.colors, boostHsl, cosClampId, drawDeathFx, drawCaptureFx,
     easeOutBack, easeOutCubic
   });

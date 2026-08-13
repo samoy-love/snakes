@@ -179,6 +179,23 @@ body.inGame #nameRow {
   text-align: right;
 }
 
+/* «Очки • Клетки» — самый длинный заголовок из трёх переменных колонок
+   (rank — фиксированная ширина 34px, name — тянется на остаток). Без явных
+   долей table-layout:fixed делил их поровну, и заголовок обрубался
+   многоточием даже там, где рядом с «Доля» простаивало место (см.
+   docs/reviews/iter-3.md). Доли подобраны так, чтобы «Очки • Клетки» и
+   «Доля» помещались на wrap ru/en локалей на всех трёх съёмочных
+   вьюпортах. */
+#stats th.cells,
+#stats td.cells {
+  width: 42%;
+}
+
+#stats th.share,
+#stats td.share {
+  width: 20%;
+}
+
 #stats td.num,
 #stats th.num {
   text-align: right;

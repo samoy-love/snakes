@@ -18,7 +18,7 @@
 import { dom } from './client_dom.js';
 import { KEYS, storageFlag, storageGet, storageSet, storageSetFlag } from './client_storage.js';
 import { clientState } from './client_state.js';
-import { cos, session, ui } from './client_store.js';
+import { cos, me, session, ui } from './client_store.js';
 import { lang, t } from './client_i18n_rt.js';
 import { botArchBadge, botArchInfo, cosTitleName } from './client_identity.js';
 import { pushEventFeedImpl, renderKillfeedImpl } from './client_fx_ui.js';
@@ -212,6 +212,8 @@ function createRightEmpty(detailsEl, titleKey, descKey) {
   el.appendChild(tEl);
   el.appendChild(dEl);
   detailsEl.appendChild(el);
+  el._descEl = dEl;
+  el._descKey = descKey;
   return el;
 }
 
@@ -285,7 +287,29 @@ export function syncRightEmptyStates() {
   const matchEmpty = !session.started || !dom.metaHud || dom.metaHud.style.display === 'none' || dom.metaHud.childElementCount === 0;
   const teamEmpty = !session.started || !dom.teamHud || !String(dom.teamHud.textContent || '').trim();
   const eventsEmpty = !session.started || !dom.killfeed || dom.killfeed.childElementCount === 0;
-  if (rightMatchEmptyEl) rightMatchEmptyEl.classList.toggle('hidden', !matchEmpty);
+  if (rightMatchEmptyEl) {
+    rightMatchEmptyEl.classList.toggle('hidden', !matchEmpty);
+    /* Панель «МАТЧ» пуста, но матч уже идёт (например, контракт активен и
+       виден в верхней полосе, а самой панели попросту нечего добавить) —
+       текст «Начните матч» в этом случае лжёт: игрок уже в матче. */
+    if (matchEmpty && rightMatchEmptyEl._descEl) {
+      const active = session.started && !!me.contractType;
+      const startedNoContract = session.started && !me.contractType;
+      const descKey = active
+        ? 'right.match_empty_desc_active'
+        : startedNoContract
+          ? 'right.match_empty_desc_no_contract'
+          : rightMatchEmptyEl._descKey;
+      rightMatchEmptyEl._descEl.textContent = t(descKey);
+      const titleEl = rightMatchEmptyEl.querySelector('.rightEmptyTitle');
+      const titleKey = active
+        ? 'right.match_empty_title_active'
+        : startedNoContract
+          ? 'right.match_empty_title_no_contract'
+          : 'right.match_empty_title';
+      if (titleEl) titleEl.textContent = t(titleKey);
+    }
+  }
   if (rightTeamEmptyEl) rightTeamEmptyEl.classList.toggle('hidden', !teamEmpty);
   if (rightEventsEmptyEl) rightEventsEmptyEl.classList.toggle('hidden', !eventsEmpty);
 }
@@ -304,8 +328,22 @@ export function updateRightI18n() {
     if (rightMatchEmptyEl) {
       const tt = rightMatchEmptyEl.querySelector('.rightEmptyTitle');
       const dd = rightMatchEmptyEl.querySelector('.rightEmptyDesc');
-      if (tt) tt.textContent = t('right.match_empty_title');
-      if (dd) dd.textContent = t('right.match_empty_desc');
+      const active = session.started && !!me.contractType;
+      const startedNoContract = session.started && !me.contractType;
+      if (tt) {
+        tt.textContent = t(active
+          ? 'right.match_empty_title_active'
+          : startedNoContract
+            ? 'right.match_empty_title_no_contract'
+            : 'right.match_empty_title');
+      }
+      if (dd) {
+        dd.textContent = t(active
+          ? 'right.match_empty_desc_active'
+          : startedNoContract
+            ? 'right.match_empty_desc_no_contract'
+            : 'right.match_empty_desc');
+      }
     }
     if (rightTeamEmptyEl) {
       const tt = rightTeamEmptyEl.querySelector('.rightEmptyTitle');

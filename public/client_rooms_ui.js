@@ -328,7 +328,14 @@ export function updateRoomsCreateUiImpl(errMsg, deps) {
   const title = sanitizeRoomTitleClient(roomsCreateNameInput?.value);
   const ok = !!title;
   const err = String(errMsg || '').trim();
-  if (roomsCreateError) roomsCreateError.textContent = err ? err : ok ? '' : t('rooms.name_placeholder');
+  // Итерация 6: пустое нетронутое поле — не ошибка, а «ещё ничего не ввели».
+  // Раньше сюда подставлялся t('rooms.name_placeholder') — тот же текст, что
+  // уже показан серым плейсхолдером внутри самого поля, только красным и под
+  // ним: форма выглядела уже провалившей валидацию до первого нажатия клавиши.
+  // Красный текст нужен только когда есть настоящее сообщение об ошибке
+  // (непустой title, но он не прошёл sanitizeRoomTitleClient).
+  const rawValue = String(roomsCreateNameInput?.value || '').trim();
+  if (roomsCreateError) roomsCreateError.textContent = err ? err : (ok || !rawValue) ? '' : t('rooms.name_placeholder');
   if (createRoomBtn) createRoomBtn.disabled = !ok || getCreateRoomPending();
 }
 

@@ -18,6 +18,10 @@ package.json
 tests/visual/test-results/
 tests/visual/.tmp/
 tests/visual/playwright-report/
+# catalog.spec.mjs: обычные скриншоты для ревью (docs/reviews/), не эталоны —
+# те отдельно в tests/visual/screens.spec.mjs-snapshots/. Регенерируются
+# прогоном, коммитить нечего.
+tests/visual/shots/
 .DS_Store
 Thumbs.db
 *.log

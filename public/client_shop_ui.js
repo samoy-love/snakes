@@ -521,6 +521,25 @@ function cosmeticsSelectItemImpl(id) {
   else syncCosmeticsUiImpl();
 }
 
+/* Общая сборка .cosmeticsProgressRow > .cosmeticsItemProgress + заливка —
+   раньше собиралась почти дословно дважды (обычный товар и titleItem),
+   разными кусками кода с одинаковыми классами. Заливка — единственное, что
+   отличается по разметке (div с width для обычного товара из-за aria на
+   самом баре, span с width для титула без aria) — оставлена на совести
+   вызывающей стороны через fillTag/fillWidth. */
+function makeCosmeticsProgressRow(fracPercent, fillTag) {
+  const row = document.createElement('div');
+  row.className = 'cosmeticsProgressRow';
+  const bar = document.createElement('div');
+  bar.className = 'cosmeticsItemProgress';
+  const fill = document.createElement(fillTag);
+  fill.className = 'cosmeticsItemProgressFill';
+  fill.style.width = `${fracPercent}%`;
+  bar.appendChild(fill);
+  row.appendChild(bar);
+  return { row, bar, fill };
+}
+
 /* Скелетон списка/шапки, пока локальное состояние ещё не готово (первая
    загрузка страницы, кэш ещё не прочитан). */
 function renderCosmeticsSkeletonImpl() {
@@ -812,18 +831,17 @@ export function syncCosmeticsUiImpl() {
       if (sub) left.appendChild(sub);
 
       if (!owned && price > 0 && missing > 0) {
-        const bar = document.createElement('div');
-        bar.className = 'cosmeticsItemProgress';
-        const fill = document.createElement('div');
-        fill.className = 'cosmeticsItemProgressFill';
-        fill.style.width = `${Math.max(0, Math.min(100, (balance / price) * 100)).toFixed(1)}%`;
-        bar.appendChild(fill);
+        // Без обёртки .cosmeticsProgressRow (см. titleItem ниже) .cosmeticsItemLeft
+        // грид с justify-items: center не даёт полосе явной ширины — она
+        // схлопывалась в точку. .cosmeticsProgressRow задаёт колонку под бар.
+        const pct = Math.max(0, Math.min(100, (balance / price) * 100)).toFixed(1);
+        const { row, bar } = makeCosmeticsProgressRow(pct, 'div');
         bar.setAttribute('role', 'progressbar');
         bar.setAttribute('aria-valuemin', '0');
         bar.setAttribute('aria-valuemax', String(price));
         bar.setAttribute('aria-valuenow', String(Math.min(balance, price)));
         bar.setAttribute('aria-label', `${t('cosmetics.missing_prefix')} ${fmtInt(missing)}`);
-        left.appendChild(bar);
+        left.appendChild(row);
       }
 
       const right = document.createElement('div');
@@ -1076,14 +1094,8 @@ function renderCosmeticsTitlesImpl() {
        null и блок просто не рисуется, как и раньше. */
     const prog = cosTitleProgressImpl(id);
     if (prog != null) {
-      const row = document.createElement('div');
-      row.className = 'cosmeticsProgressRow';
-      const bar = document.createElement('div');
-      bar.className = 'cosmeticsItemProgress';
-      const fill = document.createElement('span');
-      fill.style.width = `${Math.round(Math.max(0, Math.min(1, prog.frac)) * 100)}%`;
-      bar.appendChild(fill);
-      row.appendChild(bar);
+      const pct = Math.round(Math.max(0, Math.min(1, prog.frac)) * 100);
+      const { row } = makeCosmeticsProgressRow(pct, 'span');
       if (prog.max > 0) {
         const lab = document.createElement('span');
         lab.className = 'cosmeticsItemProgressLabel';

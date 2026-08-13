@@ -500,7 +500,13 @@ body:has(#minimapOverlay:not(.hidden)) #eventToasts {
   position: relative;
   display: flex;
   align-items: center;
-  flex: 1 1 170px;
+  /* 170px обрезал плейсхолдер «Поиск по названию/нику» до «Поиск по
+     назван» на десктопе — с ним не видно, что поиск работает и по нику
+     участника. 230px — минимум, при котором плейсхолдер помещается
+     целиком с текущим шрифтом на 1280px; ниже .roomsControls всё ещё
+     flex-wrap: wrap, так что на тесных экранах поле просто уходит на
+     отдельную строку вместо обрезки текста. */
+  flex: 1 1 230px;
   min-width: 0;
   max-width: 100%;
 }
@@ -535,7 +541,13 @@ body:has(#minimapOverlay:not(.hidden)) #eventToasts {
 }
 
 .roomsControls select {
-  flex: 1 1 140px;
+  /* Опция «Свободные сверху» — самый длинный вариант сортировки; при
+     flex: 1 1 140px соседний .roomsSearchWrap (flex: 1 1 170px) забирает
+     место первым, и select сжимается ниже ширины своего текста — опция
+     обрезается без многоточия («Свободные свер»). Даём select забрать
+     контентную ширину и не сжиматься дальше неё. */
+  flex: 0 1 auto;
+  min-width: max-content;
 }
 
 .roomsControls input:focus-visible,
@@ -898,8 +910,11 @@ body:has(#minimapOverlay:not(.hidden)) #eventToasts {
   background: rgba(0, 0, 0, 0.18);
   color: var(--text);
   cursor: pointer;
-  /* Восемь вкладок в ряд даже на 375px (панель ~288px, gap 4px×7=28px —
-     на кнопку остаётся ~28px без сжатия ниже min-width). */
+  /* Восемь вкладок в ряд на широком экране (панель ~288px, gap 4px×7=28px —
+     на кнопку остаётся ~28px без сжатия ниже min-width). На ≤720px этот
+     min-width поднят до 44px (02-cosmetics.css) — тач-цель важнее плотной
+     раскладки, лишние вкладки уходят на вторую строку (.cosmeticsTabs уже
+     flex-wrap: wrap). */
   flex: 1 1 0;
   min-width: 28px;
 }

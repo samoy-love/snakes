@@ -51,9 +51,11 @@ export function ensureLeaderboardDom(statsEl, t) {
   thName.textContent = t('leaderboard.player');
   const thCells = document.createElement('th');
   thCells.textContent = t('leaderboard.cells');
+  thCells.className = 'cells';
   thCells.style.textAlign = 'right';
   const thPct = document.createElement('th');
   thPct.textContent = t('leaderboard.share');
+  thPct.className = 'share';
   thPct.style.textAlign = 'right';
   trh.appendChild(thRank);
   trh.appendChild(thName);
@@ -78,9 +80,9 @@ function createLeaderboardRow(p) {
   const tdName = document.createElement('td');
   tdName.className = 'name';
   const tdCells = document.createElement('td');
-  tdCells.className = 'num';
+  tdCells.className = 'num cells';
   const tdPct = document.createElement('td');
-  tdPct.className = 'num';
+  tdPct.className = 'num share';
 
   tr.appendChild(tdRank);
   tr.appendChild(tdName);

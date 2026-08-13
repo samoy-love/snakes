@@ -241,6 +241,13 @@ function showDeathOverlay() {
   });
 }
 
+/* Debug-мост (public/client_debug.js, только под ?debug=1) вызывает показ
+   оверлея смерти напрямую, минуя реальную смерть в матче — тонкий экспорт по
+   образцу соседних (renderDeathStats/renderDeathReason выше). */
+export function showDeathOverlayDebug() {
+  showDeathOverlay();
+}
+
 /* K7: под открытым оверлеем смерти таблицу итогов незачем пересобирать
    каждый кадр — throttle живёт здесь, вместе с моментом последней сборки,
    который выставляет и showDeathOverlay(). */
