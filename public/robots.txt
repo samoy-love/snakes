@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://snakes.samoy.love/sitemap.xml
