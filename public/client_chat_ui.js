@@ -152,7 +152,6 @@ export function createChatUi(deps) {
     el.selectionStart = pos;
     el.selectionEnd = pos;
     el.focus();
-    if (el === chatInput) deps.scheduleChatInputOverlayRender?.();
   }
 
   function createEmojiButton(e) {

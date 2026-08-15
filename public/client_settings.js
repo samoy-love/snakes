@@ -258,6 +258,16 @@ export function initSettings() {
 
   registerOverlayCloser('settings', hideSettingsOverlay);
   dom.settingsBtn?.addEventListener('click', showSettingsOverlay);
+  /* Настройки доступны с любого экрана — меню, смерть, итоги матча — а не
+     только из ряда иконок боя. Кнопки помечены data-open-settings, чтобы
+     новая точка входа не требовала правок здесь. Оверлей настроек стоит в
+     разметке позже остальных, поэтому ложится поверх них. */
+  for (const b of document.querySelectorAll('[data-open-settings]')) {
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      showSettingsOverlay();
+    });
+  }
   dom.closeSettingsBtn?.addEventListener('click', (e) => {
     e.preventDefault();
     hideSettingsOverlay();

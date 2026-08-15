@@ -22,6 +22,7 @@ export const dom = {
 
   // Верхний HUD матча.
   hud: byId('hud'),
+  help: byId('help'),
   lbBtn: byId('lbBtn'),
   stats: byId('stats'),
   topHud: byId('topHud'),
@@ -51,7 +52,6 @@ export const dom = {
   chatLog: byId('chatLog'),
   chatForm: byId('chatForm'),
   chatInput: byId('chatInput'),
-  chatInputOverlay: byId('chatInputOverlay'),
   chatUnread: byId('chatUnread'),
   chatBtn: byId('chatBtn'),
   emojiBtn: byId('emojiBtn'),

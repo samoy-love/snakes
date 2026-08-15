@@ -64,11 +64,10 @@
   user-select: none;
   padding: 7px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.86);
-  font-size: var(--fs-meta);
+  /* Шапки правой колонки — вторичный слой: тише верхней полосы (волна 12). */
+  color: var(--muted);
+  font-size: var(--fs-meta-lg);
   font-weight: 800;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
 }
 
 #rightInfo .rightDetailsSummary::-webkit-details-marker {

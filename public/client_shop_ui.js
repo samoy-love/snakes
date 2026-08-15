@@ -716,11 +716,21 @@ export function syncCosmeticsUiImpl() {
       icon.className = 'cosmeticsTabIcon';
       icon.setAttribute('aria-hidden', 'true');
       icon.textContent = COSMETICS_TAB_ICON_BY_CAT[cid] || '❔';
+      /* Вкладка — иконка + НАЗВАНИЕ категории + счётчик. Одни пиктограммы
+         (🟩 〰 ⚪ 💀 ✨ 🏷 🖼 🏅) не читались: что такое «〰» или «🏷», игрок
+         угадывал перебором. Название рядом снимает вопрос; сетка вкладок
+         (см. .cosmeticsTabs) укладывает восемь штук в два ряда. */
+      const text = document.createElement('span');
+      text.className = 'cosmeticsTabText';
+      const name = document.createElement('span');
+      name.className = 'cosmeticsTabName';
+      name.textContent = cosmeticsLabel(cid);
       const count = document.createElement('span');
       count.className = 'cosmeticsTabCount';
       count.setAttribute('aria-hidden', 'true');
       count.textContent = `${have}/${total}`;
-      b.append(icon, count);
+      text.append(name, count);
+      b.append(icon, text);
       b.title = fullLabel;
       b.setAttribute('aria-label', fullLabel);
       b.setAttribute('role', 'tab');

@@ -109,6 +109,9 @@ html {
   --fs-title: 18px;
   --fs-body: 15px;
   --fs-meta: 12px;
+  /* Шестая ступень — только для игровых таблиц и шапок правой колонки:
+     12px в бою читаются с трудом, 15px не помещаются в колонку. */
+  --fs-meta-lg: 13px;
   /* Старые кегли схлопнуты в те же пять ступеней. Псевдонимы оставлены,
      чтобы не править 200+ мест разом; новые правила берут шкалу напрямую. */
   --fs-11: var(--fs-meta);
@@ -858,18 +861,18 @@ body:has(#minimapOverlay:not(.hidden)) #eventToasts {
   background: linear-gradient(180deg, color-mix(in srgb, var(--brand2) 14%, transparent), rgba(0, 0, 0, 0.18));
 }
 
-/* Категорий восемь (frame/nameplate/seg/head/capturefx/terr/death/title) —
-   текстовыми подписями они не помещались в одну строку и лента скроллилась
-   горизонтально, часть категорий была не видна без прокрутки. Вкладка
-   теперь — иконка категории + счётчик (см. COSMETICS_TAB_ICON_BY_CAT в
-   client.js, полная подпись — в aria-label/title), поэтому все восемь
-   помещаются в ряд без скролла даже на 375px. */
+/* Категорий восемь (frame/nameplate/seg/head/capturefx/terr/death/title).
+   Раньше вкладка была только иконкой со счётчиком, чтобы влезть в один ряд;
+   иконки без подписи не читались. Теперь вкладка — иконка + название +
+   счётчик, а раскладка — сетка в два ряда по четыре: на ширине панели
+   магазина (~430px и шире) каждой вкладке достаётся ≥100px, названия
+   помещаются целиком. На узком экране (≤720px) сетка сама уходит в три
+   колонки — см. 02-cosmetics.css. */
 .cosmeticsTabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
   margin-top: 10px;
-  justify-content: flex-start;
 }
 
 .cosmeticsEarnStyle {
@@ -901,32 +904,43 @@ body:has(#minimapOverlay:not(.hidden)) #eventToasts {
 
 .cosmeticsTabBtn {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 5px 2px;
+  gap: 8px;
+  padding: 6px 8px;
+  min-width: 0;
   border-radius: var(--r-tab);
   border: 1px solid var(--border2);
   background: rgba(0, 0, 0, 0.18);
   color: var(--text);
   cursor: pointer;
-  /* Восемь вкладок в ряд на широком экране (панель ~288px, gap 4px×7=28px —
-     на кнопку остаётся ~28px без сжатия ниже min-width). На ≤720px этот
-     min-width поднят до 44px (02-cosmetics.css) — тач-цель важнее плотной
-     раскладки, лишние вкладки уходят на вторую строку (.cosmeticsTabs уже
-     flex-wrap: wrap). */
-  flex: 1 1 0;
-  min-width: 28px;
+  text-align: left;
 }
 
 .cosmeticsTabIcon {
-  font-size: 16px;
+  flex: 0 0 auto;
+  font-size: 18px;
   line-height: 1;
+}
+
+.cosmeticsTabText {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.cosmeticsTabName {
+  font-size: var(--fs-12);
+  font-weight: 800;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cosmeticsTabCount {
   font-size: var(--fs-11, 11px);
   font-variant-numeric: tabular-nums;
+  line-height: 1.2;
   color: var(--muted);
   white-space: nowrap;
 }

@@ -648,7 +648,10 @@ export function handleEventsMessage(dv, offset, ctx) {
           styleToast.reason = reason;
           styleToast.count++;
           if (!styleToast.timer) {
-            styleToast.timer = setTimeout(flushStyleToast, 650);
+            /* Окно накопления 3 с, а не 650 мс: при захвате за захватом
+               тост «+1 стиль» вылезал каждую секунду и превращался в шум.
+               Одна карточка «+N стиль ×K» на серию — читается, не мешает. */
+            styleToast.timer = setTimeout(flushStyleToast, 3000);
           }
         }
       }

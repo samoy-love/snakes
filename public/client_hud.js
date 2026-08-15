@@ -28,7 +28,7 @@ import {
   world
 } from './client_store.js';
 import { infoPack, lang, t } from './client_i18n_rt.js';
-import { obSecondMatchPlus, obTickImpl, obUnlocked } from './client_onboarding.js';
+import { obMatchElapsedMs, obSecondMatchPlus, obTickImpl, obUnlocked } from './client_onboarding.js';
 import { addToast } from './client_toasts.js';
 import { animateNumber, renderComboHud } from './client_fx_rt.js';
 import { sortPlayersByScore } from './client_stats.js';
@@ -137,6 +137,13 @@ export function renderTopHudImpl() {
 
   topHudEl.setAttribute('aria-hidden', 'false');
 
+  /* Подсказка управления нужна первые секунды матча, а висела весь матч.
+     Через 25 с от входа гасим её классом (плавно, см. #help.helpFade). */
+  if (dom.help) {
+    const fade = obMatchElapsedMs() >= 25000;
+    if (dom.help.classList.contains('helpFade') !== fade) dom.help.classList.toggle('helpFade', fade);
+  }
+
   // F17: постепенное раскрытие мета-систем в первом матче.
   obTickImpl({ started: session.started, addToast, t });
   const obKills = obUnlocked('bounty');
@@ -232,8 +239,11 @@ export function renderTopHudImpl() {
 
   if (dom.topHudKills) {
     const killsTxt = obKills ? `⚔ ${me.kills}` : '';
-    if (dom.topHudKills.textContent !== killsTxt) {
-      dom.topHudKills.textContent = killsTxt;
+    if (dom.topHudKills.textContent !== killsTxt) dom.topHudKills.textContent = killsTxt;
+    /* Отдельно от записи текста: у пустого элемента textContent и так '',
+       и ветка выше не срабатывала — пустая «пилюля» с рамкой висела в полосе
+       до первого килла. */
+    if (dom.topHudKills.classList.contains('hidden') === obKills) {
       dom.topHudKills.classList.toggle('hidden', !obKills);
     }
   }
@@ -300,7 +310,10 @@ export function renderTopHudImpl() {
       const prog = Number(me.contractProgress) || 0;
       const rem = formatTickRemain(me.contractUntil);
       // C7: то же самое — раньше безусловная запись на каждом кадре.
-      const chipTxt = `📜 ${cn} ${prog}/${goal}${rem ? ` (${rem})` : ''}`;
+      /* «Контракт · Захват» — тип назван явно: дневное задание в правой
+         колонке тоже может называться «Захват», и без префикса игрок не
+         понимал, что из двух — миссия прямо сейчас. */
+      const chipTxt = `📜 ${infoPack().labels.contract} · ${cn} ${prog}/${goal}${rem ? ` (${rem})` : ''}`;
       if (chip.textContent !== chipTxt) chip.textContent = chipTxt;
       chip.classList.remove('hidden');
     } else {
@@ -321,152 +334,127 @@ export function renderTopHudImpl() {
 export function renderMetaHudImpl() {
   const metaHudEl = dom.metaHud;
   if (!metaHudEl) return;
-  const addRow = (rows, label, value, urgent) => {
-    const v = String(value ?? '').trim();
-    if (!v) return;
-    rows.push({ label, value: v, urgent: !!urgent });
-  };
-
-  const buildSection = (title, rows, titleHint) => {
-    const sec = document.createElement('div');
-    sec.className = 'metaSection';
-    const t2 = document.createElement('div');
-    t2.className = 'metaSectionTitle';
-    t2.textContent = title;
-    if (titleHint) t2.title = titleHint;
-    sec.appendChild(t2);
-    for (const r of rows) {
-      const row = document.createElement('div');
-      row.className = r.urgent ? 'metaRow metaRowUrgent' : 'metaRow';
-      if (typeof r.progress === 'number') {
-        row.className += ' metaRowProgress';
-        row.style.setProperty('--p', String(r.progress));
-      }
-      const l = document.createElement('span');
-      l.className = 'metaLabel';
-      l.textContent = `${r.label}:`;
-      const v = document.createElement('span');
-      v.className = 'metaValue';
-      v.textContent = typeof r.progressRight === 'string' && r.progressRight ? r.progressRight : r.value;
-      row.appendChild(l);
-      row.appendChild(v);
-      sec.appendChild(row);
-    }
-    return sec;
-  };
 
   // F17: в первом матче мета-системы открываются по одной (см. OB_STAGES).
   const obBonus = obUnlocked('bonus');
   const obKills = obUnlocked('bounty');
   const obDaily = obSecondMatchPlus();
 
-  /* Мутатор раунда и баунти отсюда убраны: оба уже стоят в верхней полосе
-     (#topHudPhase и #topHudBounty), причём там они и нужнее — это события с
-     обратным отсчётом, требующие немедленной реакции, а полоса видна всегда.
-     Дублирование стоило правой панели двух строк, а полосе — ничего. */
-  const matchRows = [];
+  /* Панель показывает ТОЛЬКО то, чего нет в верхней полосе: место, зона,
+     время, фаза, киллы, контракт и баунти стоят в #topHud и видны всегда.
+     Здесь — кошелёк, дневные задания и активные баффы. Никаких вложенных
+     сворачиваемых блоков: три плоских элемента, каждый пропадает, когда ему
+     нечего показать. */
 
-  const fightRows = [];
-  // «Киллы» живут в #topHudKills. Здесь остаётся только серия: её в верхней
-  // полосе нет, а она объясняет, откуда взялся множитель очков.
-  if (obKills && me.streak >= 2) addRow(fightRows, t('meta.streak'), `x${me.streak}`);
-  const buffs = [];
-  if (me.shield && obBonus) buffs.push(infoName(infoPack().powerups, 1, powerupLabel(1)));
+  // Стиль как валюта имеет смысл только вместе с контрактом, который его даёт.
+  const wallet = cos.style && obUnlocked('contract') ? String(cos.style) : '';
+
+  // Ежедневки — со второго матча: в первом они только добавляют шума.
+  const goals = [];
+  if (obDaily) {
+    for (const s of dailySlots()) {
+      const it = me.dailies.get(s);
+      if (!it || !it.type) continue;
+      const goal = Number(it.goal) || 0;
+      const prog = Number(it.prog) || 0;
+      goals.push({
+        name: dailyLabel(it.type),
+        prog,
+        goal,
+        p: goal > 0 ? Math.max(0, Math.min(1, prog / goal)) : 0,
+        done: goal > 0 && prog >= goal
+      });
+    }
+  }
+
+  // Чипы состояния: серия убийств (объясняет множитель) и активные баффы.
+  const chips = [];
+  if (obKills && me.streak >= 2) chips.push({ text: `🔥 ${t('meta.streak')} x${me.streak}`, cls: 'isStreak' });
+  if (me.shield && obBonus) chips.push({ text: `🛡 ${infoName(infoPack().powerups, 1, powerupLabel(1))}`, cls: '' });
   if (obBonus && me.speedUntilTick && match.lastEventsTick && me.speedUntilTick > match.lastEventsTick) {
     const rem = formatTickRemain(me.speedUntilTick);
     const tpe = me.speedType === 4 ? 4 : 2;
     const dash = infoName(infoPack().powerups, tpe, powerupLabel(tpe));
-    buffs.push(rem ? `${dash} (${rem})` : dash);
-  }
-  if (buffs.length) addRow(fightRows, infoPack().labels.buffs, buffs.join(' • '));
-
-  /* Панель показывает ТОЛЬКО то, чего нет в верхней полосе.
-     Убраны как дубли (замер на живом экране, 1076x970):
-       - «Цель: захват территории» — цель матча не меняется никогда, а слово
-         «Цель» и без того стоит заголовком этой же секции;
-       - «Зона: N • M%»  — ровно это показывают #topHudPct и #topHudCells;
-       - «До конца: м:сс» — это #topHudTime;
-       - «Киллы: N» ниже — это #topHudKills.
-     Верхняя полоса видна всегда и читается одним взглядом; правая панель —
-     для того, что в строку не помещается. */
-  const mainRows = [];
-  // Стиль как валюта имеет смысл только вместе с контрактом, который его даёт.
-  if (cos.style && obUnlocked('contract')) addRow(mainRows, infoPack().labels.style, String(cos.style));
-
-  // Ежедневки — со второго матча: в первом они только добавляют шума.
-  const dailyRows = [];
-  if (obDaily) {
-    // C7: все слоты, сколько бы их ни прислал сервер.
-    for (const s of dailySlots()) {
-      const it = me.dailies.get(s);
-      if (!it || !it.type) continue;
-      addRow(dailyRows, dailyLabel(it.type), `${it.prog}/${it.goal}`);
-    }
+    chips.push({ text: `⚡ ${dash}${rem ? ` · ${rem}` : ''}`, cls: '' });
   }
 
-  const detailSections = [];
-  const addDetailSection = (title, rows, titleHint) => {
-    if (!rows.length) return;
-    detailSections.push({ title, rows, titleHint });
-  };
-  // Заголовок «Матч» уже стоит в summary этого <details> — внутри он был
-  // третьей копией того же слова. Секция про мутатор и баунти — это раунд.
-  addDetailSection(t('meta.round'), matchRows);
-  addDetailSection(t('meta.fight'), fightRows);
-  addDetailSection(t('meta.tasks'), dailyRows, t('meta.tasks_hint'));
-
-  /* C7: панель пересобиралась ПОЛНОСТЬЮ на каждом кадре — замер оснасткой
-     (tools/probe.mjs): 16 createElement и 10 записей textContent на кадр,
-     то есть ~1000 узлов в секунду при том, что содержимое меняется раз в
-     секунду (обратные отсчёты) или реже. Тот же приём, что в renderKillfeed:
-     сверяем подпись содержимого и не трогаем DOM, когда рисовать нечего. */
-  const metaSig = JSON.stringify([
-    mainRows,
-    detailSections,
-    // Свёрнутость <details> живёт в DOM, а не в данных: если панель пересобрать,
-    // она схлопнется, поэтому состояние в подпись не входит и пересборка
-    // происходит только при смене самих строк.
-  ]);
+  /* C7: панель пересобиралась ПОЛНОСТЬЮ на каждом кадре. Сверяем подпись
+     содержимого и не трогаем DOM, когда рисовать нечего. */
+  const metaSig = JSON.stringify([wallet, goals, chips, lang()]);
   if (renderMetaHudImpl._sig === metaSig) return;
   renderMetaHudImpl._sig = metaSig;
 
-  if (!mainRows.length && !detailSections.length) {
+  if (!wallet && !goals.length && !chips.length) {
     metaHudEl.textContent = '';
     metaHudEl.style.display = 'none';
+    try {
+      syncRightEmptyStates();
+    } catch {}
     return;
   }
 
-  // Раскрытое состояние блока «Подробнее» переживает пересборку. Если
-  // панель ещё ни разу не собиралась в этой сессии — стартуем раскрытой на
-  // десктопе (там серия киллов и дневные задания видны без лишнего клика) и
-  // свёрнутой на мобильном (места мало, как и раньше).
-  const priorMetaDetails = metaHudEl.querySelector('details.metaDetails');
-  const wasOpen = priorMetaDetails
-    ? priorMetaDetails.open
-    : window.matchMedia('(min-width: 721px)').matches;
-
   metaHudEl.style.display = '';
-  const frag = document.createDocumentFragment();
-  if (mainRows.length) {
-    frag.appendChild(buildSection(t('meta.wallet'), mainRows));
+  const card = document.createElement('div');
+  card.className = 'metaCard';
+
+  if (wallet) {
+    const w = document.createElement('div');
+    w.className = 'metaWallet';
+    w.title = t('meta.wallet');
+    const ic = document.createElement('span');
+    ic.className = 'metaWalletIcon';
+    ic.setAttribute('aria-hidden', 'true');
+    ic.textContent = '✨';
+    const lb = document.createElement('span');
+    lb.className = 'metaWalletLabel';
+    lb.textContent = infoPack().labels.style;
+    const val = document.createElement('span');
+    val.className = 'metaWalletValue';
+    val.textContent = wallet;
+    w.append(ic, lb, val);
+    card.appendChild(w);
   }
 
-  if (detailSections.length) {
-    const det = document.createElement('details');
-    det.className = 'metaDetails';
-    det.open = wasOpen;
-
-    const sum = document.createElement('summary');
-    sum.className = 'metaDetailsSummary';
-    sum.textContent = t('meta.details');
-    det.appendChild(sum);
-
-    for (const s of detailSections) {
-      det.appendChild(buildSection(s.title, s.rows, s.titleHint));
+  if (goals.length) {
+    const g = document.createElement('div');
+    g.className = 'metaGoals';
+    const title = document.createElement('div');
+    title.className = 'metaGoalsTitle';
+    title.textContent = t('meta.tasks_daily');
+    title.title = t('meta.tasks_hint');
+    g.appendChild(title);
+    for (const it of goals) {
+      const row = document.createElement('div');
+      row.className = it.done ? 'metaGoal isDone' : 'metaGoal';
+      row.style.setProperty('--p', String(it.p));
+      const nm = document.createElement('span');
+      nm.className = 'metaGoalName';
+      nm.textContent = it.name;
+      const v = document.createElement('span');
+      v.className = 'metaGoalVal';
+      v.textContent = it.done ? '✓' : `${it.prog}/${it.goal}`;
+      const bar = document.createElement('i');
+      bar.className = 'metaGoalBar';
+      bar.setAttribute('aria-hidden', 'true');
+      row.append(nm, v, bar);
+      g.appendChild(row);
     }
-    frag.appendChild(det);
+    card.appendChild(g);
   }
-  metaHudEl.replaceChildren(frag);
+
+  if (chips.length) {
+    const c = document.createElement('div');
+    c.className = 'metaChips';
+    for (const ch of chips) {
+      const el = document.createElement('span');
+      el.className = ch.cls ? `metaChip ${ch.cls}` : 'metaChip';
+      el.textContent = ch.text;
+      c.appendChild(el);
+    }
+    card.appendChild(c);
+  }
+
+  metaHudEl.replaceChildren(card);
 
   try {
     syncRightEmptyStates();

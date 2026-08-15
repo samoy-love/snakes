@@ -109,11 +109,15 @@ function setNameCellWithTitle(td, titleId, name, playerNum, deps) {
   td._tid = tid;
   td._nm = nm;
   td._bsig = bsig;
-  const badge = bi ? botArchBadge(playerNum) : null;
+  /* Колонка имени узкая (~40% панели): полный бейдж «АГРЕССОР» съедал её
+     целиком, и от ника оставалось «Л…». Только глиф — как в ленте событий;
+     название архетипа остаётся в title ячейки. */
+  const badge = bi ? botArchBadge(playerNum, { glyphOnly: true }) : null;
   const tn = cosTitleName(tid);
   // Ник обрезается css text-overflow:ellipsis — title показывает полное имя
-  // (с титулом, если он есть) при наведении мыши.
-  td.title = tn ? `${tn} ${nm}` : nm;
+  // (с титулом и архетипом бота, если они есть) при наведении мыши.
+  const archTitle = bi && badge ? ` · ${badge.title}` : '';
+  td.title = (tn ? `${tn} ${nm}` : nm) + archTitle;
   if (!tn) {
     if (badge) td.replaceChildren(badge, document.createTextNode(nm));
     else td.textContent = nm;

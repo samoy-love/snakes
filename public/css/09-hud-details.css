@@ -195,10 +195,7 @@
   animation: toastBump 220ms ease;
 }
 
-/* --- I10. Индикация срочности ----------------------------------------------
-   client.js вешает .metaRowUrgent, когда до конца матча меньше 10 секунд либо
-   истекает контракт/баунти/мутатор. Правил не существовало — вся логика
-   срочности была визуально немой. */
+/* --- I10. Пульсация срочности (таймер матча в последние 15 секунд) --------- */
 @keyframes urgentPulse {
   0%,
   100% {
@@ -207,14 +204,6 @@
   50% {
     opacity: 0.55;
   }
-}
-
-.metaRowUrgent {
-  color: var(--accent);
-  font-weight: 800;
-  border-left: 2px solid var(--accent);
-  padding-left: 6px;
-  animation: urgentPulse 1.2s ease-in-out infinite;
 }
 
 /* --- I11. Появление строки лидерборда -------------------------------------- */
@@ -237,7 +226,6 @@
   .eventToast,
   .eventToastBig,
   .eventToast.bump,
-  .metaRowUrgent,
   .lb-enter,
   /* Новые анимации релизной волны: блок точечный, поэтому перечисляем явно */
   .menuOnlineDot,
@@ -633,12 +621,6 @@
 
 .lb-leave {
   animation: lbLeave 180ms ease-in both;
-}
-
-/* Подсветка ввода чата под инпутом (twemoji-парсинг) не должна ловить клики */
-.chatInputText {
-  pointer-events: none;
-  white-space: pre;
 }
 
 /* ==========================================================================
