@@ -102,6 +102,7 @@ import {
   comboBreak,
   comboBump,
   fxFlashScreen,
+  sfxPanFrom,
   shakeDirFrom,
   showBigBanner,
   triggerHitstop
@@ -393,6 +394,7 @@ function handleStateBinary(buf) {
       t,
       addShakeClass,
       shakeDirFrom,
+      sfxPanFrom,
       sfx,
       fxFlashScreen,
       comboBump,

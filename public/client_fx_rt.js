@@ -23,7 +23,6 @@ import {
   triggerHitstopImpl
 } from './client_fx_ui.js';
 import {
-  fxBannerEnabled,
   fxCountUpEnabled,
   fxFlashScale,
   fxHitstopScale,
@@ -194,7 +193,7 @@ export function fxFlashScreen(rgb, strength) {
 
 // Возвращает true, если баннер показан. Иначе вызывающий откатывается на тост.
 export function showBigBanner(icon, title, sub, mod) {
-  return showBigBannerImpl(icon, title, sub, mod, { fxBannerEnabled });
+  return showBigBannerImpl(icon, title, sub, mod);
 }
 
 /* ==========================================================================
@@ -213,6 +212,23 @@ export function shakeDirFrom(ex, ey) {
   const dy = (Number(my.y) || 0) - (Number(ey) || 0);
   if (!dx && !dy) return [0, 0];
   return [dx, dy];
+}
+
+/* Панорама события: -1 слева от моей головы, +1 справа.
+ *
+ * Считается от ширины видимого окна, а не от размера поля: событие на другом
+ * краю карты игрок всё равно не видит, а по звуку оно должно приходить с
+ * края стереополя, а не из почти-центра. Половина окна ROI по горизонтали и
+ * есть «край»; дальше — насыщение.
+ *
+ * Своей головы нет (меню, наблюдение до спавна) — панорамы тоже нет: центр
+ * честнее случайной стороны. */
+export function sfxPanFrom(ex) {
+  const my = world.currPlayers?.get?.(session.you);
+  if (!my) return 0;
+  const half = Math.max(8, (Number(world.lastRoi?.rw) || 80) / 2);
+  const dx = (Number(ex) || 0) - (Number(my.x) || 0);
+  return Math.max(-1, Math.min(1, dx / half));
 }
 
 /* ==========================================================================

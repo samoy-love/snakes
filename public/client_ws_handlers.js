@@ -248,6 +248,7 @@ export function handleEventsMessage(dv, offset, ctx) {
     renderTopHud,
     setYouStyle,
     sfx,
+    sfxPanFrom,
     shakeDirFrom,
     showBigBanner,
     styleLabel,
@@ -337,7 +338,7 @@ export function handleEventsMessage(dv, offset, ctx) {
         me.kills++;
         addFxBurst(ex, ey, 'kill');
         addShakeClass('medium', ...shakeDirFrom(ex, ey));
-        sfx.kill();
+        sfx.kill(sfxPanFrom(ex));
         fxFlashScreen([255, 96, 96], 0.75);
         comboBump();
         vibrate(35);
@@ -405,8 +406,8 @@ export function handleEventsMessage(dv, offset, ctx) {
         } else {
           addShakeClass('small', ...shakeDirFrom(ex, ey));
           // J17: раньше захват меньше 40 клеток звучал как ничто.
-          if (delta >= 40) sfx.captureBig();
-          else sfx.captureSmall();
+          if (delta >= 40) sfx.captureBig(sfxPanFrom(ex));
+          else sfx.captureSmall(sfxPanFrom(ex));
         }
 
         celebrateFirstCapture(delta);
@@ -669,6 +670,7 @@ export function handleEventsMessage(dv, offset, ctx) {
       pushEventFeed(`${t('feed.revenge')}: ${kn} -> ${vn}`, 'Revenge', killer);
       if (killer === session.you) {
         bumpMatchTabBadge();
+        // Событие реванша без координат — панорамировать не от чего.
         sfx.revenge();
         fxFlashScreen([255, 110, 110], 0.85);
         if (!showBigBanner('😈', t('banner.revenge'), t('banner.revenge_sub'), 'danger')) {
@@ -794,8 +796,8 @@ export function handleEventsMessage(dv, offset, ctx) {
           me.speedType = 4;
         }
         addFxBurst(ex, ey, type === 2 ? 'pickup2' : type === 4 ? 'pickup4' : 'pickup');
-        if (type === 2 || type === 4) sfx.speedOn();
-        else sfx.pickup();
+        if (type === 2 || type === 4) sfx.speedOn(sfxPanFrom(ex));
+        else sfx.pickup(sfxPanFrom(ex));
         addShakeClass('micro', ...shakeDirFrom(ex, ey));
         comboBump();
       }
@@ -820,10 +822,10 @@ export function handleEventsMessage(dv, offset, ctx) {
         addFxBurst(ex, ey, 'use');
         addToast(type === 3 ? '💥' : '🛡', `${t('toast.powerup_used')}: ${powerupLabel(type)}`, null, infoDesc(infoPack().powerups, type, ''));
         if (type === 3) {
-          sfx.explode();
+          sfx.explode(sfxPanFrom(ex));
           fxFlashScreen([255, 150, 90], 0.8);
         } else {
-          sfx.powerUsed();
+          sfx.powerUsed(sfxPanFrom(ex));
         }
         addShakeClass('medium', ...shakeDirFrom(ex, ey));
       }
@@ -912,10 +914,10 @@ export function handleCosmeticsMessage(msg, ctx) {
     cosmeticsLabel,
     cosmeticsOpClear,
     cosmeticsVariantName,
-    playBeep,
     renderMenuSkinPreview,
     renderMetaHud,
     setCosmeticsStatus,
+    sfx,
     syncCosmeticsUi,
     t,
     youCos
@@ -1012,7 +1014,7 @@ export function handleCosmeticsMessage(msg, ctx) {
       const boughtText = () => `${t('cosmetics.bought_prefix')}: ${cosmeticsLabel(bc)} — ${cosmeticsVariantName(bc, bi)}`;
       setCosmeticsStatus(boughtText, 'success');
       addToast('✨', boughtText(), null);
-      playBeep(880, 150, 0.9);
+      sfx.purchase();
     } else if (pending) {
       setCosmeticsStatus('', '');
     }
