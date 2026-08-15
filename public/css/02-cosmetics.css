@@ -919,10 +919,6 @@
   background: linear-gradient(135deg, var(--brand), var(--brand2));
 }
 
-body {
-  --hud-filter: brightness(var(--hud-brightness)) contrast(var(--hud-contrast));
-}
-
 .fieldLabel {
   font-size: var(--fs-13);
   font-weight: 800;

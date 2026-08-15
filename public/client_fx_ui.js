@@ -98,10 +98,7 @@ let bigBannerLastAt = 0;
 let bigBannerTimer = 0;
 
 // Возвращает true, если баннер показан. Иначе вызывающий откатывается на тост.
-// deps: { fxBannerEnabled }
-export function showBigBannerImpl(icon, title, sub, mod, deps) {
-  const { fxBannerEnabled } = deps;
-  if (!fxBannerEnabled()) return false;
+export function showBigBannerImpl(icon, title, sub, mod) {
   const el = document.getElementById('bigBanner');
   if (!el) return false;
 

@@ -362,18 +362,11 @@
 
               <div class="settingsGroupTitle" data-i18n="settings.hud"></div>
               <label class="fieldInline">
-                <span class="fieldLabel" data-i18n="settings.hud_brightness"></span>
-                <input id="hudBrightness" type="range" min="0.75" max="1.25" step="0.05" value="1" />
-              </label>
-              <div class="fieldHint" data-i18n="settings.hud_brightness_hint"></div>
-              <label class="fieldInline">
-                <span class="fieldLabel" data-i18n="settings.hud_contrast"></span>
-                <input id="hudContrast" type="range" min="0.85" max="1.35" step="0.05" value="1" />
-              </label>
-              <div class="fieldHint" data-i18n="settings.hud_contrast_hint"></div>
-              <label class="fieldInline">
                 <span class="fieldLabel" data-i18n="settings.hud_panels"></span>
-                <input id="hudPanelOpacity" type="range" min="0.55" max="1" step="0.05" value="0.82" />
+                <!-- step 0.01, а не 0.05: с шагом 0.05 от 0.55 значение по
+                     умолчанию 0.82 не попадало на сетку, и ползунок вставал на
+                     0.80, показывая не то, что сохранено. -->
+                <input id="hudPanelOpacity" type="range" min="0.55" max="1" step="0.01" value="0.82" />
               </label>
               <div class="fieldHint" data-i18n="settings.hud_panels_hint"></div>
             </div>
@@ -419,10 +412,6 @@
                 <input id="perfEnabled" type="checkbox" />
               </label>
               <div class="fieldHint" data-i18n="settings.perf_hint"></div>
-              <label class="fieldInline">
-                <span class="fieldLabel" data-i18n="settings.perf_compact"></span>
-                <input id="perfCompact" type="checkbox" />
-              </label>
             </div>
           </div>
         </div>

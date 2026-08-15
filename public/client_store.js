@@ -300,7 +300,6 @@ export const settings = {
   fxPresetUserSet: false,
 
   perfEnabled: false,
-  perfCompact: false,
 
   soundEnabled: true,
   soundVolume: 0.7,
@@ -311,10 +310,7 @@ export const settings = {
      navigator.vibrate поддержан; iOS Safari его не знает. */
   hapticsEnabled: true,
 
-  hudBrightness: 1,
-  hudContrast: 1,
-  hudPanelOpacity: 0.82,
-  hudDensity: 'comfy'
+  hudPanelOpacity: 0.82
 };
 
 /* Сиюминутное состояние эффектов — не сохраняется и не переживает матч. */

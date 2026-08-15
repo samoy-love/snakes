@@ -15,7 +15,6 @@
   background: linear-gradient(160deg, rgba(17, 26, 40, 0.72), rgba(7, 11, 19, 0.78));
   backdrop-filter: blur(12px);
   box-shadow: var(--shadow-float-strong);
-  filter: var(--hud-filter);
   min-width: 260px;
   max-width: min(360px, calc(100vw - 24px - var(--sa-left) - var(--sa-right)));
   max-height: calc(100dvh - 24px - var(--sa-top) - var(--sa-bottom));
@@ -275,7 +274,6 @@ body.inGame #nameRow {
   backdrop-filter: blur(12px);
   box-shadow: var(--shadow-float);
   pointer-events: none;
-  filter: var(--hud-filter);
 }
 
 #topHud[aria-hidden="true"] {
@@ -418,7 +416,6 @@ body.inGame #nameRow {
   line-height: 1.35;
   text-align: left;
   pointer-events: none;
-  filter: var(--hud-filter);
 }
 
 .metaSection {

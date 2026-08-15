@@ -67,8 +67,6 @@ html {
   --text: #e5e7eb;
   --muted: rgba(229, 231, 235, 0.84);
   --muted2: rgba(229, 231, 235, 0.78);
-  --hud-brightness: 1;
-  --hud-contrast: 1;
   --hud-panel-alpha: 0.82;
   --accent: rgba(255, 45, 85, 0.98);
   --accent2: rgba(76, 201, 240, 0.88);

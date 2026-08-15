@@ -15,9 +15,9 @@
 import { settings } from './client_store.js';
 
 const FX_PRESETS = {
-  calm: { shake: 0, flash: 0, particles: 0.35, hitstop: 0, countUp: false, volume: 0.6, banner: true },
-  normal: { shake: 1, flash: 1, particles: 1, hitstop: 1, countUp: true, volume: 1, banner: true },
-  casino: { shake: 1.45, flash: 1.25, particles: 1.4, hitstop: 1.3, countUp: true, volume: 1.1, banner: true }
+  calm: { shake: 0, flash: 0, particles: 0.35, hitstop: 0, countUp: false, volume: 0.6 },
+  normal: { shake: 1, flash: 1, particles: 1, hitstop: 1, countUp: true, volume: 1 },
+  casino: { shake: 1.45, flash: 1.25, particles: 1.4, hitstop: 1.3, countUp: true, volume: 1.1 }
 };
 
 export function prefersReducedMotion() {
@@ -62,6 +62,3 @@ export function fxVolumeScale() {
   return Math.max(0, def().volume);
 }
 
-export function fxBannerEnabled() {
-  return !!def().banner;
-}

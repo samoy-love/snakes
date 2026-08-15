@@ -122,7 +122,6 @@ export const dom = {
   fxIntensityInput: byId('fxIntensity'),
   shakeIntensityInput: byId('shakeIntensity'),
   perfEnabledInput: byId('perfEnabled'),
-  perfCompactInput: byId('perfCompact'),
   soundEnabledInput: byId('soundEnabled'),
   soundVolumeInput: byId('soundVolume'),
   muteOnBlurInput: byId('muteOnBlur'),
@@ -130,8 +129,6 @@ export const dom = {
   hapticsRow: byId('hapticsRow'),
   testBeepBtn: byId('testBeepBtn'),
   resetSettingsBtn: byId('resetSettingsBtn'),
-  hudBrightnessInput: byId('hudBrightness'),
-  hudContrastInput: byId('hudContrast'),
   hudPanelOpacityInput: byId('hudPanelOpacity'),
 
   // Магазин.

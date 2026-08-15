@@ -10,9 +10,8 @@
    запись localStorage, синхронизация полей формы и обработчики. */
 
 import { dom } from './client_dom.js';
-import { KEYS, storageGet, storageGetJson, storageSet, storageSetJson } from './client_storage.js';
+import { KEYS, storageGetJson, storageSetJson } from './client_storage.js';
 import { settings } from './client_store.js';
-import { onLangChange, t } from './client_i18n_rt.js';
 import { overlayManager } from './client_util.js';
 import { syncOverlayUiState, registerOverlayCloser } from './client_overlays.js';
 import { normalizeFxPreset, prefersReducedMotion } from './client_fx_preset.js';
@@ -28,14 +27,11 @@ const FIELDS = {
   fxIntensity: { def: 0.85, kind: 'range', min: 0, max: 1, input: () => dom.fxIntensityInput },
   shakeIntensity: { def: 0.55, kind: 'range', min: 0, max: 1, input: () => dom.shakeIntensityInput },
   perfEnabled: { def: false, kind: 'bool', input: () => dom.perfEnabledInput },
-  perfCompact: { def: false, kind: 'bool', input: () => dom.perfCompactInput },
   soundEnabled: { def: true, kind: 'bool', input: () => dom.soundEnabledInput },
   soundVolume: { def: 0.7, kind: 'range', min: 0, max: 1, input: () => dom.soundVolumeInput },
   muteOnBlur: { def: true, kind: 'bool', input: () => dom.muteOnBlurInput },
   hapticsEnabled: { def: true, kind: 'bool', input: () => dom.hapticsInput },
-  hudBrightness: { def: 1, kind: 'range', min: 0.5, max: 2, input: () => dom.hudBrightnessInput },
-  hudContrast: { def: 1, kind: 'range', min: 0.5, max: 2, input: () => dom.hudContrastInput },
-  hudPanelOpacity: { def: 0.82, kind: 'range', min: 0.3, max: 1, input: () => dom.hudPanelOpacityInput }
+  hudPanelOpacity: { def: 0.82, kind: 'range', min: 0.55, max: 1, input: () => dom.hudPanelOpacityInput }
 };
 
 const clampField = (name, raw) => {
@@ -51,17 +47,12 @@ function applyHudSettings() {
   const b = document.body;
   if (!b) return;
   try {
-    b.style.setProperty('--hud-brightness', String(settings.hudBrightness));
-    b.style.setProperty('--hud-contrast', String(settings.hudContrast));
     b.style.setProperty('--hud-panel-alpha', String(settings.hudPanelOpacity));
   } catch {}
 }
 
 export function applyPerfUi() {
-  if (dom.perf) {
-    dom.perf.classList.toggle('perfCompact', !!settings.perfCompact);
-    dom.perf.style.display = settings.perfEnabled ? '' : 'none';
-  }
+  if (dom.perf) dom.perf.style.display = settings.perfEnabled ? '' : 'none';
 }
 
 function applyFxPreset(next, fromUser) {
@@ -78,21 +69,6 @@ function applyFxPreset(next, fromUser) {
       sel.value = v;
     } catch {}
   }
-}
-
-function getHudDensityDefault() {
-  const raw = storageGet(KEYS.hudDensity);
-  return raw === 'comfy' || raw === 'compact' ? raw : 'comfy';
-}
-
-function applyHudDensity(next) {
-  const v = String(next || 'comfy');
-  if (v !== 'comfy' && v !== 'compact') return;
-  settings.hudDensity = v;
-  try {
-    document.body.dataset.hudDensity = v;
-  } catch {}
-  storageSet(KEYS.hudDensity, v);
 }
 
 /* --- Тактильный отклик -------------------------------------------------
@@ -181,53 +157,13 @@ function hideSettingsOverlay() {
   syncOverlayUiState();
 }
 
-/* J22: тумблер пресета. Разметки под него нет — создаём поле сами, чтобы
-   настройка была доступна. Пересобирается на смену языка. */
-function ensureFxPresetControl() {
-  let sel = document.getElementById('fxPresetSelect');
-  if (!sel) {
-    const anchor = dom.fxEnabledInput?.closest?.('.fieldInline') || null;
-    const host = anchor?.parentElement || null;
-    if (!host) return null;
-    try {
-      const label = document.createElement('label');
-      label.className = 'fieldInline';
-      const span = document.createElement('span');
-      span.className = 'fieldLabel';
-      span.setAttribute('data-i18n', 'settings.fx_preset');
-      span.textContent = t('settings.fx_preset');
-      sel = document.createElement('select');
-      sel.id = 'fxPresetSelect';
-      label.append(span, sel);
-
-      const hint = document.createElement('div');
-      hint.className = 'fieldHint';
-      hint.setAttribute('data-i18n', 'settings.fx_preset_hint');
-      hint.textContent = t('settings.fx_preset_hint');
-
-      host.insertBefore(label, anchor);
-      host.insertBefore(hint, anchor);
-    } catch {
-      return null;
-    }
-  }
-
+/* J22: тумблер пресета. Само поле и его варианты лежат в index.html, а их
+   подписи переводит общий проход по [data-i18n] — здесь остаётся только
+   выставить текущее значение. */
+function syncFxPresetControl() {
+  const sel = document.getElementById('fxPresetSelect');
+  if (!sel) return null;
   try {
-    const opts = [
-      ['calm', t('settings.fx_preset_calm')],
-      ['normal', t('settings.fx_preset_normal')],
-      ['casino', t('settings.fx_preset_casino')]
-    ];
-    if (sel.options?.length !== opts.length) sel.replaceChildren();
-    for (let i = 0; i < opts.length; i++) {
-      let op = sel.options?.[i];
-      if (!op) {
-        op = document.createElement('option');
-        sel.appendChild(op);
-      }
-      op.value = opts[i][0];
-      op.textContent = opts[i][1];
-    }
     sel.value = settings.fxPreset;
   } catch {}
   return sel;
@@ -246,15 +182,13 @@ export function initSettings() {
   syncHapticsRowUi();
   applyPerfUi();
   applyHudSettings();
-  applyHudDensity(getHudDensityDefault());
 
-  const fxPresetSelect = ensureFxPresetControl();
+  const fxPresetSelect = syncFxPresetControl();
   fxPresetSelect?.addEventListener('change', () => {
     applyFxPreset(fxPresetSelect.value, true);
     saveSettings();
     sfx.ui();
   });
-  onLangChange(ensureFxPresetControl);
 
   registerOverlayCloser('settings', hideSettingsOverlay);
   dom.settingsBtn?.addEventListener('click', showSettingsOverlay);
@@ -294,7 +228,6 @@ export function initSettings() {
   bind('fxIntensity');
   bind('shakeIntensity');
   bind('perfEnabled', applyPerfUi);
-  bind('perfCompact', applyPerfUi);
   bind('soundEnabled');
   bind('soundVolume');
   bind('muteOnBlur', () => {
@@ -304,8 +237,6 @@ export function initSettings() {
   bind('hapticsEnabled', () => {
     if (settings.hapticsEnabled) vibrate(30);
   });
-  bind('hudBrightness', applyHudSettings);
-  bind('hudContrast', applyHudSettings);
   bind('hudPanelOpacity', applyHudSettings);
 
   dom.testBeepBtn?.addEventListener('click', (e) => {
