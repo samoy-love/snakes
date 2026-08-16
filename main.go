@@ -82,7 +82,6 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", hub.HandleWS)
-	mux.HandleFunc("/favicon.ico", httpx.FaviconHandler)
 	// Liveness/readiness for systemd and whatever sits in front of it.
 	mux.HandleFunc("/healthz", httpx.HealthzHandler)
 	mux.HandleFunc("/readyz", httpx.ReadyzHandler)

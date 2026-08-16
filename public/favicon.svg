@@ -1,11 +1,53 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Змейки">
-  <rect width="32" height="32" rx="7" fill="#1a2e1a" />
-  <path
-    d="M8 10c0-2.2 1.8-4 4-4s4 1.8 4 4-1.8 4-4 4h8c2.2 0 4 1.8 4 4s-1.8 4-4 4-4-1.8-4-4"
-    fill="none"
-    stroke="#5fd75f"
-    stroke-width="3.4"
-    stroke-linecap="round"
-  />
-  <circle cx="22" cy="10" r="1.6" fill="#101a10" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Змейки">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#161e2a" />
+      <stop offset="1" stop-color="#0b0f14" />
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#4cc9f0" />
+      <stop offset="0.5" stop-color="#a855f7" />
+      <stop offset="1" stop-color="#ff2d55" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff2d55" stop-opacity="0.4" />
+      <stop offset="1" stop-color="#ff2d55" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glowTail" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4cc9f0" stop-opacity="0.35" />
+      <stop offset="1" stop-color="#4cc9f0" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- плитка -->
+  <rect width="64" height="64" rx="15" fill="url(#bg)" />
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="14.25" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1.5" />
+
+  <!-- сетка поля -->
+  <path d="M16 4v56M32 4v56M48 4v56M4 16h56M4 32h56M4 48h56" stroke="#ffffff" stroke-opacity="0.06" stroke-width="1" />
+
+  <!-- захваченная территория -->
+  <path d="M34 8h21a4 4 0 0 1 4 4v22z" fill="#f5c542" fill-opacity="0.18" />
+
+  <!-- свечение -->
+  <circle cx="47" cy="18" r="17" fill="url(#glow)" />
+  <circle cx="13" cy="46" r="13" fill="url(#glowTail)" />
+
+  <!-- тень тела -->
+  <path d="M13 46c0-7 5-11 11-11h14c6 0 9-4 9-9v-8"
+        fill="none" stroke="#000" stroke-opacity="0.5" stroke-width="12" stroke-linecap="round" transform="translate(0 2.5)" />
+
+  <!-- тело -->
+  <path d="M13 46c0-7 5-11 11-11h14c6 0 9-4 9-9v-8"
+        fill="none" stroke="url(#body)" stroke-width="10.5" stroke-linecap="round" />
+
+  <!-- голова -->
+  <circle cx="47" cy="18" r="7.5" fill="#ff2d55" />
+  <circle cx="45" cy="15.5" r="2.9" fill="#ffffff" />
+  <circle cx="50.2" cy="15.8" r="2.4" fill="#ffffff" />
+  <circle cx="45.7" cy="15.8" r="1.5" fill="#0b0f14" />
+  <circle cx="50.8" cy="16.1" r="1.25" fill="#0b0f14" />
+
+  <!-- язык -->
+  <path d="M54.5 19.5h3.5l1.8-1.8M58 19.5l1.8 1.8" fill="none" stroke="#ff2d55" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
 </svg>

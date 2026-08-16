@@ -175,9 +175,3 @@ func ReadyzHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ready\n"))
 }
-
-// FaviconHandler отвечает пустотой, чтобы не ловить 404 в логах.
-func FaviconHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusNoContent)
-}
