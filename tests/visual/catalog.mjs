@@ -257,21 +257,18 @@ function chatRun(messages) {
   };
 }
 
-// Оверлей ввода чата (#chatInputOverlay) — не отдельный модальный экран, а
-// подложка, что рисует ЭМОДЗИ поверх обычного <input> тем же текстом (сам
-// public/client_chat.js: renderChatInputOverlayNow вызывается на каждый
-// 'input' — обычное действие пользователя, debug-мосту тут вмешиваться
-// незачем, как и для настроек-тумблеров выше).
+// Поле ввода чата с набранным текстом и эмодзи. Отдельного слоя-подложки
+// (#chatInputOverlay) больше нет: он дублировал набираемый текст поверх поля,
+// эмодзи рисует сам браузер.
 const chatInputOverlayEntry = {
-  id: 'chat-input-overlay',
-  description: 'Поле ввода чата — оверлей с эмодзи поверх текста',
+  id: 'chat-input-typed',
+  description: 'Поле ввода чата — набранный текст с эмодзи',
   async run(page) {
     await gotoDebug(page);
     // #chat скрыт, пока открыт #menuOverlay — chatLog([]) закрывает меню тем
     // же путём, что и остальные chat-сценарии (см. client_debug.js).
     await callDebug(page, 'chatLog', []);
     await page.fill('#chatInput', '😀 привет команда 🔥');
-    await page.locator('#chatInputOverlay .chatInputText').waitFor({ state: 'visible' });
   }
 };
 

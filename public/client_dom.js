@@ -22,6 +22,7 @@ export const dom = {
 
   // Верхний HUD матча.
   hud: byId('hud'),
+  help: byId('help'),
   lbBtn: byId('lbBtn'),
   stats: byId('stats'),
   topHud: byId('topHud'),
@@ -51,7 +52,6 @@ export const dom = {
   chatLog: byId('chatLog'),
   chatForm: byId('chatForm'),
   chatInput: byId('chatInput'),
-  chatInputOverlay: byId('chatInputOverlay'),
   chatUnread: byId('chatUnread'),
   chatBtn: byId('chatBtn'),
   emojiBtn: byId('emojiBtn'),
@@ -122,7 +122,6 @@ export const dom = {
   fxIntensityInput: byId('fxIntensity'),
   shakeIntensityInput: byId('shakeIntensity'),
   perfEnabledInput: byId('perfEnabled'),
-  perfCompactInput: byId('perfCompact'),
   soundEnabledInput: byId('soundEnabled'),
   soundVolumeInput: byId('soundVolume'),
   muteOnBlurInput: byId('muteOnBlur'),
@@ -130,8 +129,6 @@ export const dom = {
   hapticsRow: byId('hapticsRow'),
   testBeepBtn: byId('testBeepBtn'),
   resetSettingsBtn: byId('resetSettingsBtn'),
-  hudBrightnessInput: byId('hudBrightness'),
-  hudContrastInput: byId('hudContrast'),
   hudPanelOpacityInput: byId('hudPanelOpacity'),
 
   // Магазин.

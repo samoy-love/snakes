@@ -19,7 +19,7 @@ import { escapeHtml } from './client_util.js';
 import { isEn, t } from './client_i18n_rt.js';
 import { fmtInt } from './client_labels.js';
 import { addToast } from './client_toasts.js';
-import { playBeep } from './client_sfx.js';
+import { sfx } from './client_sfx.js';
 import { renderMetaHudImpl as renderMetaHud } from './client_hud.js';
 import { handleCosmeticsMessage } from './client_ws_handlers.js';
 import {
@@ -566,10 +566,10 @@ export function onCosmetics(msg) {
     cosmeticsLabel,
     cosmeticsOpClear,
     cosmeticsVariantName,
-    playBeep,
     renderMenuSkinPreview,
     renderMetaHud,
     setCosmeticsStatus,
+    sfx,
     syncCosmeticsUi,
     t,
     youCos

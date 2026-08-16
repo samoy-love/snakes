@@ -499,6 +499,7 @@ body.inGame #hud:not(.lbPinned):focus-within {
   line-height: 1.25;
   color: var(--muted);
   pointer-events: none;
+  transition: opacity 600ms ease;
   /* Вне матча подсказка не нужна: показываем её только в игре (см. ниже). */
   display: none;
 }
@@ -798,4 +799,165 @@ body.inGame #hud:not(.lbPinned) #langToggle {
 
 .matchTable thead th {
   background: rgba(5, 9, 16, 0.55);
+}
+
+/* ==========================================================================
+   ВОЛНА 12. Фокус игрового экрана.
+   Ревью живого матча (1920×1080): восемь панелей одинаковой яркости — глазу
+   не за что зацепиться. Иерархия задана явно: одна акцентная сущность —
+   верхняя полоса (место, время, текущая миссия), всё остальное на ступень
+   тише. Блок идёт последним и перекрывает ранние правила порядком.
+   ========================================================================== */
+
+/* --- Верхняя полоса: миссия — акцентный чип ---------------------------------
+   Контракт — единственная «что делать прямо сейчас» сущность на экране, а
+   стоял серым текстом в конце строки. Теперь это бренд-чип с собственной
+   рамкой; фаза матча рядом, наоборот, приглушена — она информирует, а не
+   зовёт к действию. */
+.topHudContract .topHudChip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 22%, transparent), color-mix(in srgb, var(--brand2) 12%, transparent));
+  color: #f4fffb;
+  font-weight: 800;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 12%, transparent), 0 6px 18px color-mix(in srgb, var(--brand) 18%, transparent);
+}
+
+.topHudContract .topHudChip.hidden {
+  display: none;
+}
+
+#topHudPhase.topHudChip {
+  opacity: 0.72;
+}
+
+#topHudPhase.topHudChip.isFinal {
+  opacity: 1;
+}
+
+/* --- Правая колонка: вторичный слой ---------------------------------------
+   Шапки панелей (цвет — в 08-game-sidebar.css) и лента событий тише полосы:
+   ниже непрозрачность чужих строк. Свои события остаются полными — это единственное,
+   на что здесь стоит смотреть боковым зрением. */
+#rightInfo #killfeed .killLine.killLineOther,
+#rightInfo #killfeed .killLine:not(.killLineMine) {
+  opacity: 0.78;
+}
+
+#rightInfo #killfeed .killLine.killLineMine {
+  opacity: 1;
+}
+
+/* Лента — четыре последних строки: пятая-шестая уже история, а не события. */
+#rightInfo #killfeed {
+  max-height: var(--killfeed-max, 132px);
+}
+
+/* Технический счётчик FPS/пинга — самый тихий текст экрана. */
+#rightSidebar #perf {
+  opacity: 0.6;
+}
+
+#rightSidebar #perf:hover {
+  opacity: 1;
+}
+
+/* Ряд действий на экранах смерти и итогов: настройки — иконка справа от
+   основных кнопок, а не третья равноправная кнопка. */
+.matchActions > .iconBtn {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* Футер меню: настройки и язык стоят рядом у правого края, а не по разным
+   углам (margin-left: auto у языка задан в 02-cosmetics.css для футера
+   настроек, где он один). */
+.menuFooterActions > .langToggle {
+  margin-left: 0;
+}
+
+/* --- Подсказка управления гаснет через 25 с матча (client_hud.js) --------- */
+body.inGame #help.helpFade {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Комбо-чип «⚔ N ×M» делил левый нижний угол с подсказкой и наезжал на неё:
+   поднимаем чип над строкой подсказки. */
+body.inGame #hudCombo {
+  bottom: calc(12px + var(--sa-bottom) + 40px);
+}
+
+/* Легенда миникарты лежала ПОВЕРХ карты и закрывала её левый нижний угол —
+   теперь стоит строкой под канвасом. */
+#minimapPanel {
+  display: grid;
+  gap: 6px;
+}
+
+#minimapPanel .minimapLegend {
+  position: static;
+  grid-template-columns: repeat(3, auto);
+  justify-content: start;
+  gap: 4px 12px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+/* Полоса состояния читается поверх любой территории: подложка темнее и
+   непрозрачнее общей панели — на розовой/жёлтой заливке белый текст падал
+   ниже AA. */
+#topHud {
+  background: rgba(6, 10, 18, 0.9);
+}
+
+/* Один язык карточек. Строки ленты, чипы и тосты сводятся к одной форме:
+   радиус --r-md, тонкая рамка --border2, без декоративной скобки слева у
+   событий. Свои события отмечает только цвет фона, а не отдельная полоса. */
+.killLine {
+  border-left-width: 1px;
+  border-left-color: var(--border2);
+}
+
+.killLine.killLineMine {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border2));
+}
+
+.killLine.killLineOther {
+  border-left-color: var(--border2);
+}
+
+/* Меньше капса, крупнее подписи: шапки правой колонки и заголовки таблиц —
+   обычный регистр и кегль тела; колонки таблицы лидеров — 13px вместо 11. */
+.metaGoalsTitle,
+.metaWalletLabel {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--fs-meta-lg);
+}
+
+#stats,
+#stats td,
+#stats th,
+.teamTable td,
+.teamTable th {
+  font-size: var(--fs-meta-lg);
+}
+
+/* На высоком экране правая колонка обрывалась на ~60% высоты — лента событий
+   не растёт под контент. Отдаём ей остаток колонки: до 12 строк по высоте. */
+@media (min-height: 1000px) {
+  #rightInfo > #rightEventsDetails {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #rightInfo #killfeed {
+    max-height: min(40dvh, 420px);
+  }
 }

@@ -413,6 +413,33 @@ export function createMockAudioContext(opts = {}) {
     return n;
   };
 
+  /* Узлы пространства и характера. Каждый выключается своим флагом: движок
+     обязан пережить их отсутствие (Safari годами жил без StereoPanner), и
+     проверять это можно только на моке, где узла действительно нет. */
+  if (!opts.noPanner) {
+    ctx.createStereoPanner = () => {
+      const n = node('panner');
+      n.pan = makeParam(n, 'pan', log);
+      return n;
+    };
+  }
+
+  if (!opts.noConvolver) {
+    ctx.createConvolver = () => {
+      const n = node('convolver');
+      n.buffer = null;
+      return n;
+    };
+  }
+
+  if (!opts.noShaper) {
+    ctx.createWaveShaper = () => {
+      const n = node('shaper');
+      n.curve = null;
+      return n;
+    };
+  }
+
   ctx.createBuffer = (channels, len, rate) => {
     ctx.createBufferCalls++;
     const data = new Float32Array(len);

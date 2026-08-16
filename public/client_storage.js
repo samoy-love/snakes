@@ -27,7 +27,6 @@ export const KEYS = {
   // Настройки.
   settings: 'snakes_settings_v1',
   lang: 'lang',
-  hudDensity: 'hudDensity',
 
   // Состояние интерфейса, которое игрок выставил сам.
   leaderboardPinned: 'lbPinned',

@@ -17,7 +17,6 @@
   flex-direction: column;
   min-height: 0;
   max-height: calc(100dvh - 24px - var(--sa-top) - var(--sa-bottom));
-  filter: var(--hud-filter);
 }
 
 #chatHeader {
@@ -239,6 +238,18 @@
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   position: relative;
+  /* Панель — флекс-ребёнок #chat (overflow: hidden, max-height). Без
+     flex-shrink: 0 её сжимало до полоски в 18px и выталкивало за нижний
+     край: кнопка 😀 «не работала», хотя класс .open ставился. */
+  flex: 0 0 auto;
+}
+
+/* Пока панель открыта, лог отдаёт ей высоту: бюджет #chat фиксирован
+   (шапка + форма + лог 140px уже забирали его целиком), а лог под панелью
+   в этот момент всё равно не читают. */
+#chat:has(#emojiPanel.open) #chatLog {
+  min-height: 0;
+  flex: 0 1 auto;
 }
 
 #chat.collapsed #chatLog,

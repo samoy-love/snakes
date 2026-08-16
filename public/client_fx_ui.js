@@ -98,10 +98,7 @@ let bigBannerLastAt = 0;
 let bigBannerTimer = 0;
 
 // Возвращает true, если баннер показан. Иначе вызывающий откатывается на тост.
-// deps: { fxBannerEnabled }
-export function showBigBannerImpl(icon, title, sub, mod, deps) {
-  const { fxBannerEnabled } = deps;
-  if (!fxBannerEnabled()) return false;
+export function showBigBannerImpl(icon, title, sub, mod) {
   const el = document.getElementById('bigBanner');
   if (!el) return false;
 
@@ -259,9 +256,12 @@ export function comboBumpImpl(deps) {
   comboCount++;
 
   if (comboCount >= 2) {
-    // +2 полутона за шаг цепочки.
-    const semis = Math.min(24, (comboCount - 2) * 2);
-    sfx.comboStep(semis);
+    /* Наружу уходит НОМЕР ШАГА, а не полутона. Раньше здесь считался подъём
+       «+2 полутона за шаг» с потолком в 24: после четырнадцатого звена
+       цепочки звук переставал меняться совсем, и рекордная серия матча
+       звучала как средняя. Куда шаг девать — высота, плотность, хвост —
+       решает палитра (ladder() в client_sfx.js); здесь только счёт. */
+    sfx.comboStep(comboCount - 2);
   }
   renderComboHudImpl(deps);
 
@@ -278,7 +278,8 @@ export function comboBreakImpl(deps) {
   const had = comboCount;
   comboCount = 0;
   renderComboHudImpl(deps);
-  if (had >= 2) sfx.comboBreak();
+  // Падение начинается с той ступени, на которой цепочка оборвалась.
+  if (had >= 2) sfx.comboBreak(had - 2);
 }
 
 // deps: { getStarted, getYouKills }
@@ -370,7 +371,8 @@ export function renderKillfeedImpl(deps) {
   const now = performance.now();
   const small = window.innerWidth <= 720;
   const maxAge = small ? 8000 : 12000;
-  const maxLines = small ? 4 : 6;
+  // Четыре строки: пятая-шестая — уже история, а не события (волна 12).
+  const maxLines = 4;
   const visible = eventFeed.filter((e) => now - e.t < maxAge).slice(0, maxLines);
   /* C8: замер до правки — 195 узлов за 12 с. Половина пересборок приходилась на
      пакеты, где видимый текст не менялся вообще: killfeedDirty выставляется на

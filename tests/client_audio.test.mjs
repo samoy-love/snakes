@@ -147,9 +147,12 @@ test('AudioContext недоступен или бросает — модуль �
 
 // --- шина -------------------------------------------------------------------
 
-test('шина: master -> компрессор -> destination, и строится один раз', () => {
+test('шина: master -> общий выход -> компрессор -> destination, и строится один раз', () => {
   // Ловит: потерю компрессора (аккорды и наложения начинают клиппировать)
-  // и пересоздание master на каждый звук (утечка узлов + скачки громкости).
+  // и пересоздание шины на каждый звук (утечка узлов + скачки громкости).
+  //
+  // Шин две: общий выход (front) и просадка (master). Крупное событие
+  // приглушает master, но само идёт в front — иначе удар глушит сам себя.
   const s = setup();
   try {
     s.audio.tone({ freq: 440 });
@@ -157,12 +160,75 @@ test('шина: master -> компрессор -> destination, и строитс
 
     const comps = s.nodes('compressor');
     assert.equal(comps.length, 1);
-    const master = s.nodes('gain')[0];
-    assert.equal(master.__connected[0], comps[0]);
+    const out = s.nodes('gain')[0];
+    const master = s.nodes('gain')[1];
+    assert.equal(out.__connected[0], comps[0]);
     assert.equal(comps[0].__connected[0], s.ctx().destination);
-    // master + по одному gain на голос
-    assert.equal(s.nodes('gain').length, 3);
+    assert.equal(master.__connected[0], out);
+    // общий выход + просадка + по одному gain на голос
+    assert.equal(s.nodes('gain').length, 4);
     assert.equal(s.env.ctorCalls(), 1);
+  } finally {
+    s.restore();
+  }
+});
+
+test('шина: обычный голос идёт через просадку, front — мимо неё', () => {
+  // Ловит: возврат к одной шине. Если голоса крупного события снова попадут
+  // в master, duck() под тем же событием прижмёт его собственный удар — ровно
+  // то, ради чего шина и разделена.
+  const s = setup();
+  try {
+    s.audio.tone({ freq: 440 });
+    s.audio.tone({ freq: 550, front: true });
+
+    const out = s.nodes('gain')[0];
+    const master = s.nodes('gain')[1];
+    assert.equal(s.nodes('gain')[2].__connected[0], master, 'обычный голос — в просадку');
+    assert.equal(s.nodes('gain')[3].__connected[0], out, 'front-голос — в общий выход');
+  } finally {
+    s.restore();
+  }
+});
+
+test('duck: просадка ведёт master вниз и обязательно возвращает к единице', () => {
+  // Ловит: застрявшую просадку. Если обратный пандус потеряется, вся игра
+  // после первой же смерти навсегда останется вдвое тише.
+  const s = setup();
+  try {
+    s.audio.tone({ freq: 440 });
+    const master = s.nodes('gain')[1];
+    const before = master.gain.__calls.length;
+
+    s.audio.duck(0.5, 400);
+
+    const calls = master.gain.__calls.slice(before);
+    assert.deepEqual(
+      calls.map((c) => c[0]),
+      ['cancelScheduledValues', 'setValueAtTime', 'linearRampToValueAtTime', 'linearRampToValueAtTime']
+    );
+    assert.equal(calls[2][1], 0.5);
+    assert.equal(calls[3][1], 1);
+    assert.ok(calls[3][2] > calls[2][2], 'возврат позже провала');
+  } finally {
+    s.restore();
+  }
+});
+
+test('duck: нулевая и мусорная величина ничего не трогают', () => {
+  // Ловит: NaN в setValueAtTime — после него автоматика параметра ломается
+  // целиком, и громкость больше не восстановится.
+  const s = setup();
+  try {
+    s.audio.tone({ freq: 440 });
+    const master = s.nodes('gain')[1];
+    const before = master.gain.__calls.length;
+    s.audio.duck(0, 400);
+    assert.equal(master.gain.__calls.length, before);
+    for (const junk of [NaN, Infinity, -1, 'abc', null, undefined, {}]) {
+      assert.doesNotThrow(() => s.audio.duck(junk, junk));
+    }
+    assert.deepEqual(badAudioNumbers(s.log()), []);
   } finally {
     s.restore();
   }
@@ -287,6 +353,77 @@ test('лимитер: окно скользящее — новый звук по
   }
 });
 
+test('event: слои одного звука стоят в окне лимитера как один звук', () => {
+  // Ловит: возврат к «лимитер считает голоса». Удар — это щелчок, тело и
+  // суб; если каждый слой занимает своё место в окне, то на четыре слоя
+  // приходится всё окно, и уже второе событие подряд начинает рассыпаться.
+  const s = setup();
+  try {
+    const layered = () => {
+      s.audio.tone({ freq: 100 });
+      s.audio.tone({ freq: 200 });
+      s.audio.tone({ freq: 300 });
+    };
+    for (let i = 0; i < 4; i++) s.audio.event(3, layered);
+    assert.equal(s.oscFreqs().length, 12, 'четыре события по три слоя проходят целиком');
+
+    s.audio.event(3, layered);
+    assert.equal(s.oscFreqs().length, 12, 'пятое событие уже за окном');
+  } finally {
+    s.restore();
+  }
+});
+
+test('event: отложенное событие доигрывает целиком, а не по слоям', () => {
+  // Ловит: расползание слоёв по времени. Ради этого слои и группируются:
+  // щелчок, ушедший в очередь без своего суба, звучит как чужой звук.
+  const s = setup();
+  try {
+    for (let i = 0; i < 4; i++) s.audio.tone({ freq: 10 + i });
+    s.audio.event(5, () => {
+      s.audio.tone({ freq: 700 });
+      s.audio.noiseBurst(80, 'lowpass', 900);
+      s.audio.tone({ freq: 900 });
+    });
+    assert.equal(s.oscFreqs().length, 4, 'событие целиком ушло в очередь');
+
+    s.timers.advance(300);
+    assert.deepEqual(s.oscFreqs().slice(-2), [700, 900]);
+    assert.equal(s.nodes('bufsrc').length, 1, 'шумовой слой пришёл вместе с тоновыми');
+  } finally {
+    s.restore();
+  }
+});
+
+test('event: при выключенном звуке слои даже не считаются', () => {
+  const s = setup({ soundEnabled: false });
+  try {
+    let built = 0;
+    s.audio.event(5, () => {
+      built++;
+      s.audio.tone({ freq: 440 });
+    });
+    assert.equal(built, 0);
+    assert.equal(s.env.ctorCalls(), 0);
+  } finally {
+    s.restore();
+  }
+});
+
+test('duck: при выключенном звуке не будит AudioContext', () => {
+  // Ловит: просадку в обход настройки. duck() зовётся первой строкой
+  // крупных событий, и без этой проверки выключенный звук всё равно
+  // создавал бы контекст — то есть держал бы разбуженной аудио-подсистему
+  // телефона ровно теми же событиями, что и раньше.
+  const s = setup({ soundEnabled: false });
+  try {
+    s.audio.duck(0.5, 400);
+    assert.equal(s.env.ctorCalls(), 0);
+  } finally {
+    s.restore();
+  }
+});
+
 test('приоритет: важный звук вытесняет мелкий из очереди', () => {
   // Ловит: очередь FIFO вместо приоритетной. Тогда в бою «гибель» звучала
   // бы после десятка «шуршаний», то есть уже не в тот момент.
@@ -381,6 +518,12 @@ test('никаких NaN/Infinity в расписании параметров �
   try {
     for (const j of junk) {
       s.audio.tone({ freq: j, dur: j, vol: 1, delay: j, attack: j, decay: j, detune: j });
+      s.timers.advance(300);
+      // Те же грабли на новых входах: панорама приходит из мира, посыл и
+      // перегруз — из палитры, модуляция считается от частоты.
+      s.audio.tone({ freq: 440, vol: 1, pan: j, send: j, drive: j, bend: j, unison: j, unisonCents: j });
+      s.timers.advance(300);
+      s.audio.tone({ freq: 440, vol: 1, fm: { ratio: j, index: j }, vibrato: { rate: j, cents: j, delay: j } });
       s.timers.advance(300);
       s.audio.sweep(j, j, j, 'square');
       s.timers.advance(300);
@@ -497,12 +640,185 @@ test('фильтр: узел вставляется между голосом и
   try {
     s.audio.tone({ freq: 440, filter: { type: 'bandpass', freq: 900, freq2: 300, q: 4 } });
     const filt = s.nodes('biquad')[0];
-    const master = s.nodes('gain')[0];
-    const voiceGain = s.nodes('gain')[1];
+    const master = s.nodes('gain')[1];
+    const voiceGain = s.nodes('gain')[2];
     assert.equal(filt.type, 'bandpass');
     assert.equal(voiceGain.__connected[0], filt);
     assert.equal(filt.__connected[0], master);
     assert.deepEqual(filt.Q.__calls[0], ['setValueAtTime', 4, s.ctx().currentTime]);
+  } finally {
+    s.restore();
+  }
+});
+
+// --- пространство и характер ------------------------------------------------
+
+test('панорама: узел появляется только при ненулевом pan и зажимается', () => {
+  // Ловит: панорамирование каждого голоса. Событие в центре экрана обязано
+  // идти без лишнего узла, иначе на каждый мелкий захват приходится ещё один
+  // элемент графа — а их за матч тысячи.
+  const s = setup();
+  try {
+    s.audio.tone({ freq: 440 });
+    assert.equal(s.nodes('panner').length, 0);
+
+    s.audio.tone({ freq: 440, pan: 9 });
+    const p = s.nodes('panner')[0];
+    assert.equal(p.pan.__calls[0][1], 1, 'панорама зажата в [-1, 1]');
+    const master = s.nodes('gain')[1];
+    assert.equal(s.nodes('gain')[3].__connected[0], p, 'голос -> панорама');
+    assert.equal(p.__connected[0], master, 'панорама -> шина');
+  } finally {
+    s.restore();
+  }
+});
+
+test('панорама: браузер без StereoPanner всё равно играет звук', () => {
+  // Ловит: обязательность узла. StereoPannerNode не везде есть; без
+  // запасного пути событие пропадёт целиком вместо потери стерео.
+  const s = setup({ audio: { noPanner: true } });
+  try {
+    s.audio.tone({ freq: 440, pan: -1 });
+    assert.equal(s.nodes('panner').length, 0);
+    assert.deepEqual(s.oscFreqs(), [440]);
+  } finally {
+    s.restore();
+  }
+});
+
+test('реверб: свёртка строится один раз, а возврат идёт мимо просадки', () => {
+  // Ловит: пересчёт импульсного отклика на каждый звук (полторы секунды
+  // стереошума прямо в кадре смерти) и возврат хвоста в просаженную шину —
+  // тогда реверб крупного события душит сам себя.
+  const s = setup();
+  try {
+    s.audio.tone({ freq: 440, send: 0.5 });
+    s.audio.tone({ freq: 550, send: 0.5 });
+
+    const conv = s.nodes('convolver');
+    assert.equal(conv.length, 1);
+    const out = s.nodes('gain')[0];
+    const wet = conv[0].__connected[0];
+    assert.equal(wet.__connected[0], out, 'хвост возвращается в общий выход');
+  } finally {
+    s.restore();
+  }
+});
+
+test('реверб: без send посыл не строится вовсе', () => {
+  const s = setup();
+  try {
+    s.audio.tone({ freq: 440 });
+    assert.equal(s.nodes('convolver').length, 0);
+  } finally {
+    s.restore();
+  }
+});
+
+test('реверб: браузер без Convolver — сухой звук, но звук', () => {
+  const s = setup({ audio: { noConvolver: true } });
+  try {
+    s.audio.tone({ freq: 440, send: 0.7 });
+    assert.deepEqual(s.oscFreqs(), [440]);
+  } finally {
+    s.restore();
+  }
+});
+
+test('перегруз: shaper встаёт перед огибающей и компенсирует громкость', () => {
+  // Ловит: перегруз после огибающей. Насыщение имеет смысл только до неё:
+  // иначе оно срезает спад, и удар превращается в ровный гудок.
+  const s = setup();
+  try {
+    s.audio.tone({ freq: 440 });
+    assert.equal(s.nodes('shaper').length, 0);
+
+    s.audio.tone({ freq: 440, drive: 1 });
+    const shaper = s.nodes('shaper')[0];
+    assert.ok(shaper.curve && shaper.curve.length > 0, 'кривая задана');
+    const gains = s.nodes('gain');
+    const voiceGain = gains[3];
+    const pre = gains[4];
+    const post = gains[5];
+    assert.equal(pre.__connected[0], shaper, 'подкачка -> shaper');
+    assert.equal(shaper.__connected[0], post, 'shaper -> компенсация');
+    assert.equal(post.__connected[0], voiceGain, 'компенсация -> огибающая');
+    assert.ok(pre.gain.__calls[0][1] > 1 && post.gain.__calls[0][1] < 1);
+  } finally {
+    s.restore();
+  }
+});
+
+test('перегруз: браузер без WaveShaper — чистый звук, но звук', () => {
+  const s = setup({ audio: { noShaper: true } });
+  try {
+    s.audio.tone({ freq: 440, drive: 1 });
+    assert.deepEqual(s.oscFreqs(), [440]);
+  } finally {
+    s.restore();
+  }
+});
+
+test('унисон: копии расстроены симметрично, а суммарная громкость не растёт', () => {
+  // Ловит: унисон «в лоб». Три копии на полной громкости — это +9 дБ и
+  // клиппинг на каждом крупном захвате.
+  const s = setup();
+  try {
+    s.audio.tone({ freq: 440, vol: 1, unison: 3, unisonCents: 12 });
+    const oscs = s.nodes('osc');
+    assert.equal(oscs.length, 3);
+    // Средняя копия идёт без расстройки, и узлу её не задают вовсе — ноль
+    // здесь означает «detune не трогали».
+    const cents = oscs.map((o) => o.detune.__calls[0]?.[1] ?? 0);
+    assert.deepEqual(cents, [-12, 0, 12]);
+    const peak = s.nodes('gain')[2].gain.__calls.find((c) => c[0] === 'exponentialRampToValueAtTime')[1];
+    assert.ok(peak < 0.7, `каждая копия тише одиночного голоса: ${peak}`);
+  } finally {
+    s.restore();
+  }
+});
+
+test('унисон: единица и мусор дают ровно один голос', () => {
+  const s = setup();
+  try {
+    s.audio.tone({ freq: 440, unison: 1 });
+    s.timers.advance(300);
+    s.audio.tone({ freq: 440, unison: 'abc' });
+    assert.equal(s.nodes('osc').length, 2);
+    assert.equal(s.nodes('panner').length, 0, 'без унисона панораму не разводим');
+  } finally {
+    s.restore();
+  }
+});
+
+test('FM: модулятор живёт ровно столько же, сколько несущая', () => {
+  // Ловит: незакрытый модулятор. Осциллятор без stop() продолжает считаться
+  // до конца сессии — за матч их набирается столько, что кадр проседает.
+  const s = setup();
+  try {
+    s.audio.tone({ freq: 400, dur: 200, fm: { ratio: 3, index: 2 } });
+    const oscs = s.nodes('osc');
+    assert.equal(oscs.length, 2);
+    const [carrier, mod] = oscs;
+    assert.equal(mod.frequency.__calls[0][1], 1200, 'ratio считается от несущей');
+    assert.equal(mod.__started.length, 1);
+    assert.ok(mod.__stopped[0] >= carrier.__stopped[0], 'модулятор не переживает несущую');
+  } finally {
+    s.restore();
+  }
+});
+
+test('bend: спад высоты укладывается в свой отрезок, а не в всю длительность', () => {
+  // Ловит: потерю bend. Удар отличается от гудка именно тем, что высота
+  // падает за первые миллисекунды, а тело тянется дальше.
+  const s = setup();
+  try {
+    s.audio.tone({ freq: 300, freq2: 80, dur: 400, bend: 50 });
+    const osc = s.nodes('osc')[0];
+    const ramp = osc.frequency.__calls.find((c) => c[0] === 'exponentialRampToValueAtTime');
+    const t0 = s.ctx().currentTime;
+    assert.equal(ramp[1], 80);
+    assert.ok(Math.abs(ramp[2] - (t0 + 0.05)) < 1e-6, `спад за 50 мс, а не за 400: ${ramp[2] - t0}`);
   } finally {
     s.restore();
   }
@@ -530,15 +846,16 @@ test('узлы отсоединяются после проигрывания', 
     s.audio.tone({ freq: 440, filter: { type: 'lowpass', freq: 900 } });
     const osc = s.nodes('osc')[0];
     const filt = s.nodes('biquad')[0];
-    const gain = s.nodes('gain')[1];
+    const gain = s.nodes('gain')[2];
     assert.equal(typeof osc.onended, 'function');
 
     osc.onended();
     assert.equal(osc.__disconnected, 1);
     assert.equal(filt.__disconnected, 1);
     assert.equal(gain.__disconnected, 1);
-    // Мастер-шина живёт дальше.
+    // Обе шины живут дальше.
     assert.equal(s.nodes('gain')[0].__disconnected, 0);
+    assert.equal(s.nodes('gain')[1].__disconnected, 0);
   } finally {
     s.restore();
   }

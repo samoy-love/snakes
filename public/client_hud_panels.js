@@ -376,7 +376,26 @@ export const eventFeed = [];
 // не перерисовывался. Теперь pushEventFeed() сама метит флаг на каждом пути,
 // где feed реально меняется — новую ветку разбора протокола дублировать
 // нечего, звать нужно только сам pushEventFeed().
+/* Какие события вообще попадают в ленту. Лента — не лог сервера, а ответ на
+   вопрос игрока «что важного только что случилось со мной и вокруг меня»:
+     - смерти и убийства (кто опасен, кого убрали) — всегда;
+     - глобальные объявления матча (баунти, мутатор раунда) — всегда;
+     - всё остальное — захваты, реклеймы, поднятые бонусы, серии, ачивки,
+       контракты — только СВОИ. Чужой «+91 зоны» или «поднял: Рывок» ничего
+       не сообщает о раскладе и топил в ленте собственные события игрока;
+     - начисления стиля («+1 стиль (Захват)») в ленту не идут вовсе: их уже
+       показывает тост внизу слева, вторая копия справа — шум. */
+const FEED_GLOBAL_KINDS = new Set(['Kill', 'Death', 'Revenge', 'Bounty', 'Round']);
+
+function feedEventRelevant(kind, actorNum) {
+  const k = String(kind || '');
+  if (FEED_GLOBAL_KINDS.has(k)) return true;
+  const a = Number(actorNum);
+  return Number.isFinite(a) && a === session.you;
+}
+
 export function pushEventFeed(text, kind, actorNum) {
+  if (!feedEventRelevant(kind, actorNum)) return;
   pushEventFeedImpl(text, kind, actorNum, {
     eventFeed,
     setKillfeedDirty: (v) => {

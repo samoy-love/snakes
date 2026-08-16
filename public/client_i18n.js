@@ -131,16 +131,11 @@ export const I18N = {
     'settings.test_beep': 'Проверить звук',
     'settings.reset': 'Сбросить по умолчанию',
     'settings.hud': 'HUD',
-    'settings.hud_brightness': 'Яркость',
-    'settings.hud_brightness_hint': 'Влияет на панели интерфейса в матче',
-    'settings.hud_contrast': 'Контраст',
-    'settings.hud_contrast_hint': 'Сделайте выше, если плохо читается на тёмном фоне',
     'settings.hud_panels': 'Прозрачность панелей',
     'settings.hud_panels_hint': 'Ниже — больше видно игру под панелями',
     'settings.debug': 'Отладка',
     'settings.perf_show': 'Статистика (FPS)',
     'settings.perf_hint': 'Горячая клавиша: P',
-    'settings.perf_compact': 'Компактно',
 
 
     'hud.leaders': 'Показать лидеров',
@@ -216,12 +211,10 @@ export const I18N = {
     'hud.objective': 'Цель',
     'hud.objective_capture': 'захват территории',
 
-    'meta.details': 'Детали',
-    'meta.round': 'Раунд',
     'meta.wallet': 'Кошелёк',
     'meta.leaderboard': 'Таблица',
-    'meta.fight': 'Бой',
     'meta.tasks': 'Задания',
+    'meta.tasks_daily': 'Задания дня',
     'meta.tasks_hint': 'Ежедневные задания — сбрасываются раз в сутки, прогресс не переносится между днями',
 
     'rooms.invalid_title': 'Некорректное название',
@@ -249,7 +242,7 @@ export const I18N = {
 
     'leaderboard.player': 'Игрок',
     'leaderboard.cells': 'Очки • Клетки',
-    'leaderboard.share': 'Доля',
+    'leaderboard.share': '% карты',
 
     'death.your_result': 'Ваш результат',
     'death.place': 'Место',
@@ -578,16 +571,11 @@ export const I18N = {
     'settings.test_beep': 'Test sound',
     'settings.reset': 'Reset defaults',
     'settings.hud': 'HUD',
-    'settings.hud_brightness': 'Brightness',
-    'settings.hud_brightness_hint': 'Affects match UI panels',
-    'settings.hud_contrast': 'Contrast',
-    'settings.hud_contrast_hint': 'Increase if it is hard to read on dark backgrounds',
     'settings.hud_panels': 'Panel opacity',
     'settings.hud_panels_hint': 'Lower means more of the game is visible under panels',
     'settings.debug': 'Debug',
     'settings.perf_show': 'Stats (FPS)',
     'settings.perf_hint': 'Hotkey: P',
-    'settings.perf_compact': 'Compact',
 
     'hud.leaders': 'Show leaders',
     'hud.cosmetics': 'Open cosmetics',
@@ -661,12 +649,10 @@ export const I18N = {
     'hud.objective': 'Objective',
     'hud.objective_capture': 'capture territory',
 
-    'meta.details': 'Details',
-    'meta.round': 'Round',
     'meta.wallet': 'Wallet',
     'meta.leaderboard': 'Standings',
-    'meta.fight': 'Fight',
     'meta.tasks': 'Tasks',
+    'meta.tasks_daily': 'Daily tasks',
     'meta.tasks_hint': 'Daily tasks — reset once every 24 hours, progress does not carry over between days',
 
     'rooms.invalid_title': 'Invalid title',
@@ -694,7 +680,7 @@ export const I18N = {
 
     'leaderboard.player': 'Player',
     'leaderboard.cells': 'Points • Cells',
-    'leaderboard.share': 'Share',
+    'leaderboard.share': '% map',
 
     'death.your_result': 'Your result',
     'death.place': 'Place',

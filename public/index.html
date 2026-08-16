@@ -157,8 +157,22 @@
           </div>
         </div>
 
-        <!-- H19: переключатель языка живёт в футере карточки, а не поверх её угла -->
+        <!-- H19: переключатель языка живёт в футере карточки, а не поверх её угла.
+             Рядом — настройки: раньше до них можно было добраться только из
+             матча, а звук/эффекты хочется выставить до первой игры. -->
         <div class="menuFooterActions">
+          <button
+            id="settingsMenuBtn"
+            class="iconBtn"
+            type="button"
+            aria-label="Открыть настройки"
+            title="Открыть настройки"
+            data-open-settings
+            data-i18n-aria-label="hud.settings"
+            data-i18n-title="hud.settings"
+          >
+            ⚙
+          </button>
           <button
             id="langToggleGlobal"
             class="iconBtn langToggle langToggleGlobal"
@@ -283,6 +297,7 @@
         <div class="matchActions">
           <button id="restartBtn" class="btnPrimary" aria-label="Играть снова" data-i18n="death.play_again" data-i18n-aria-label="death.play_again">Играть снова</button>
           <button id="deathMenuBtn" class="btnGhost" aria-label="В меню" data-i18n="common.to_menu" data-i18n-aria-label="common.to_menu">В меню</button>
+          <button id="deathSettingsBtn" class="iconBtn" type="button" aria-label="Открыть настройки" title="Открыть настройки" data-open-settings data-i18n-aria-label="hud.settings" data-i18n-title="hud.settings">⚙</button>
         </div>
       </div>
 
@@ -301,6 +316,7 @@
         <div class="matchActions">
           <button id="matchContinueBtn" class="btnPrimary" data-i18n="match.play_on">Играть дальше</button>
           <button id="matchMenuBtn" class="btnGhost" data-i18n="common.to_menu">В меню</button>
+          <button id="matchSettingsBtn" class="iconBtn" type="button" aria-label="Открыть настройки" title="Открыть настройки" data-open-settings data-i18n-aria-label="hud.settings" data-i18n-title="hud.settings">⚙</button>
         </div>
       </div>
     </div>
@@ -346,18 +362,11 @@
 
               <div class="settingsGroupTitle" data-i18n="settings.hud"></div>
               <label class="fieldInline">
-                <span class="fieldLabel" data-i18n="settings.hud_brightness"></span>
-                <input id="hudBrightness" type="range" min="0.75" max="1.25" step="0.05" value="1" />
-              </label>
-              <div class="fieldHint" data-i18n="settings.hud_brightness_hint"></div>
-              <label class="fieldInline">
-                <span class="fieldLabel" data-i18n="settings.hud_contrast"></span>
-                <input id="hudContrast" type="range" min="0.85" max="1.35" step="0.05" value="1" />
-              </label>
-              <div class="fieldHint" data-i18n="settings.hud_contrast_hint"></div>
-              <label class="fieldInline">
                 <span class="fieldLabel" data-i18n="settings.hud_panels"></span>
-                <input id="hudPanelOpacity" type="range" min="0.55" max="1" step="0.05" value="0.82" />
+                <!-- step 0.01, а не 0.05: с шагом 0.05 от 0.55 значение по
+                     умолчанию 0.82 не попадало на сетку, и ползунок вставал на
+                     0.80, показывая не то, что сохранено. -->
+                <input id="hudPanelOpacity" type="range" min="0.55" max="1" step="0.01" value="0.82" />
               </label>
               <div class="fieldHint" data-i18n="settings.hud_panels_hint"></div>
             </div>
@@ -403,10 +412,6 @@
                 <input id="perfEnabled" type="checkbox" />
               </label>
               <div class="fieldHint" data-i18n="settings.perf_hint"></div>
-              <label class="fieldInline">
-                <span class="fieldLabel" data-i18n="settings.perf_compact"></span>
-                <input id="perfCompact" type="checkbox" />
-              </label>
             </div>
           </div>
         </div>
@@ -550,8 +555,10 @@
       <div id="chatLog"></div>
       <form id="chatForm" autocomplete="off">
         <button id="emojiBtn" type="button" title="Эмодзи" aria-label="Открыть панель эмодзи" data-i18n-title="chat.emoji" data-i18n-aria-label="chat.emoji_open">😀</button>
+        <!-- Слой #chatInputOverlay (twemoji-копия набираемого текста поверх
+             поля) убран: он не был скрыт стилями и дублировал каждую букву
+             под курсором. Эмодзи в поле рисует сам браузер. -->
         <div id="chatInputWrap">
-          <div id="chatInputOverlay"></div>
           <input id="chatInput" placeholder="Сообщение..." maxlength="180" data-i18n-placeholder="chat.message_placeholder" />
         </div>
         <button id="chatBtn" type="submit" aria-label="Отправить сообщение" data-i18n="chat.send" data-i18n-aria-label="chat.send">Отправить</button>

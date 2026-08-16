@@ -14,7 +14,7 @@ import { clientState } from './client_state.js';
 import { KEYS, storageFlag, storageGet, storageSetFlag } from './client_storage.js';
 import { session, ui } from './client_store.js';
 import { dom, setChatInputEl } from './client_dom.js';
-import { EMOJIS, emojiParseSafeHtml, setSafeEmojiHtml, setSafeHtml } from './client_util.js';
+import { EMOJIS, setSafeEmojiHtml } from './client_util.js';
 import { isOverlayOpen } from './client_overlays.js';
 import { onLangChange, t } from './client_i18n_rt.js';
 import { displayNameOf } from './client_identity.js';
@@ -150,39 +150,6 @@ export function onChat(m) {
   updateChatHeaderStatus();
 }
 
-function syncChatInputOverlayScroll() {
-  if (!dom.chatInputOverlay || !dom.chatInput) return;
-  dom.chatInputOverlay.scrollLeft = dom.chatInput.scrollLeft;
-}
-
-let chatInputOverlayRaf = 0;
-
-function renderChatInputOverlayNow() {
-  chatInputOverlayRaf = 0;
-  if (!dom.chatInputOverlay || !dom.chatInput) return;
-  const v = dom.chatInput.value || '';
-  setSafeHtml(dom.chatInputOverlay, v ? `<span class="chatInputText">${emojiParseSafeHtml(v)}</span>` : '<span class="chatInputText"></span>');
-  requestAnimationFrame(syncChatInputOverlayScroll);
-}
-
-function scheduleChatInputOverlayRender() {
-  if (chatInputOverlayRaf) return;
-  chatInputOverlayRaf = requestAnimationFrame(renderChatInputOverlayNow);
-}
-
-function insertAtCursor(el, text) {
-  const start = el.selectionStart ?? el.value.length;
-  const end = el.selectionEnd ?? el.value.length;
-  const before = el.value.slice(0, start);
-  const after = el.value.slice(end);
-  el.value = `${before}${text}${after}`;
-  const pos = start + text.length;
-  el.selectionStart = pos;
-  el.selectionEnd = pos;
-  el.focus();
-  if (el === dom.chatInput) scheduleChatInputOverlayRender();
-}
-
 export function setChatCollapsed(v) {
   dom.chat.classList.toggle('collapsed', v);
   if (v) toggleEmojiPanel(false);
@@ -278,8 +245,7 @@ export function initChat(ctx) {
     CHAT_AUTO_OPEN_MS,
     notifyUnread: notifyChatUnread,
     setChatCollapsed: (v) => setChatCollapsed(v),
-    bumpChatOpenUntil: bumpChatOpenUntilBy,
-    scheduleChatInputOverlayRender: () => scheduleChatInputOverlayRender()
+    bumpChatOpenUntil: bumpChatOpenUntilBy
   });
 
   try {
@@ -387,13 +353,8 @@ export function initChat(ctx) {
   });
 
   dom.chatInput?.addEventListener('input', () => {
-    scheduleChatInputOverlayRender();
     if (dom.chatInput && String(dom.chatInput.value || '').trim()) hideChatEnterHint();
   });
-  dom.chatInput?.addEventListener('scroll', syncChatInputOverlayScroll);
-  dom.chatInput?.addEventListener('click', syncChatInputOverlayScroll);
-  dom.chatInput?.addEventListener('keyup', syncChatInputOverlayScroll);
-  scheduleChatInputOverlayRender();
 
   dom.chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -402,7 +363,6 @@ export function initChat(ctx) {
     wsSend('chat', { text });
     hideChatEnterHint();
     dom.chatInput.value = '';
-    scheduleChatInputOverlayRender();
     chatOpenUntil = performance.now() + 12000;
     unreadCount = 0;
     updateUnreadBadge();
