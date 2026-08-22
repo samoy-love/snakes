@@ -500,6 +500,7 @@ func (r *Room) resetMatchLocked() {
 		if p.owned != nil {
 			p.owned = p.owned[:0]
 		}
+		p.captureQueued = false
 		// Per-match state. respawnPlayer deliberately keeps the contract (F1),
 		// so a new match has to clear it here.
 		p.contractType = ContractNone
@@ -1542,6 +1543,7 @@ func (r *Room) killPlayerWithReason(num uint16, killer uint16, reason string, hi
 	}
 
 	p.alive = false
+	p.captureQueued = false
 	p.killStreak = 0
 	p.lastKillTick = 0
 	p.shield = 0
@@ -1707,6 +1709,7 @@ func (r *Room) respawnPlayer(p *Player) {
 	if p.owned != nil {
 		p.owned = p.owned[:0]
 	}
+	p.captureQueued = false
 	p.alive = true
 	p.respawnAt = 0
 	p.aiNextDecisionTick = 0
@@ -2214,8 +2217,42 @@ func (r *Room) applyMove(p *Player) {
 		}
 	} else {
 		if len(p.trail) > 0 {
-			r.capture(p.num)
+			// Захват откладывается до конца фазы движения: см. flushCaptures.
+			p.captureQueued = true
 		}
+	}
+}
+
+// flushCaptures закрывает петли всех, кто в этой фазе вернулся на свою землю.
+//
+// Раньше capture() вызывался прямо из applyMove, и это делало исход переезда
+// чужого следа зависимым от порядка обхода игроков — а он у map случайный.
+// Жертва, замкнувшая петлю тем же тиком, успевала стереть свой след раньше,
+// чем по нему проезжал преследователь: примерно каждый двадцатый переезд не
+// убивал никого. Ход в тике один для всех, поэтому и след живёт весь ход:
+// сначала ходят все, потом закрываются петли — но только у тех, кто до конца
+// фазы дожил.
+//
+// Порядок закрытия — по номеру игрока, а не по обходу map: два захвата в один
+// тик могут делить клетки, и результат обязан быть воспроизводимым.
+func (r *Room) flushCaptures(list []*Player) {
+	pending := r.tmpCapture[:0]
+	for _, p := range list {
+		if p == nil || !p.captureQueued {
+			continue
+		}
+		p.captureQueued = false
+		if !p.alive || len(p.trail) == 0 {
+			continue
+		}
+		pending = append(pending, p)
+	}
+	r.tmpCapture = pending
+	if len(pending) > 1 {
+		sort.Slice(pending, func(i, j int) bool { return pending[i].num < pending[j].num })
+	}
+	for _, p := range pending {
+		r.capture(p.num)
 	}
 }
 
@@ -2482,6 +2519,7 @@ func (r *Room) step() {
 	for _, p := range alive {
 		r.applyMove(p)
 	}
+	r.flushCaptures(alive)
 	// G11: the accelerated half-step used to run stepPlayer+applyMove per player
 	// with no head-on pass in between, so two speeding players could walk
 	// through each other in the same cell. It is now the same three phases as
@@ -2504,6 +2542,7 @@ func (r *Room) step() {
 		for _, p := range speeders {
 			r.applyMove(p)
 		}
+		r.flushCaptures(speeders)
 	}
 	moveDur = time.Since(moveStartedAt)
 

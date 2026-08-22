@@ -154,6 +154,7 @@ type Room struct {
 	headOnCells   map[int][]uint16
 	headOnTouched []int
 	tmpSpeeders   []*Player
+	tmpCapture    []*Player
 
 	tmpAlive   []*Player
 	tmpPlayers []*Player
@@ -229,6 +230,11 @@ type Player struct {
 	respawnAt uint32
 	trail     []int
 	owned     []int
+
+	// captureQueued — игрок вернулся на свою землю в этой фазе движения, но
+	// петля закрывается только после того, как походили все. Пока фаза не
+	// закончилась, след остаётся на карте и остаётся смертельным.
+	captureQueued bool
 
 	aiMode             uint8
 	aiModeUntil        uint32
