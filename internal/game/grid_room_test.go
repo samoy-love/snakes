@@ -433,6 +433,67 @@ func TestFourDeathCauses(t *testing.T) {
 	})
 }
 
+// Ловит: возврат мгновенного захвата в applyMove. Жертва, замыкающая петлю тем
+// же тиком, стирала свой след раньше, чем по нему проезжал преследователь, —
+// и переезд не убивал никого. Кто из двоих ходит первым, решал случайный обход
+// map, поэтому баг выглядел как «иногда враг не умирает».
+func TestTrailCutBeatsCaptureInSameTick(t *testing.T) {
+	for _, victimFirst := range []bool{false, true} {
+		name := "убийца ходит первым"
+		if victimFirst {
+			name = "жертва ходит первой"
+		}
+		t.Run(name, func(t *testing.T) {
+			r := newRulesRoom(t, 163)
+			r.tick = 5
+
+			// Жертва: земля 5x5, голова снаружи, шаг возвращает её домой.
+			victim := addHumanPlayer(r, 1, 22, 19, DirDown)
+			for y := 20; y <= 24; y++ {
+				for x := 20; x <= 24; x++ {
+					r.setGrid(r.idx(x, y), 1)
+				}
+			}
+			out := r.idx(22, 19)
+			r.setTrail(out, 1)
+			victim.trail = append(victim.trail, out)
+			ownedBefore := len(victim.owned)
+
+			// Убийца: шаг ровно на клетку следа жертвы.
+			killer := addHumanPlayer(r, 2, 21, 19, DirRight)
+
+			list := []*Player{killer, victim}
+			if victimFirst {
+				list = []*Player{victim, killer}
+			}
+			for _, p := range list {
+				r.stepPlayer(p)
+			}
+			if victim.nextI == killer.nextI {
+				t.Fatalf("подготовка: игроки метят в одну клетку %d — это лобовое, а не переезд", victim.nextI)
+			}
+			r.resolveHeadOnCollisions(list)
+			for _, p := range list {
+				if p.alive {
+					r.applyMove(p)
+				}
+			}
+			r.flushCaptures(list)
+
+			assertDeath(t, r, 1, 2, 1)
+			if !killer.alive {
+				t.Fatal("убийца погиб вместе с жертвой")
+			}
+			if len(victim.owned) > ownedBefore {
+				t.Fatalf("петля жертвы закрылась после смерти: owned %d -> %d", ownedBefore, len(victim.owned))
+			}
+			if r.matchKills[2] != 1 {
+				t.Fatalf("килл не засчитан: %d", r.matchKills[2])
+			}
+		})
+	}
+}
+
 func assertDeath(t *testing.T, r *Room, num uint16, killer uint16, code uint8) {
 	t.Helper()
 	p := r.players[num]
