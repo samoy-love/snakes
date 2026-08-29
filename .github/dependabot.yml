@@ -18,6 +18,9 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ['minor', 'patch']
     commit-message:
       prefix: 'deps'
   - package-ecosystem: 'gomod'
@@ -26,6 +29,9 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ['minor', 'patch']
     commit-message:
       prefix: 'deps'
   - package-ecosystem: 'npm'
@@ -34,5 +40,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ['minor', 'patch']
     commit-message:
       prefix: 'deps'
