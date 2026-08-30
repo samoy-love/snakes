@@ -20,7 +20,7 @@
    дополнен немедленным. */
 
 import { dom } from './client_dom.js';
-import { ROI_MARGIN_CELLS, VIEW_CELLS_X, VIEW_CELLS_Y } from './client_field_view.js';
+import { ROI_MARGIN_CELLS, baseCellFor } from './client_field_view.js';
 
 /* Отправка в сокет и перерисовка превью меню приходят из initViewport(), а не
    импортом: сокет создаётся позже этого модуля, а превью тянет за собой весь
@@ -69,11 +69,17 @@ export function applyRoiCaps(src) {
 
 /* Сколько клеток нужно, чтобы закрыть текущий вьюпорт. Базовый масштаб тот же,
    что в draw() (до клэмпа по ROI), плюс ROI_MARGIN_CELLS на гуляние окна:
-   сервер снапит его по ROIStep и смещает вперёд по ходу движения. */
+   сервер снапит его по ROIStep и смещает вперёд по ходу движения.
+
+   Масштаб берётся из baseCellFor(), а не считается здесь заново: формула жила
+   в двух местах, и после появления потолка видимых клеток телефон просил у
+   сервера окно под старый, неограниченный масштаб — вдвое больше того, что
+   реально рисует. Лишняя половина окна — это лишняя сетка в каждом снапшоте,
+   которую телефон качает и разбирает, чтобы никогда не показать. */
 function computeViewportCells() {
   const cw = Math.max(1, Number(window.innerWidth) || 1);
   const chh = Math.max(1, Number(window.innerHeight) || 1);
-  const cell = Math.max(6, Math.floor(Math.min(cw / VIEW_CELLS_X, chh / VIEW_CELLS_Y)));
+  const cell = baseCellFor({ cw, viewH: chh });
   let w = Math.ceil(cw / cell) + ROI_MARGIN_CELLS;
   let h = Math.ceil(chh / cell) + ROI_MARGIN_CELLS;
   w = Math.max(roiCaps.minW, Math.min(roiCaps.maxW, w));
@@ -138,10 +144,20 @@ function scheduleViewportSend(delayMs = 250) {
 }
 
 
+/* Потолок плотности буфера канваса.
+
+   Телефоны давно приехали на devicePixelRatio 3: на iPhone Pro Max
+   полноэкранный канвас — это 1320x2868 ≈ 3.8 Мпикс, вдвое больше, чем у
+   десктопа в 1920x1080, и каждый fillRect поля закрашивает втрое больше
+   физических пикселей. Поле собрано из плоских прямоугольников и текста, и
+   разница между 2x и 3x на них глазом не ловится — в отличие от разницы в
+   частоте кадров. */
+const MAX_DPR = 2;
+
 function resize() {
   const ctx = dom.canvas?.getContext?.('2d');
   if (!ctx) return;
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(MAX_DPR, Math.max(1, Number(window.devicePixelRatio) || 1));
   dom.canvas.width = Math.floor(window.innerWidth * dpr);
   dom.canvas.height = Math.floor(window.innerHeight * dpr);
   dom.canvas.style.width = `${window.innerWidth}px`;

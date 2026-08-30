@@ -11,10 +11,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  MAX_VISIBLE_CELLS,
   MIN_CELL,
   ROI_MARGIN_CELLS,
   VIEW_CELLS_X,
   VIEW_CELLS_Y,
+  baseCellFor,
   cellSizeFor,
   clampToRoi,
   decayShake,
@@ -26,6 +28,9 @@ import {
 
 /** Сколько клеток попадает на экран при данном масштабе. */
 const cellsOnScreen = (px, cell) => px / cell;
+
+/** Сколько клеток рисуется за кадр при данном масштабе. */
+const visibleCells = (w, h, cell) => (w / cell) * (h / cell);
 
 // --- масштаб: главный баг «туман на пол-экрана» ------------------------------
 
@@ -54,6 +59,59 @@ test('десктоп: поправка на ROI ничего не меняет, 
   const viewH = 1080;
   const base = Math.max(MIN_CELL, Math.floor(Math.min(cw / VIEW_CELLS_X, viewH / VIEW_CELLS_Y)));
   assert.equal(cellSizeFor({ cw, viewH, roi: { rw: 80, rh: 56 } }), base);
+});
+
+/* Потолок видимых клеток.
+
+   Вписывание VIEW_CELLS_X x VIEW_CELLS_Y берёт меньшую сторону, поэтому на
+   вытянутом экране длинная сторона не ограничена ничем. От этого спасал клэмп
+   по ROI выше — ровно до тех пор, пока ROI не стал адаптивным: клиент просит
+   окно под свой же масштаб, сервер выдаёт, и клэмп упирается в то самое
+   число, из которого посчитан. Ниже — этот замкнутый круг целиком. */
+test('портретный телефон не рисует вдвое больше клеток, чем десктоп', () => {
+  // iPhone 16 Pro Max, портрет. До потолка: клетка 11 px, 40x87 ≈ 3500 клеток.
+  const cw = 440;
+  const viewH = 956;
+  const cell = baseCellFor({ cw, viewH });
+
+  assert.ok(
+    visibleCells(cw, viewH, cell) <= MAX_VISIBLE_CELLS,
+    `видно ${Math.round(visibleCells(cw, viewH, cell))} клеток при потолке ${MAX_VISIBLE_CELLS}`
+  );
+  const desktop = baseCellFor({ cw: 1920, viewH: 1080 });
+  assert.ok(
+    visibleCells(cw, viewH, cell) <= visibleCells(1920, 1080, desktop) * 1.2,
+    'телефон не должен видеть заметно больше поля, чем десктоп'
+  );
+});
+
+test('адаптивный ROI не возвращает мелкую клетку через выданное окно', () => {
+  /* Сервер выдаёт ровно то окно, которое клиент попросил под свой масштаб.
+     Клэмп по ROI при таком входе ничего не меняет — держать масштаб обязан
+     сам потолок, иначе круг замыкается и телефон снова рисует 3500 клеток. */
+  const cw = 440;
+  const viewH = 956;
+  const cell = baseCellFor({ cw, viewH });
+  const grant = {
+    w: Math.ceil(cw / cell) + ROI_MARGIN_CELLS,
+    h: Math.ceil(viewH / cell) + ROI_MARGIN_CELLS
+  };
+
+  const withGrant = cellSizeFor({ cw, viewH, roi: { rw: grant.w, rh: grant.h }, roiGrant: grant });
+  assert.equal(withGrant, cell, 'выданное окно не должно опускать масштаб ниже базового');
+  assert.ok(visibleCells(cw, viewH, withGrant) <= MAX_VISIBLE_CELLS);
+});
+
+test('ландшафт телефона тоже под потолком', () => {
+  const cell = baseCellFor({ cw: 956, viewH: 440 });
+  assert.ok(visibleCells(956, 440, cell) <= MAX_VISIBLE_CELLS);
+});
+
+test('десктоп 16:9 потолка не касается ни в одном разрешении', () => {
+  for (const [cw, viewH] of [[1366, 768], [1600, 900], [1920, 1080], [2560, 1440], [3840, 2160]]) {
+    const fit = Math.floor(Math.min(cw / VIEW_CELLS_X, viewH / VIEW_CELLS_Y));
+    assert.equal(baseCellFor({ cw, viewH }), fit, `${cw}x${viewH}: масштаб обязан остаться базовым`);
+  }
 });
 
 test('масштаб ограничен снизу: поле не превращается в кашу', () => {

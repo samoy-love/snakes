@@ -28,6 +28,35 @@ export const ROI_MARGIN_CELLS = 14;
 /** Минимальный размер клетки в пикселях. Меньше — поле нечитаемо. */
 export const MIN_CELL = 6;
 
+/* Потолок числа клеток на экране — бюджет на кадр и на честность обзора.
+   Вписывание VIEW_CELLS_X x VIEW_CELLS_Y берёт МЕНЬШУЮ из двух сторон, то
+   есть на вытянутом экране длинная сторона не ограничена ничем: на портретном
+   телефоне 440x956 клетка выходила 11 px и в кадр попадало 40x87 ≈ 3500
+   клеток — вдвое с лишним больше десктопных 51x28 ≈ 1440, и всё это на
+   телефонном GPU. Раньше от этого спасал клэмп по ROI ниже, но с адаптивным
+   ROI (C2) клиент просит у сервера окно ровно под свой же неограниченный
+   масштаб, сервер его выдаёт — и клэмп перестал что-либо ограничивать.
+
+   Потолок держится по площади, а не по сторонам: 16:9 в любом разрешении даёт
+   ~1440 клеток и порога не касается, а срабатывает он только там, где вид
+   растянут — на телефоне и на сверхшироком мониторе. */
+export const MAX_VISIBLE_CELLS = 1600;
+
+/**
+ * Базовый размер клетки — до поправки на фактический ROI.
+ *
+ * Общий для отрисовки (cellSizeFor) и для запроса окна у сервера
+ * (client_viewport.js). Раньше эта формула была написана в двух местах: клиент
+ * просил ROI под один масштаб, а рисовал в другом.
+ */
+export function baseCellFor({ cw, viewH }) {
+  const w = Math.max(1, Number(cw) || 0);
+  const h = Math.max(1, Number(viewH) || 0);
+  const fit = Math.floor(Math.min(w / VIEW_CELLS_X, h / VIEW_CELLS_Y));
+  const budget = Math.ceil(Math.sqrt((w * h) / MAX_VISIBLE_CELLS));
+  return Math.max(MIN_CELL, fit, budget);
+}
+
 /**
  * Размер клетки в пикселях.
  *
@@ -40,7 +69,7 @@ export function cellSizeFor({ cw, viewH, roi, roiGrant }) {
   const w = Math.max(1, Number(cw) || 0);
   const h = Math.max(1, Number(viewH) || 0);
 
-  let cell = Math.max(MIN_CELL, Math.floor(Math.min(w / VIEW_CELLS_X, h / VIEW_CELLS_Y)));
+  let cell = baseCellFor({ cw: w, viewH: h });
 
   /* До первого ROI-пакета опираемся на размер, подтверждённый сервером
      (ack на viewport), и только потом — на исторические 80x56. Иначе первые
