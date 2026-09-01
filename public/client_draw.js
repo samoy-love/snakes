@@ -40,7 +40,7 @@ import {
 const coolEdgePaths = new Map();
 
 export function computeDrawCamera(now, deps) {
-  const { cw, viewH, you, W, H, tickMs, lastPacketAt, youSpeedUntilTick, shakeX, shakeY, shakeVelX, shakeVelY, shakeIntensity, lastRoi, roiGrant, deathZoomAnchorX, deathZoomAnchorY, getInterpPlayer, approxNowTick, hitstopLostMs, updateDeathZoom } = deps;
+  const { cw, viewH, you, W, H, tickMs, lastPacketAt, youSpeedUntilTick, shakeX, shakeY, shakeVelX, shakeVelY, shakeIntensity, lastRoi, roiGrant, maxCells, deathZoomAnchorX, deathZoomAnchorY, getInterpPlayer, approxNowTick, hitstopLostMs, updateDeathZoom } = deps;
 
   // J12: hitstop замедляет только интерполяцию игроков, не эффекты.
   const interpElapsed = now - lastPacketAt - hitstopLostMs(lastPacketAt, now);
@@ -68,7 +68,7 @@ export function computeDrawCamera(now, deps) {
      чтобы экран никогда не был больше фактического ROI. На десктопе
      (cw/viewH ≈ 1.6) обе поправки меньше базового значения и ничего не
      меняют. */
-  const baseCell = cellSizeFor({ cw, viewH, roi: lastRoi, roiGrant });
+  const baseCell = cellSizeFor({ cw, viewH, roi: lastRoi, roiGrant, maxCells });
 
   /* Драматический наезд на точку гибели: чистый визуальный множитель поверх
      baseCell, не влияющий на ROI/сетевой запрос вьюпорта (см. beginDeathZoom

@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 
 import {
   MAX_VISIBLE_CELLS,
+  MAX_VISIBLE_CELLS_TOUCH,
   MIN_CELL,
   ROI_MARGIN_CELLS,
   VIEW_CELLS_X,
@@ -111,6 +112,53 @@ test('десктоп 16:9 потолка не касается ни в одно�
   for (const [cw, viewH] of [[1366, 768], [1600, 900], [1920, 1080], [2560, 1440], [3840, 2160]]) {
     const fit = Math.floor(Math.min(cw / VIEW_CELLS_X, viewH / VIEW_CELLS_Y));
     assert.equal(baseCellFor({ cw, viewH }), fit, `${cw}x${viewH}: масштаб обязан остаться базовым`);
+  }
+});
+
+/* Тач-бюджет: на телефоне клетка десктопного размера — это два миллиметра.
+   Отдельный потолок нужен именно как ОТДЕЛЬНЫЙ: общий трогать нельзя, он
+   держит десктоп. */
+test('тач-бюджет даёт клетку заметно крупнее общего', () => {
+  const cw = 440;
+  const viewH = 956;
+  const обычная = baseCellFor({ cw, viewH });
+  const тач = baseCellFor({ cw, viewH, maxCells: MAX_VISIBLE_CELLS_TOUCH });
+
+  assert.ok(тач > обычная, `тач ${тач} обязан быть крупнее общего ${обычная}`);
+  assert.ok(
+    visibleCells(cw, viewH, тач) <= MAX_VISIBLE_CELLS_TOUCH,
+    `видно ${Math.round(visibleCells(cw, viewH, тач))} при потолке ${MAX_VISIBLE_CELLS_TOUCH}`
+  );
+});
+
+test('тач-бюджет держит число видимых клеток от экрана к экрану', () => {
+  // Разные телефоны и планшет: клетка растёт вместе с экраном, обзор — нет.
+  for (const [cw, viewH] of [[375, 667], [440, 956], [956, 440], [820, 1180]]) {
+    const cell = baseCellFor({ cw, viewH, maxCells: MAX_VISIBLE_CELLS_TOUCH });
+    const видно = visibleCells(cw, viewH, cell);
+    assert.ok(видно <= MAX_VISIBLE_CELLS_TOUCH, `${cw}x${viewH}: видно ${Math.round(видно)}`);
+    assert.ok(видно >= MAX_VISIBLE_CELLS_TOUCH * 0.6, `${cw}x${viewH}: обзор просел до ${Math.round(видно)}`);
+  }
+});
+
+test('запрошенный ROI и нарисованный масштаб считаются по одному бюджету', () => {
+  /* Разъезд этих двух чисел уже случался: клиент просил окно под один
+     масштаб, а рисовал в другом, и качал сетку, которую не показывает. */
+  const cw = 440;
+  const viewH = 956;
+  const maxCells = MAX_VISIBLE_CELLS_TOUCH;
+  const cell = baseCellFor({ cw, viewH, maxCells });
+  const grant = {
+    w: Math.ceil(cw / cell) + ROI_MARGIN_CELLS,
+    h: Math.ceil(viewH / cell) + ROI_MARGIN_CELLS
+  };
+
+  assert.equal(cellSizeFor({ cw, viewH, roi: { rw: grant.w, rh: grant.h }, roiGrant: grant, maxCells }), cell);
+});
+
+test('без бюджета поведение прежнее — десктоп не задет', () => {
+  for (const [cw, viewH] of [[1366, 768], [1920, 1080], [2560, 1440]]) {
+    assert.equal(baseCellFor({ cw, viewH }), baseCellFor({ cw, viewH, maxCells: MAX_VISIBLE_CELLS }));
   }
 });
 

@@ -65,6 +65,12 @@ export function setMenuControlsSeen() {
 }
 
 export function syncMenuOnboardingUi() {
+  /* Тот же признак гасит и подсказку про свайп поверх поля (#helpTouch,
+     12-mobile.css): игрок, который уже поехал, управление знает, а строка
+     висела весь матч и все следующие. Класс ставится до проверки ниже —
+     подсказка в меню и подсказка в матче живут в разных узлах, и отсутствие
+     одного не повод не обновить другой. */
+  document.body.classList.toggle('controlsSeen', getMenuControlsSeen());
   if (!dom.menuOnboarding) return;
   dom.menuOnboarding.classList.toggle('hidden', getMenuControlsSeen());
 }
