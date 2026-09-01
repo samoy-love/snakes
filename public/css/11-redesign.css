@@ -961,3 +961,41 @@ body.inGame #hudCombo {
     max-height: min(40dvh, 420px);
   }
 }
+
+/* --- Тач-устройства: HUD не размывает поле -------------------------------
+   backdrop-filter поверх канваса, который перерисовывается каждый кадр, —
+   худшее, что можно попросить у мобильного GPU: слой под панелью объявляется
+   грязным на каждом кадре игры, и размытие считается заново 60 раз в секунду.
+   Во время матча над полем постоянно висят шесть таких панелей (#topHud,
+   #chat, #metaHud, .rightDetails, четыре-пять .iconBtn, #helpTouch), и ни
+   один медиазапрос их не гасил: мобильные блоки снимали размытие только с
+   #hud, а на тач-устройствах 10-ux-waves.css его ещё и ДОБАВЛЯЛ кнопкам.
+
+   Признак — pointer: coarse, а не ширина экрана: дело в классе устройства, а
+   не в вьюпорте, и в ландшафте телефон шире 720px, оставаясь телефоном.
+   Панели становятся непрозрачными: размытие держало читаемость текста над
+   пёстрым полем, и без замены подложки её терять нельзя. */
+@media (pointer: coarse) {
+  body.inGame #topHud,
+  body.inGame #chat,
+  body.inGame #metaHud,
+  body.inGame #rightInfo .rightDetails,
+  body.inGame #helpTouch,
+  body.inGame .hudActions .iconBtn,
+  body.inGame #hud:not(.lbPinned) .hudActions .iconBtn {
+    background: var(--panel-solid);
+    backdrop-filter: none;
+  }
+
+  /* Тень с радиусом 28px по краю каждой панели — второй слой композитинга
+     поверх того же движущегося канваса. На неподвижном фоне она бесплатна, над
+     полем — нет, а её роль (отделить панель от фона) уже выполняет
+     непрозрачная подложка. */
+  body.inGame #topHud,
+  body.inGame #chat,
+  body.inGame #rightInfo .rightDetails,
+  body.inGame .hudActions .iconBtn,
+  body.inGame #hud:not(.lbPinned) .hudActions .iconBtn {
+    box-shadow: none;
+  }
+}
