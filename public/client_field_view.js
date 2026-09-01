@@ -42,6 +42,14 @@ export const MIN_CELL = 6;
    растянут — на телефоне и на сверхшироком мониторе. */
 export const MAX_VISIBLE_CELLS = 1600;
 
+/* Отдельный потолок для телефона и планшета. Общий бюджет в 1600 клеток даёт
+   на 440x956 клетку в 17 px — около 2 мм на экране iPhone: поле читается как
+   мелкая сетка, голова и след сливаются, а рассмотреть их приходится в
+   движении и одной рукой. Палец не курсор, и экран не монитор: на тач-
+   устройстве важнее разглядеть ближний бой, чем держать десктопный обзор.
+   720 клеток дают на той же метрике клетку в 25 px — примерно 3.3 мм. */
+export const MAX_VISIBLE_CELLS_TOUCH = 720;
+
 /**
  * Базовый размер клетки — до поправки на фактический ROI.
  *
@@ -49,11 +57,12 @@ export const MAX_VISIBLE_CELLS = 1600;
  * (client_viewport.js). Раньше эта формула была написана в двух местах: клиент
  * просил ROI под один масштаб, а рисовал в другом.
  */
-export function baseCellFor({ cw, viewH }) {
+export function baseCellFor({ cw, viewH, maxCells }) {
   const w = Math.max(1, Number(cw) || 0);
   const h = Math.max(1, Number(viewH) || 0);
+  const cap = Math.max(1, Number(maxCells) || MAX_VISIBLE_CELLS);
   const fit = Math.floor(Math.min(w / VIEW_CELLS_X, h / VIEW_CELLS_Y));
-  const budget = Math.ceil(Math.sqrt((w * h) / MAX_VISIBLE_CELLS));
+  const budget = Math.ceil(Math.sqrt((w * h) / cap));
   return Math.max(MIN_CELL, fit, budget);
 }
 
@@ -65,11 +74,11 @@ export function baseCellFor({ cw, viewH }) {
  * иначе за его краем рисуется туман. Именно поэтому здесь max, а не min —
  * увеличение клетки уменьшает число видимых клеток.
  */
-export function cellSizeFor({ cw, viewH, roi, roiGrant }) {
+export function cellSizeFor({ cw, viewH, roi, roiGrant, maxCells }) {
   const w = Math.max(1, Number(cw) || 0);
   const h = Math.max(1, Number(viewH) || 0);
 
-  let cell = baseCellFor({ cw: w, viewH: h });
+  let cell = baseCellFor({ cw: w, viewH: h, maxCells });
 
   /* До первого ROI-пакета опираемся на размер, подтверждённый сервером
      (ack на viewport), и только потом — на исторические 80x56. Иначе первые

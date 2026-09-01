@@ -20,7 +20,7 @@
    дополнен немедленным. */
 
 import { dom } from './client_dom.js';
-import { ROI_MARGIN_CELLS, baseCellFor } from './client_field_view.js';
+import { MAX_VISIBLE_CELLS, MAX_VISIBLE_CELLS_TOUCH, ROI_MARGIN_CELLS, baseCellFor } from './client_field_view.js';
 
 /* Отправка в сокет и перерисовка превью меню приходят из initViewport(), а не
    импортом: сокет создаётся позже этого модуля, а превью тянет за собой весь
@@ -67,6 +67,20 @@ export function applyRoiCaps(src) {
   }
 }
 
+/* Бюджет видимых клеток для этого устройства. Тач — телефон или планшет, где
+   клетка десктопного размера уходит в два миллиметра; см. комментарий у
+   MAX_VISIBLE_CELLS_TOUCH. Признак — класс устройства (pointer: coarse), а не
+   ширина окна: в ландшафте телефон шире иного ноутбука, оставаясь телефоном.
+
+   Спрашивается на каждом вызове, а не кэшируется: matchMedia меняет ответ при
+   подключении мыши к планшету, а вызовов тут единицы за секунду. */
+export function viewCellBudget() {
+  try {
+    if (window.matchMedia?.('(pointer: coarse)')?.matches) return MAX_VISIBLE_CELLS_TOUCH;
+  } catch {}
+  return MAX_VISIBLE_CELLS;
+}
+
 /* Сколько клеток нужно, чтобы закрыть текущий вьюпорт. Базовый масштаб тот же,
    что в draw() (до клэмпа по ROI), плюс ROI_MARGIN_CELLS на гуляние окна:
    сервер снапит его по ROIStep и смещает вперёд по ходу движения.
@@ -79,7 +93,7 @@ export function applyRoiCaps(src) {
 function computeViewportCells() {
   const cw = Math.max(1, Number(window.innerWidth) || 1);
   const chh = Math.max(1, Number(window.innerHeight) || 1);
-  const cell = baseCellFor({ cw, viewH: chh });
+  const cell = baseCellFor({ cw, viewH: chh, maxCells: viewCellBudget() });
   let w = Math.ceil(cw / cell) + ROI_MARGIN_CELLS;
   let h = Math.ceil(chh / cell) + ROI_MARGIN_CELLS;
   w = Math.max(roiCaps.minW, Math.min(roiCaps.maxW, w));

@@ -35,7 +35,7 @@ import { cosClampId, drawCaptureFx, drawDeathFx } from './client_cos_draw.js';
 import { SCORE_POPUP_MS, hasFirstCapture, hitstopLostMs } from './client_fx_rt.js';
 import { obGuideActiveImpl } from './client_onboarding.js';
 import { botArchGlyph, cosTitlePrefix } from './client_identity.js';
-import { roi } from './client_viewport.js';
+import { roi, viewCellBudget } from './client_viewport.js';
 import { MINIMAP_REFRESH_MS, drawMinimap } from './client_minimap_ui.js';
 import { getChatOpenUntil, setChatCollapsed } from './client_chat.js';
 import {
@@ -362,7 +362,7 @@ function draw() {
 
   const viewH = Math.max(1, ch - occludedBottom);
 
-  const drawCameraDeps = { cw, viewH, you: session.you, W: session.W, H: session.H, tickMs: session.tickMs, lastPacketAt: world.lastPacketAt, youSpeedUntilTick: me.speedUntilTick, shakeX: fxRt.shakeX, shakeY: fxRt.shakeY, shakeVelX: fxRt.shakeVelX, shakeVelY: fxRt.shakeVelY, shakeIntensity: settings.shakeIntensity, lastRoi: world.lastRoi, roiGrant: roi.grant, deathZoomAnchorX: fxRt.deathZoomAnchorX, deathZoomAnchorY: fxRt.deathZoomAnchorY, getInterpPlayer, approxNowTick, hitstopLostMs, updateDeathZoom };
+  const drawCameraDeps = { cw, viewH, you: session.you, W: session.W, H: session.H, tickMs: session.tickMs, lastPacketAt: world.lastPacketAt, youSpeedUntilTick: me.speedUntilTick, shakeX: fxRt.shakeX, shakeY: fxRt.shakeY, shakeVelX: fxRt.shakeVelX, shakeVelY: fxRt.shakeVelY, shakeIntensity: settings.shakeIntensity, lastRoi: world.lastRoi, roiGrant: roi.grant, maxCells: viewCellBudget(), deathZoomAnchorX: fxRt.deathZoomAnchorX, deathZoomAnchorY: fxRt.deathZoomAnchorY, getInterpPlayer, approxNowTick, hitstopLostMs, updateDeathZoom };
   const cam = computeDrawCamera(performance.now(), drawCameraDeps);
   const { interp, my, nt, speedActive, targetX, targetY, cell, screenBounds, offsetX, offsetY, minX, minY, maxX, maxY, gb, gMinX, gMinY, gMaxX, gMaxY } = cam;
   const nextShakeX = cam.shakeX, nextShakeY = cam.shakeY, nextShakeVelX = cam.shakeVelX, nextShakeVelY = cam.shakeVelY;
