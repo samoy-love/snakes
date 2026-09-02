@@ -29,7 +29,7 @@
 ## Отдельный слушатель
 
 Сбор идёт из Prometheus в
-[metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love), а тот живёт
+[metrics.samoy.love](https://github.com/samoy-love/metrics.samoy.love), а тот живёт
 в Docker и приходит с адреса моста. Игровой порт закрыт на loopback намеренно,
 поэтому для сбора поднимается отдельный слушатель на `METRICS_ADDR`: он отдаёт
 ровно `/metrics`, и открытие адреса моста не открывает заодно `/ws` и статику

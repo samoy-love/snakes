@@ -2,8 +2,8 @@
 
 Русский · [English](README.en.md)
 
-[![CI](https://github.com/tr0llex/snakes/actions/workflows/ci.yml/badge.svg)](https://github.com/tr0llex/snakes/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/tr0llex/snakes/branch/main/graph/badge.svg)](https://codecov.io/gh/tr0llex/snakes)
+[![CI](https://github.com/samoy-love/snakes/actions/workflows/ci.yml/badge.svg)](https://github.com/samoy-love/snakes/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/samoy-love/snakes/branch/main/graph/badge.svg)](https://codecov.io/gh/samoy-love/snakes)
 [![прод](https://img.shields.io/website?url=https%3A%2F%2Fsnakes.samoy.love&up_message=online&up_color=2ea043&down_message=offline&label=snakes.samoy.love)](https://snakes.samoy.love)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -69,7 +69,7 @@ node-тесты — сверяются с этим эталоном на CI.
 десятками собственных счётчиков, см. [docs/metrics.md](docs/metrics.md).
 
 **Прод** — systemd-юнит `snakes.service` за системным nginx, релизы через
-[deploy-kit](https://github.com/tr0llex/deploy-kit).
+[deploy-kit](https://github.com/samoy-love/deploy-kit).
 
 ## Быстрый старт
 
@@ -90,7 +90,7 @@ WS_ALLOW_LOCALHOST=1 go run .
 включённым он позволял бы любой локально открытой странице предъявить валидный
 Origin, и цена этой ошибки на проде выше, чем лишняя переменная локально.
 
-Тем же способом сервер поднимает [deploy-kit](https://github.com/tr0llex/deploy-kit) —
+Тем же способом сервер поднимает [deploy-kit](https://github.com/samoy-love/deploy-kit) —
 `dk run snakes` берёт эту переменную из `.deploy-kit/prod.env` и не требует
 помнить её вовсе.
 
@@ -148,7 +148,7 @@ dk rollback snakes --list # какие релизы лежат на сервер
 
 Атомарные релизы с автооткатом; клиент и сервер едут **одним артефактом** —
 разъехавшиеся версии ломают разбор пакетов. Конфигурация nginx и сами скрипты
-релиза — в [deploy-kit](https://github.com/tr0llex/deploy-kit); в этом
+релиза — в [deploy-kit](https://github.com/samoy-love/deploy-kit); в этом
 репозитории лежит только описание цели `.deploy-kit/prod.env`.
 
 Профили игроков — единственные данные, которых нет больше нигде. Их снимает
@@ -162,15 +162,15 @@ systemd-таймер: 48 часовых копий и 14 суточных, сн�
 
 | Сервис | Что это | Репозиторий |
 | --- | --- | --- |
-| [samoy.love](https://samoy.love) | Личная страница и витрина проектов | [tr0llex/samoy.love](https://github.com/tr0llex/samoy.love) |
-| [snakes.samoy.love](https://snakes.samoy.love) | Эта игра | [tr0llex/snakes](https://github.com/tr0llex/snakes) |
-| [metro.samoy.love](https://metro.samoy.love) | Офлайн-PWA со схемой московского метро | [tr0llex/metro-map](https://github.com/tr0llex/metro-map) |
-| [launcher.samoy.love](https://launcher.samoy.love) | ChillHub, лаунчер игр для Windows | [tr0llex/chillhub](https://github.com/tr0llex/chillhub) |
-| [status.samoy.love](https://status.samoy.love) | Аптайм, версии, инциденты | [tr0llex/status.samoy.love](https://github.com/tr0llex/status.samoy.love) |
-| Мониторинг | Prometheus, Grafana, посещаемость из логов nginx | [tr0llex/metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love) |
+| [samoy.love](https://samoy.love) | Личная страница и витрина проектов | [samoy-love/samoy.love](https://github.com/samoy-love/samoy.love) |
+| [snakes.samoy.love](https://snakes.samoy.love) | Эта игра | [samoy-love/snakes](https://github.com/samoy-love/snakes) |
+| [metro.samoy.love](https://metro.samoy.love) | Офлайн-PWA со схемой московского метро | [samoy-love/metro-map](https://github.com/samoy-love/metro-map) |
+| [launcher.samoy.love](https://launcher.samoy.love) | ChillHub, лаунчер игр для Windows | [samoy-love/chillhub](https://github.com/samoy-love/chillhub) |
+| [status.samoy.love](https://status.samoy.love) | Аптайм, версии, инциденты | [samoy-love/status.samoy.love](https://github.com/samoy-love/status.samoy.love) |
+| Мониторинг | Prometheus, Grafana, посещаемость из логов nginx | [samoy-love/metrics.samoy.love](https://github.com/samoy-love/metrics.samoy.love) |
 
 Все они едут одним инструментом,
-[deploy-kit](https://github.com/tr0llex/deploy-kit): одно описание цели в
+[deploy-kit](https://github.com/samoy-love/deploy-kit): одно описание цели в
 репозитории, один `release.sh` на сервере, одна конфигурация nginx на всех.
 Добавить в этот ряд новый сервис стоит одного файла `.deploy-kit/*.env`.
 
