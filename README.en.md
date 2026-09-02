@@ -2,8 +2,8 @@
 
 [Русский](README.md) · English
 
-[![CI](https://github.com/tr0llex/snakes/actions/workflows/ci.yml/badge.svg)](https://github.com/tr0llex/snakes/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/tr0llex/snakes/branch/main/graph/badge.svg)](https://codecov.io/gh/tr0llex/snakes)
+[![CI](https://github.com/samoy-love/snakes/actions/workflows/ci.yml/badge.svg)](https://github.com/samoy-love/snakes/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/samoy-love/snakes/branch/main/graph/badge.svg)](https://codecov.io/gh/samoy-love/snakes)
 [![prod](https://img.shields.io/website?url=https%3A%2F%2Fsnakes.samoy.love&up_message=online&up_color=2ea043&down_message=offline&label=snakes.samoy.love)](https://snakes.samoy.love)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -70,7 +70,7 @@ Metrics are exposed in the Prometheus text format by 30-odd counters of our own,
 see [docs/metrics.md](docs/metrics.md).
 
 **Production** — a `snakes.service` systemd unit behind the system nginx,
-released through [deploy-kit](https://github.com/tr0llex/deploy-kit).
+released through [deploy-kit](https://github.com/samoy-love/deploy-kit).
 
 ## Quick start
 
@@ -91,7 +91,7 @@ gets a 403 — menu and profile are all there, and nothing connects. The default
 off on purpose: on by default, any locally opened page could present a valid
 Origin, and that costs more in production than one variable costs locally.
 
-[deploy-kit](https://github.com/tr0llex/deploy-kit) starts the server the same
+[deploy-kit](https://github.com/samoy-love/deploy-kit) starts the server the same
 way: `dk run snakes` takes the variable from `.deploy-kit/prod.env`, so there is
 nothing to remember.
 
@@ -150,7 +150,7 @@ dk rollback snakes --list # list releases on the server
 Atomic releases with automatic rollback; client and server ship as **one
 artifact**, because versions that drift apart break packet parsing. The nginx
 configuration and the release scripts live in
-[deploy-kit](https://github.com/tr0llex/deploy-kit); this repository only holds
+[deploy-kit](https://github.com/samoy-love/deploy-kit); this repository only holds
 the target description in `.deploy-kit/prod.env`.
 
 Player profiles are the only data that exists nowhere else. A systemd timer
@@ -164,15 +164,15 @@ release pipeline, one status page.
 
 | Service | What it is | Repository |
 | --- | --- | --- |
-| [samoy.love](https://samoy.love) | Personal page and project showcase | [tr0llex/samoy.love](https://github.com/tr0llex/samoy.love) |
-| [snakes.samoy.love](https://snakes.samoy.love) | This game | [tr0llex/snakes](https://github.com/tr0llex/snakes) |
-| [metro.samoy.love](https://metro.samoy.love) | Offline PWA with the Moscow Metro diagram | [tr0llex/metro-map](https://github.com/tr0llex/metro-map) |
-| [launcher.samoy.love](https://launcher.samoy.love) | ChillHub, a game launcher for Windows | [tr0llex/chillhub](https://github.com/tr0llex/chillhub) |
-| [status.samoy.love](https://status.samoy.love) | Uptime, versions, incidents | [tr0llex/status.samoy.love](https://github.com/tr0llex/status.samoy.love) |
-| Monitoring | Prometheus, Grafana, traffic from nginx logs | [tr0llex/metrics.samoy.love](https://github.com/tr0llex/metrics.samoy.love) |
+| [samoy.love](https://samoy.love) | Personal page and project showcase | [samoy-love/samoy.love](https://github.com/samoy-love/samoy.love) |
+| [snakes.samoy.love](https://snakes.samoy.love) | This game | [samoy-love/snakes](https://github.com/samoy-love/snakes) |
+| [metro.samoy.love](https://metro.samoy.love) | Offline PWA with the Moscow Metro diagram | [samoy-love/metro-map](https://github.com/samoy-love/metro-map) |
+| [launcher.samoy.love](https://launcher.samoy.love) | ChillHub, a game launcher for Windows | [samoy-love/chillhub](https://github.com/samoy-love/chillhub) |
+| [status.samoy.love](https://status.samoy.love) | Uptime, versions, incidents | [samoy-love/status.samoy.love](https://github.com/samoy-love/status.samoy.love) |
+| Monitoring | Prometheus, Grafana, traffic from nginx logs | [samoy-love/metrics.samoy.love](https://github.com/samoy-love/metrics.samoy.love) |
 
 They all ship through one tool,
-[deploy-kit](https://github.com/tr0llex/deploy-kit): one target description in
+[deploy-kit](https://github.com/samoy-love/deploy-kit): one target description in
 the repository, one `release.sh` on the server, one nginx configuration for
 everything. Adding a service to the row costs a single `.deploy-kit/*.env` file.
 
