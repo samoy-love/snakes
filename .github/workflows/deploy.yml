@@ -67,7 +67,7 @@ concurrency:
 
 jobs:
   deploy:
-    uses: tr0llex/deploy-kit/.github/workflows/go-service.yml@main
+    uses: samoy-love/deploy-kit/.github/workflows/go-service.yml@main
     with:
       config: .deploy-kit/prod.env
       # Полный `go test ./...` сюда не входит: тот же прогон (и под -race, и
