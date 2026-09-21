@@ -68,4 +68,4 @@ jobs:
         with:
           name: visual-snapshots-linux
           path: tests/visual/screens.spec.mjs-snapshots
-          retention-days: 14
+          retention-days: 1
