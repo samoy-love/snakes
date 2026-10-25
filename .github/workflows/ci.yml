@@ -97,7 +97,7 @@ jobs:
         # выполняется в том же job'е, что и сборка.
         uses: dominikh/staticcheck-action@9716614d4101e79b4340dd97b10e54d68234e431 # v1.4.1
         with:
-          version: "2025.1.1"
+          version: "2026.2.2"
           install-go: false
 
       - name: go build
@@ -126,7 +126,7 @@ jobs:
       - name: Отправить покрытие в Codecov
         # Приколот к SHA, а не к тегу: тег мутабелен, и у Codecov уже был
         # прецедент компрометации релиза.
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: ./coverage.out
           flags: go
@@ -141,7 +141,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # 22.x: `node --check` сам определяет ES-модуль по синтаксису.
           # На 20.x файлы с `export` (client_net.js и др.) падали бы как CJS.
@@ -235,7 +235,7 @@ jobs:
         run: |
           echo "::notice::PAT недоступен (dependabot или форк) — сверка защиты ветки пропущена"
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.GH_TOKEN != ''
 
       - name: Сверить задачи с обязательными проверками main
